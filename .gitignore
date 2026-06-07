@@ -1,0 +1,11 @@
+node_modules/
+dist/
+projects/
+.env
+.env.local
+*.log
+logs/
+.DS_Store
+Thumbs.db
+.claude/
+coverage/

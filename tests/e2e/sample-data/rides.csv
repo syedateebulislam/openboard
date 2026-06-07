@@ -1,0 +1,9 @@
+ride_id,ride_date,city,driver,vehicle_type,distance_miles,fare_usd,tip_usd,status
+R-1001,2026-05-01,Seattle,Avery,Sedan,8.4,27.50,4.00,completed
+R-1002,2026-05-01,Seattle,Blake,SUV,13.2,44.10,6.50,completed
+R-1003,2026-05-02,Portland,Casey,Sedan,4.9,16.75,2.25,completed
+R-1004,2026-05-02,San Francisco,Drew,Van,21.7,82.30,12.00,completed
+R-1005,2026-05-03,Seattle,Avery,Sedan,2.8,11.20,0.00,cancelled
+R-1006,2026-05-03,Portland,Elliot,SUV,15.5,51.90,7.75,completed
+R-1007,2026-05-04,San Francisco,Drew,Van,18.1,70.40,10.00,completed
+R-1008,2026-05-04,Seattle,Blake,SUV,6.7,23.60,3.40,completed

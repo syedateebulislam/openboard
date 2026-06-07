@@ -1,0 +1,7 @@
+[
+  { "sku": "OB-001", "category": "Hardware", "region": "West", "stock": 120, "reorder_level": 40, "monthly_sales": 82 },
+  { "sku": "OB-002", "category": "Hardware", "region": "East", "stock": 35, "reorder_level": 50, "monthly_sales": 91 },
+  { "sku": "OB-003", "category": "Software", "region": "West", "stock": 410, "reorder_level": 100, "monthly_sales": 140 },
+  { "sku": "OB-004", "category": "Services", "region": "Central", "stock": 72, "reorder_level": 30, "monthly_sales": 48 },
+  { "sku": "OB-005", "category": "Software", "region": "East", "stock": 260, "reorder_level": 90, "monthly_sales": 125 }
+]

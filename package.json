@@ -1,0 +1,81 @@
+{
+  "name": "openboard",
+  "version": "1.0.0",
+  "description": "AI-powered analytics dashboard generator TUI",
+  "license": "MIT",
+  "author": "Syed Ateebul Islam <syedateebulislam@gmail.com>",
+  "homepage": "https://github.com/syedateebulislam/openboard#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syedateebulislam/openboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/syedateebulislam/openboard/issues"
+  },
+  "keywords": [
+    "dashboard",
+    "analytics",
+    "tui",
+    "cli",
+    "ai",
+    "llm",
+    "react",
+    "vite",
+    "vercel",
+    "data-visualization",
+    "csv"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "openboard": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md",
+    "LICENSE",
+    "Agent.md",
+    "user-manual.md",
+    "arch.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/index.tsx --format esm --dts --out-dir dist",
+    "dev": "npx tsx src/index.tsx",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.37.0",
+    "bcryptjs": "^2.4.3",
+    "chalk": "^5.3.0",
+    "conf": "^13.0.1",
+    "csv-parse": "^5.6.0",
+    "figlet": "^1.7.0",
+    "ink": "^5.1.0",
+    "ink-select-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "meow": "^13.2.0",
+    "ollama": "^0.5.12",
+    "openai": "^4.77.0",
+    "react": "^18.3.1",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/figlet": "^1.5.8",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "ink-testing-library": "^3.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
