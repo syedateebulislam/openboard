@@ -14,9 +14,10 @@ Set up providers -> add data source -> internal LLM chat -> deploy
 
 ## Launch
 
-Installed package:
+Install from npm (the package is `openboard-cli`; the command is `openboard`):
 
 ```bash
+npm install -g openboard-cli
 openboard
 ```
 

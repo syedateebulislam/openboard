@@ -25,6 +25,12 @@ OpenBoard must be configured once by a human:
 - Vercel token or Vercel Git integration.
 - Dashboard login credentials.
 
+Install from npm (the package is `openboard-cli`; the installed command is `openboard`):
+
+```bash
+npm install -g openboard-cli
+```
+
 Check installation:
 
 ```bash
