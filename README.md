@@ -1,4 +1,4 @@
-# OpenBoard
+# `[_-_]` OpenBoard
 
 OpenBoard is a terminal UI for generating and deploying one authenticated React analytics app from CSV/JSON data. The first dashboard creates the shared app. Every later dashboard is added as another tab in that same UI.
 

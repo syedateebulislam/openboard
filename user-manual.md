@@ -36,7 +36,7 @@ The TUI opens with:
 
 ```text
 ╔═══════════════════════════════════════╗
-║           O p e n B o a r d           ║
+║        [_-_] O p e n B o a r d        ║
 ║     Analytics Dashboard Generator     ║
 ║                v1.0.0                 ║
 ╚═══════════════════════════════════════╝

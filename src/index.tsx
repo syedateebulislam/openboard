@@ -81,7 +81,7 @@ if (cli.flags.version) {
   const B = '\x1b[1m';
   const R = '\x1b[0m';
   console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
-  console.log(`${B}${F}║${L}           O p e n B o a r d           ${F}║${R}`);
+  console.log(`${B}${F}║${L}        [_-_] O p e n B o a r d        ${F}║${R}`);
   console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
   console.log(`${B}${F}║${S}                v1.0.0                 ${F}║${R}`);
   console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
