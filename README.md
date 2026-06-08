@@ -20,9 +20,11 @@ Existing dashboards are opened from the Dashboards menu. Opening an existing das
 ## Install And Run
 
 ```bash
-npm install -g openboard
+npm install -g openboard-cli
 openboard
 ```
+
+> The npm package is `openboard-cli`; the installed command is `openboard`.
 
 From source:
 

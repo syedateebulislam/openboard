@@ -1,5 +1,5 @@
 {
-  "name": "openboard",
+  "name": "openboard-cli",
   "version": "1.0.0",
   "description": "AI-powered analytics dashboard generator TUI",
   "license": "MIT",
@@ -42,11 +42,12 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.tsx --format esm --dts --out-dir dist",
+    "build": "tsup src/index.tsx --format esm --dts --out-dir dist --clean",
     "dev": "npx tsx src/index.tsx",
     "test": "vitest",
     "test:run": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
