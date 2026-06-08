@@ -16,6 +16,12 @@ export interface LLMCompletionOptions {
   messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Optional progress sink. Long-running providers (e.g. the Codex CLI) emit
+   * heartbeat/log lines here so non-interactive callers stay alive instead of
+   * looking wedged. Providers without streaming may ignore it.
+   */
+  onProgress?: (line: string) => void;
 }
 
 export interface LLMValidationResult {

@@ -61,7 +61,7 @@ RULES:
 3. App.tsx MUST use the useAuth() hook to check isAuthenticated. Show <LoginPage> when not authenticated, show dashboard when authenticated.
 4. App.tsx header MUST be the master OpenBoard shell: centered <h1 className="app-title">OpenBoard</h1>, with user.username and logout button on the right.
 5. NEVER rename the app header to an individual dashboard title. Individual dashboard names belong only in tab labels and dashboard content headings.
-6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components.
+6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components. If a dashboard with the same id, label, or component already exists in CURRENT App.tsx, UPDATE it in place — never append a second tab entry or a duplicate import. Each dashboard id, tab label, and component import MUST appear at most once in App.tsx.
 7. Dashboard navigation MUST use accessible tab semantics: the tab container has role="tablist"; each tab button has role="tab", aria-selected, aria-controls, and a stable id; each active panel has role="tabpanel" and aria-labelledby.
 8. When removing a dashboard, remove only that dashboard's tab/content/imports. Preserve the OpenBoard header shell and all other tabs.
 9. Do not rebuild App.tsx from scratch if CURRENT App.tsx is provided. Treat it as the source of truth and minimally extend or edit it.
@@ -69,6 +69,7 @@ RULES:
 11. Every chart must include a readable title or aria-label, visible axis/legend/tooltip labels where relevant, and must not rely on color alone to communicate state.
 12. Use proper TypeScript interfaces for all props and data.
 13. Do NOT use sample/mock rows for real dashboards. If loading, render loading/empty states; when data arrives, compute metrics from protected hook rows.
+13a. Components MUST render without throwing for ANY data: handle 0, 1, or many rows and missing/null/unparseable fields. Guard every array access, .map/.reduce, date parse, and numeric/division operation (default to 0 or skip rather than crash), and render an empty state instead of throwing. A runtime crash shows a blank page, so a dashboard must never assume a field, row, or non-zero count exists.
 14. Keep components self-contained — each component file should work independently.
 15. Do NOT use markdown code fences. Use the --- FILE: ... --- format only.
 16. Component files go in "components/" (e.g., --- FILE: components/RevenueChart.tsx ---).

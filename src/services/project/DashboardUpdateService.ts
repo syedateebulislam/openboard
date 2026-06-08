@@ -628,7 +628,11 @@ Requirements:
         { role: 'user', content: prompt },
       ],
       temperature: 0.2,
-      maxTokens: 4096,
+      // Dashboard components can be large; 4096 truncates them on API providers.
+      maxTokens: 8192,
+      // Stream liveness so non-interactive agent runners don't treat a long
+      // generation as a wedged process and kill it mid-run.
+      onProgress,
     });
 
     const files = extractFiles(response);

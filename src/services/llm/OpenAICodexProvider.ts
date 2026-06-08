@@ -32,11 +32,31 @@ function messagesToPrompt(messages: LLMMessage[]): string {
     .join('\n\n');
 }
 
+// Kill the spawned process AND its children. codex spawns a model runtime
+// subprocess; a bare proc.kill() leaves it orphaned (especially on Windows).
+function killProcessTree(pid: number | undefined): void {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+    } catch {
+      /* best effort */
+    }
+  } else {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 function runWithStdin(
   cmd: string,
   args: string[],
   stdin: string,
   timeoutMs: number,
+  onProgress?: ProgressCallback,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
     const invocation = resolveSpawnInvocation(cmd, args);
@@ -48,8 +68,23 @@ function runWithStdin(
 
     let stdout = '';
     let stderr = '';
+    const start = Date.now();
+
+    // Heartbeat so non-interactive callers (and agent runners that poll for
+    // output) can see the generation is alive even while codex is silent.
+    const heartbeat = onProgress
+      ? setInterval(() => {
+          const elapsed = Math.round((Date.now() - start) / 1000);
+          onProgress(`  codex still generating… ${elapsed}s elapsed`);
+        }, 12_000)
+      : undefined;
+    const stopHeartbeat = () => {
+      if (heartbeat) clearInterval(heartbeat);
+    };
 
     const timer = setTimeout(() => {
+      stopHeartbeat();
+      killProcessTree(proc.pid);
       proc.kill();
       reject(new Error(`Command "${cmd}" timed out after ${timeoutMs / 1000}s`));
     }, timeoutMs);
@@ -58,16 +93,26 @@ function runWithStdin(
       stdout += chunk.toString();
     });
 
+    // codex writes status/progress to stderr; surface trimmed lines as liveness.
     proc.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      if (onProgress) {
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed) onProgress(`  codex: ${trimmed.slice(0, 180)}`);
+        }
+      }
     });
 
     proc.on('error', (err) => {
+      stopHeartbeat();
       clearTimeout(timer);
       reject(err);
     });
 
     proc.on('close', (code) => {
+      stopHeartbeat();
       clearTimeout(timer);
       resolve({ stdout, stderr, code: code ?? 1 });
     });
@@ -145,6 +190,7 @@ export class OpenAICodexProvider implements LLMProvider {
     const outputFile = join(tmpdir(), `openboard-codex-${randomUUID()}.txt`);
     const prompt = messagesToPrompt(options.messages);
 
+    options.onProgress?.(`Running codex (${this.model})…`);
     const result = await runWithStdin(
       'codex',
       [
@@ -161,6 +207,7 @@ export class OpenAICodexProvider implements LLMProvider {
       ],
       prompt,
       10 * 60_000,
+      options.onProgress,
     );
 
     try {

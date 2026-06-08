@@ -399,6 +399,10 @@ export class ProjectManager {
     // 4. Ensure Vercel security headers are present
     this.repairVercelSecurityHeaders(projectDir, onProgress);
 
+    // 4b. Remove duplicate dashboard tabs/imports the LLM may have appended
+    //     across (re)generations — agent retries can add the same tab twice.
+    this.dedupeAppDashboards(projectDir, onProgress);
+
     // 5. Ensure auth/data protection files exist
     const authProviderPath = join(projectDir, 'src', 'components', 'AuthProvider.tsx');
     const loginPagePath = join(projectDir, 'src', 'components', 'LoginPage.tsx');
@@ -584,6 +588,77 @@ export class ProjectManager {
     mkdirSync(dirname(targetPath), { recursive: true });
     copyFileSync(sourcePath, targetPath);
     onProgress?.(`  Added missing generated support file: ${relativePath}`);
+  }
+
+  /**
+   * Remove duplicate dashboard tabs and duplicate component imports from
+   * src/App.tsx. The agent flow rewrites App.tsx through the LLM on every
+   * generation; interrupted/retried runs can make it append a tab (or import)
+   * that already exists. This deterministically keeps the first occurrence of
+   * each tab id / import and drops later duplicates. Conservative: only writes
+   * when braces stay balanced, so it never corrupts hand- or LLM-authored code.
+   */
+  private dedupeAppDashboards(projectDir: string, onProgress?: ProgressCallback): void {
+    const appPath = join(projectDir, 'src', 'App.tsx');
+    if (!existsSync(appPath)) return;
+
+    let content: string;
+    try {
+      content = readFileSync(appPath, 'utf-8');
+    } catch {
+      return;
+    }
+    const original = content;
+
+    // 1. Drop exact-duplicate component import lines (keep the first).
+    const seenImports = new Set<string>();
+    content = content
+      .split('\n')
+      .filter((line) => {
+        if (/^\s*import\s+\{[^}]+\}\s+from\s+['"]\.\/components\/[\w.-]+['"];?\s*$/.test(line)) {
+          const key = line.trim();
+          if (seenImports.has(key)) return false;
+          seenImports.add(key);
+        }
+        return true;
+      })
+      .join('\n');
+
+    // 2. Drop duplicate tab objects by id. Match brace blocks that contain a
+    //    quoted `id: '...'` and no nested braces (generated tabs render
+    //    `component: <X />`), so the interface and JSX `id={...}` are untouched.
+    const seenIds = new Set<string>();
+    let removed = 0;
+    content = content.replace(
+      /\{[^{}]*?\bid:\s*['"]([\w-]+)['"][^{}]*?\}\s*,?/g,
+      (block, id: string) => {
+        if (seenIds.has(id)) {
+          removed += 1;
+          return '';
+        }
+        seenIds.add(id);
+        return block;
+      },
+    );
+
+    if (content === original) return;
+
+    // Safety: only write if braces remain balanced.
+    const opens = (content.match(/\{/g) || []).length;
+    const closes = (content.match(/\}/g) || []).length;
+    if (opens !== closes) {
+      onProgress?.('  Skipped App.tsx tab dedupe (unsafe to edit automatically)');
+      return;
+    }
+
+    // Collapse blank-line runs left by removed blocks.
+    content = content.replace(/\n{3,}/g, '\n\n');
+    writeFileSync(appPath, content, 'utf-8');
+    if (removed > 0) {
+      onProgress?.(`  Removed ${removed} duplicate dashboard tab(s) from App.tsx`);
+    } else {
+      onProgress?.('  Removed duplicate dashboard import(s) from App.tsx');
+    }
   }
 
   private repairVercelSecurityHeaders(projectDir: string, onProgress?: ProgressCallback): void {

@@ -413,6 +413,42 @@ describe('ProjectManager', () => {
       expect(result.error).toContain('bcrypt hash literal');
       expect(result.error).toContain('JWT secret env name');
     });
+
+    it('should remove duplicate dashboard tabs the agent flow may append', async () => {
+      const board = makeBoard({ name: 'dup-tabs' });
+      const scaffoldResult = await pm.scaffold(board);
+      const appPath = join(scaffoldResult.projectDir!, 'src', 'App.tsx');
+      writeFileSync(
+        appPath,
+        `import { AuthProvider, useAuth } from './components/AuthProvider'
+import { LoginPage } from './components/LoginPage'
+import { ZomatoDashboard } from './components/ZomatoDashboard'
+
+function DashboardContent() {
+  const { isAuthenticated } = useAuth()
+  if (!isAuthenticated) return <LoginPage />
+  const dashboardTabs = [
+    { id: 'zomato', label: 'Zomato', type: 'finance', component: <ZomatoDashboard /> },
+    { id: 'uber', label: 'Uber', type: 'finance', component: <UberDashboard /> },
+    { id: 'uber', label: 'Uber', type: 'finance', component: <UberDashboard /> },
+  ]
+  return <main>{dashboardTabs.length}</main>
+}
+
+export default function App() {
+  return <AuthProvider><DashboardContent /></AuthProvider>
+}
+`,
+        'utf-8',
+      );
+
+      pm.preDeployChecks(scaffoldResult.projectDir!);
+
+      const cleaned = readFileSync(appPath, 'utf-8');
+      const ids = (cleaned.match(/id: '[a-z-]+'/g) || []).map((s) => s.slice(5, -1));
+      expect(ids).toEqual(['zomato', 'uber']);
+      expect(cleaned.split("id: 'uber'").length - 1).toBe(1);
+    });
   });
 
   // ════════════════════════════════════════════════════════════════════════════
