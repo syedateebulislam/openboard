@@ -29,7 +29,7 @@
     "node": ">=18"
   },
   "bin": {
-    "openboard": "./dist/index.js"
+    "openboard": "dist/index.js"
   },
   "files": [
     "dist",
