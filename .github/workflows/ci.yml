@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop-v2]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    # crossSpawn has Windows-specific cmd-shim handling; run both OSes so
+    # platform-only regressions surface in CI instead of in the field.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 20]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:run
+        env:
+          OPENBOARD_ENCRYPTION_SECRET: ci-test-secret

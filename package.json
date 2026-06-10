@@ -1,10 +1,10 @@
 {
   "name": "openboard-cli",
-  "version": "1.0.1",
-  "description": "AI-powered analytics dashboard generator TUI",
+  "version": "1.0.3",
+  "description": "AI-powered analytics dashboard generator TUI — https://openboard-site.vercel.app",
   "license": "MIT",
   "author": "Syed Ateebul Islam <syedateebulislam@gmail.com>",
-  "homepage": "https://github.com/syedateebulislam/openboard#readme",
+  "homepage": "https://openboard-site.vercel.app",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/syedateebulislam/openboard.git"

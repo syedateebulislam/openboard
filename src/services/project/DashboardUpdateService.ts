@@ -8,21 +8,51 @@ import { DataParserService } from '../data/DataParserService.js';
 import { LLMService } from '../llm/LLMService.js';
 import { SYSTEM_PROMPT } from '../llm/prompts/systemPrompt.js';
 import { TemplateService } from '../template/TemplateService.js';
+import { BuildService } from '../build/BuildService.js';
+import { DeployVerificationService } from '../deploy/DeployVerificationService.js';
 import { extractFiles } from '../../utils/codeExtractor.js';
+import { classifyAgentError } from '../../utils/errorCodes.js';
 import type { BoardConfig } from '../../types/board.js';
 import type { LLMConfig } from '../../types/llm.js';
 import { BoardRegistryService } from './BoardRegistryService.js';
 import { PromptHistoryService } from './PromptHistoryService.js';
+import { ProjectLockService } from './ProjectLockService.js';
 import { ProjectManager } from './ProjectManager.js';
+import { PipelineReporter } from './pipelinePhases.js';
+import type { PipelineEventSink } from './pipelinePhases.js';
+import { RunStateService } from './RunStateService.js';
+import type { RunRecord, RunTokenUsage } from './RunStateService.js';
 
 export type UpdateProgress = (line: string) => void;
+
+export interface DashboardPlan {
+  title: string;
+  selector: string;
+  type: BoardConfig['type'];
+  rowCount: number;
+  columnCount: number;
+  dataSummary: string;
+}
 
 export interface DashboardUpdateResult {
   success: boolean;
   error?: string;
+  /** Stable machine-readable failure class (see utils/errorCodes.ts). */
+  errorCode?: string;
   board?: BoardConfig;
   writtenFiles?: string[];
   deployUrl?: string;
+  /** deploy-N git tag created for this deploy (rollback target). */
+  deployTag?: string;
+  /** Post-deploy verification outcome; undefined when no URL to verify. */
+  verified?: boolean;
+  /** Persistent run id — resumable with `openboard agent resume <id>`. */
+  runId?: string;
+  /** True when this result was returned from a prior run (idempotency/resume). */
+  reused?: boolean;
+  /** Set on --dry-run: what would be generated, without calling the LLM. */
+  plan?: DashboardPlan;
+  tokenUsage?: RunTokenUsage;
 }
 
 export interface CreateDashboardOptions {
@@ -30,12 +60,17 @@ export interface CreateDashboardOptions {
   title?: string;
   type?: BoardConfig['type'];
   prompt?: string;
+  /** Return the prior result when a succeeded run already used this key. */
+  idempotencyKey?: string;
+  /** Parse + analyze and return the plan without LLM/deploy. */
+  dryRun?: boolean;
 }
 
 export interface PromptUpdateOptions {
   dashboard: string;
   prompt: string;
   dataFile?: string;
+  dryRun?: boolean;
 }
 
 function getDefaultModel(provider: string): string {
@@ -103,6 +138,13 @@ function buildHistoryText(entries: ReturnType<PromptHistoryService['read']>): st
     .map((entry, index) => `${index + 1}. [${entry.source}] ${entry.prompt}`)
     .join('\n\n');
 }
+
+/** chars/4 token estimate for providers that don't report usage. */
+function estimateTokens(chars: number): number {
+  return Math.ceil(chars / 4);
+}
+
+const MAX_REPAIR_ATTEMPTS = 2;
 
 /**
  * Ask the configured LLM to remove one dashboard's tab/import/content from the
@@ -189,17 +231,23 @@ export class DashboardUpdateService {
   private history: PromptHistoryService;
   private projectManager: ProjectManager;
   private templateService: TemplateService;
+  private events?: PipelineEventSink;
+  private runs: RunStateService;
 
   constructor(
     registry = new BoardRegistryService(),
     history = new PromptHistoryService(),
     projectManager = new ProjectManager(),
     templateService = new TemplateService(),
+    events?: PipelineEventSink,
+    runs = new RunStateService(),
   ) {
     this.registry = registry;
     this.history = history;
     this.projectManager = projectManager;
     this.templateService = templateService;
+    this.events = events;
+    this.runs = runs;
   }
 
   listBoards(): BoardConfig[] {
@@ -210,23 +258,66 @@ export class DashboardUpdateService {
     return this.listBoards().find((board) => matchesBoard(board, selector));
   }
 
+  listRuns(limit = 20): RunRecord[] {
+    return this.runs.list(limit);
+  }
+
+  runSummary(): ReturnType<RunStateService['summarize']> {
+    return this.runs.summarize();
+  }
+
   async createFromDataSource(
     options: CreateDashboardOptions,
     onProgress?: UpdateProgress,
   ): Promise<DashboardUpdateResult> {
+    // Idempotency: a retried create with the same key returns the prior result
+    // instead of generating a duplicate dashboard.
+    if (options.idempotencyKey && !options.dryRun) {
+      const prior = this.runs.findByIdempotencyKey(options.idempotencyKey);
+      if (prior) {
+        this.note(onProgress, `Idempotency key matched succeeded run ${prior.runId}; returning prior result.`);
+        return this.resultFromRun(prior);
+      }
+    }
+
+    const run = options.dryRun
+      ? undefined
+      : this.runs.createRun('create', { ...options }, options.idempotencyKey);
+    const reporter = this.makeReporter(onProgress, run);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
     try {
       const dataFile = resolve(options.dataFile);
       const title = options.title?.trim() || titleFromDataFile(dataFile);
       const type = options.type ?? 'custom';
       getPreset(type);
 
-      onProgress?.(`Reading data source: ${dataFile}`);
+      reporter.phase('parse');
+      reporter.log(`Reading data source: ${dataFile}`);
       const parsed = await DataParserService.parse(dataFile);
+
+      reporter.phase('analyze');
       const analysis = DataAnalyzer.analyze(parsed);
       const dataSummary = DataAnalyzer.generateSummary(analysis);
-      onProgress?.(`Parsed data source (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
+      reporter.log(`Parsed data source (${analysis.rowCount} rows, ${analysis.columnCount} columns; summary samples ${Math.min(3, analysis.rowCount)} rows)`);
 
       const boardName = createBoardConfig(title);
+
+      if (options.dryRun) {
+        reporter.log('Dry run: stopping before generation. No LLM call, no files written.');
+        return {
+          success: true,
+          plan: {
+            title: boardName.title,
+            selector: boardName.name,
+            type,
+            rowCount: analysis.rowCount,
+            columnCount: analysis.columnCount,
+            dataSummary,
+          },
+        };
+      }
+
       const board: BoardConfig = {
         id: `board-${randomUUID()}`,
         name: boardName.name,
@@ -239,10 +330,10 @@ export class DashboardUpdateService {
         dataSummary,
       };
 
-      onProgress?.(`Preparing OpenBoard workspace for "${board.title}"...`);
+      reporter.log(`Preparing OpenBoard workspace for "${board.title}"...`);
       const scaffold = await this.projectManager.scaffold(board);
       if (!scaffold.success || !scaffold.projectDir) {
-        return { success: false, board, error: `Scaffold failed: ${scaffold.error}` };
+        return this.failure(run, { board }, `Scaffold failed: ${scaffold.error}`);
       }
 
       const initializedBoard: BoardConfig = {
@@ -250,15 +341,33 @@ export class DashboardUpdateService {
         outputDir: scaffold.projectDir,
         dataSummary,
       };
-      await this.writeProtectedData(initializedBoard, parsed, dataSummary, onProgress);
+      if (run) {
+        run.boardId = initializedBoard.id;
+        run.boardName = initializedBoard.name;
+        run.boardTitle = initializedBoard.title;
+        run.projectDir = scaffold.projectDir;
+        this.runs.save(run);
+      }
+
+      lock = ProjectLockService.acquire(scaffold.projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board: initializedBoard }, lock.error ?? 'Project lock failed');
+      }
+
+      await this.writeProtectedData(initializedBoard, parsed, dataSummary, reporter.progress);
 
       const writtenFiles = await this.generateAndWriteFiles(
         initializedBoard,
         this.buildInitialPrompt(initializedBoard, dataSummary, options.prompt),
-        onProgress,
+        reporter,
+        run,
       );
       if (writtenFiles.length === 0) {
-        return { success: false, board: initializedBoard, error: 'LLM did not return any writable files.' };
+        return this.failure(run, { board: initializedBoard }, 'LLM did not return any writable files.');
+      }
+      if (run) {
+        run.writtenFiles = writtenFiles;
+        this.runs.save(run);
       }
 
       const updatedBoard: BoardConfig = {
@@ -277,15 +386,17 @@ export class DashboardUpdateService {
         dataSummary,
       });
 
-      const deploy = await this.buildPushDeploy(
+      return await this.buildPushDeploy(
         updatedBoard,
         writtenFiles,
         `Create ${updatedBoard.name}: ${new Date().toISOString()}`,
-        onProgress,
+        reporter,
+        run,
       );
-      return deploy;
     } catch (error: any) {
-      return { success: false, error: error.message };
+      return this.failure(run, {}, error.message);
+    } finally {
+      lock?.release();
     }
   }
 
@@ -295,9 +406,13 @@ export class DashboardUpdateService {
   ): Promise<DashboardUpdateResult> {
     const board = this.findBoard(options.dashboard);
     if (!board) {
-      return { success: false, error: `Dashboard not found: ${options.dashboard}` };
+      return {
+        success: false,
+        error: `Dashboard not found: ${options.dashboard}`,
+        errorCode: 'E_DASHBOARD_NOT_FOUND',
+      };
     }
-    return this.updateBoardWithPrompt(board, options.prompt, options.dataFile, onProgress);
+    return this.updateBoardWithPrompt(board, options.prompt, options.dataFile, onProgress, options.dryRun);
   }
 
   async updateBySelector(selector: string, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
@@ -306,6 +421,7 @@ export class DashboardUpdateService {
       return {
         success: false,
         error: `Dashboard not found: ${selector}`,
+        errorCode: 'E_DASHBOARD_NOT_FOUND',
       };
     }
     return this.updateBoard(board, onProgress);
@@ -321,32 +437,53 @@ export class DashboardUpdateService {
   }
 
   async updateBoard(board: BoardConfig, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+    const run = this.runs.createRun('refresh', { dashboard: board.name });
+    const reporter = this.makeReporter(onProgress, run);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
     try {
       const projectDir = board.outputDir || this.registry.getSharedProjectDir();
       if (!projectDir) {
-        return { success: false, board, error: 'No generated app workspace found.' };
+        return this.failure(run, { board }, 'No generated app workspace found.');
       }
 
       const dataFile = board.dataFiles[0];
       if (!dataFile) {
-        return { success: false, board, error: 'No data source is linked to this dashboard.' };
+        return this.failure(run, { board }, 'No data source is linked to this dashboard.');
       }
 
       const promptHistory = this.history.read(board.id);
       if (promptHistory.length === 0) {
-        return {
-          success: false,
-          board,
-          error: 'No prompt history found. Generate or modify this dashboard once before running update.',
-        };
+        return this.failure(
+          run,
+          { board },
+          'No prompt history found. Generate or modify this dashboard once before running update.',
+        );
       }
 
-      onProgress?.(`Reading latest data: ${dataFile}`);
+      if (run) {
+        run.boardId = board.id;
+        run.boardName = board.name;
+        run.boardTitle = board.title;
+        run.projectDir = projectDir;
+        this.runs.save(run);
+      }
+
+      reporter.phase('parse');
+      reporter.log(`Reading latest data: ${dataFile}`);
       const parsed = await DataParserService.parse(dataFile);
+
+      reporter.phase('analyze');
       const analysis = DataAnalyzer.analyze(parsed);
       const latestSummary = DataAnalyzer.generateSummary(analysis);
-      onProgress?.(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
-      await this.writeProtectedData(board, parsed, latestSummary, onProgress);
+      reporter.log(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+      }
+
+      await this.writeProtectedData(board, parsed, latestSummary, reporter.progress);
 
       const currentAppPath = join(projectDir, 'src', 'App.tsx');
       const currentApp = existsSync(currentAppPath)
@@ -388,9 +525,13 @@ Requirements:
 5. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
 6. Return all changed files using the required //CODE_START format.`;
 
-      const writtenFiles = await this.generateAndWriteFiles(board, prompt, onProgress);
+      const writtenFiles = await this.generateAndWriteFiles(board, prompt, reporter, run);
       if (writtenFiles.length === 0) {
-        return { success: false, board, error: 'LLM did not return any writable files.' };
+        return this.failure(run, { board }, 'LLM did not return any writable files.');
+      }
+      if (run) {
+        run.writtenFiles = writtenFiles;
+        this.runs.save(run);
       }
 
       const updatedBoard: BoardConfig = {
@@ -411,14 +552,17 @@ Requirements:
         dataSummary: latestSummary,
       });
 
-      return this.buildPushDeploy(
+      return await this.buildPushDeploy(
         updatedBoard,
         writtenFiles,
         `Update ${board.name}: ${new Date().toISOString()}`,
-        onProgress,
+        reporter,
+        run,
       );
     } catch (error: any) {
-      return { success: false, board, error: error.message };
+      return this.failure(run, { board }, error.message);
+    } finally {
+      lock?.release();
     }
   }
 
@@ -436,42 +580,65 @@ Requirements:
    * cleanup leaves the dashboard intact rather than orphaning the live app.
    */
   async removeDashboard(board: BoardConfig, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+    const run = this.runs.createRun('remove', { dashboard: board.name });
+    const reporter = this.makeReporter(onProgress, run);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
     try {
       const projectDir = board.outputDir || this.registry.getSharedProjectDir();
 
       // No generated workspace — registry-only removal.
       if (!projectDir) {
         this.registry.removeBoard(board.id);
-        onProgress?.('Removed from registry. No generated app workspace was found for UI cleanup.');
-        return { success: true, board };
+        reporter.log('Removed from registry. No generated app workspace was found for UI cleanup.');
+        this.runs.complete(run, { boardId: board.id, boardName: board.name, boardTitle: board.title });
+        return { success: true, board, runId: run.runId };
+      }
+
+      if (run) {
+        run.boardId = board.id;
+        run.boardName = board.name;
+        run.boardTitle = board.title;
+        run.projectDir = projectDir;
+        this.runs.save(run);
+      }
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
       }
 
       const remainingBoards = this.registry.listBoards().filter((b) => b.id !== board.id);
 
       // 1. Clean App.tsx (tab/import/content) via the configured LLM.
-      onProgress?.(`Cleaning generated UI for "${board.title}"...`);
+      reporter.phase('generate');
+      reporter.log(`Cleaning generated UI for "${board.title}"...`);
       const cleanupMessage = await removeDashboardFromGeneratedApp(board, remainingBoards, projectDir);
-      onProgress?.(cleanupMessage);
+      reporter.log(cleanupMessage);
 
       // 2. Delete orphaned component files that no remaining dashboard uses.
-      const removedFiles = await this.deleteOrphanedComponents(board, remainingBoards, projectDir, onProgress);
+      reporter.phase('write');
+      const removedFiles = await this.deleteOrphanedComponents(board, remainingBoards, projectDir, reporter.progress);
 
       // 3. Delete the dashboard's protected data so the API stops serving it.
       await this.templateService.deleteProtectedDashboardData(projectDir, board.name);
-      onProgress?.(`Removed protected data for "${board.name}".`);
+      reporter.log(`Removed protected data for "${board.name}".`);
 
       // 4. Code cleanup succeeded — now drop from registry + prompt history.
       this.registry.removeBoard(board.id);
 
       // 5. Rebuild + push + deploy so the live app no longer shows the dashboard.
-      return this.buildPushDeploy(
+      return await this.buildPushDeploy(
         { ...board, outputDir: projectDir },
         ['App.tsx', ...removedFiles],
         `Remove ${board.name}: ${new Date().toISOString()}`,
-        onProgress,
+        reporter,
+        run,
       );
     } catch (error: any) {
-      return { success: false, board, error: error.message };
+      return this.failure(run, { board }, error.message);
+    } finally {
+      lock?.release();
     }
   }
 
@@ -480,22 +647,61 @@ Requirements:
     userPrompt: string,
     dataFileOverride?: string,
     onProgress?: UpdateProgress,
+    dryRun?: boolean,
   ): Promise<DashboardUpdateResult> {
+    const run = dryRun
+      ? undefined
+      : this.runs.createRun('update', { dashboard: board.name, prompt: userPrompt, dataFile: dataFileOverride });
+    const reporter = this.makeReporter(onProgress, run);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
     try {
       const projectDir = board.outputDir || this.registry.getSharedProjectDir();
       if (!projectDir) {
-        return { success: false, board, error: 'No generated app workspace found.' };
+        return this.failure(run, { board }, 'No generated app workspace found.');
       }
       const dataFile = dataFileOverride ? resolve(dataFileOverride) : board.dataFiles[0];
       if (!dataFile) {
-        return { success: false, board, error: 'No data source is linked to this dashboard.' };
+        return this.failure(run, { board }, 'No data source is linked to this dashboard.');
       }
 
-      onProgress?.(`Reading latest data: ${dataFile}`);
+      if (run) {
+        run.boardId = board.id;
+        run.boardName = board.name;
+        run.boardTitle = board.title;
+        run.projectDir = projectDir;
+        this.runs.save(run);
+      }
+
+      reporter.phase('parse');
+      reporter.log(`Reading latest data: ${dataFile}`);
       const parsed = await DataParserService.parse(dataFile);
+
+      reporter.phase('analyze');
       const analysis = DataAnalyzer.analyze(parsed);
       const latestSummary = DataAnalyzer.generateSummary(analysis);
-      onProgress?.(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
+      reporter.log(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
+
+      if (dryRun) {
+        reporter.log('Dry run: stopping before generation. No LLM call, no files written.');
+        return {
+          success: true,
+          board,
+          plan: {
+            title: board.title,
+            selector: board.name,
+            type: board.type,
+            rowCount: analysis.rowCount,
+            columnCount: analysis.columnCount,
+            dataSummary: latestSummary,
+          },
+        };
+      }
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+      }
 
       const updatedInputBoard: BoardConfig = {
         ...board,
@@ -503,12 +709,16 @@ Requirements:
         dataFiles: [dataFile, ...board.dataFiles.filter((file) => file !== dataFile)],
         dataSummary: latestSummary,
       };
-      await this.writeProtectedData(updatedInputBoard, parsed, latestSummary, onProgress);
+      await this.writeProtectedData(updatedInputBoard, parsed, latestSummary, reporter.progress);
 
       const prompt = this.buildPromptUpdatePrompt(updatedInputBoard, latestSummary, userPrompt);
-      const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, onProgress);
+      const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, reporter, run);
       if (writtenFiles.length === 0) {
-        return { success: false, board: updatedInputBoard, error: 'LLM did not return any writable files.' };
+        return this.failure(run, { board: updatedInputBoard }, 'LLM did not return any writable files.');
+      }
+      if (run) {
+        run.writtenFiles = writtenFiles;
+        this.runs.save(run);
       }
 
       const updatedBoard: BoardConfig = {
@@ -527,14 +737,135 @@ Requirements:
         dataSummary: latestSummary,
       });
 
-      return this.buildPushDeploy(
+      return await this.buildPushDeploy(
         updatedBoard,
         writtenFiles,
         `Update ${updatedBoard.name}: ${new Date().toISOString()}`,
-        onProgress,
+        reporter,
+        run,
       );
     } catch (error: any) {
-      return { success: false, board, error: error.message };
+      return this.failure(run, { board }, error.message);
+    } finally {
+      lock?.release();
+    }
+  }
+
+  /**
+   * Resume a failed run from its last completed phase.
+   *
+   * If generation already completed (writtenFiles persisted), only the
+   * build → push → deploy → verify tail re-runs — no LLM cost. Otherwise the
+   * original action is replayed from scratch with its stored options.
+   */
+  async resume(runId: string, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+    const run = this.runs.get(runId);
+    if (!run) {
+      return { success: false, error: `Run not found: ${runId}`, errorCode: 'E_RUN_NOT_FOUND' };
+    }
+    if (run.status === 'succeeded') {
+      this.note(onProgress, `Run ${runId} already succeeded; returning its result.`);
+      return this.resultFromRun(run);
+    }
+
+    const board = run.boardId
+      ? this.listBoards().find((b) => b.id === run.boardId)
+      : undefined;
+
+    if (
+      board &&
+      run.writtenFiles && run.writtenFiles.length > 0 &&
+      run.projectDir && existsSync(run.projectDir)
+    ) {
+      this.note(onProgress, `Resuming run ${runId} from build (generation already completed; no LLM cost).`);
+      run.status = 'running';
+      this.runs.save(run);
+      const reporter = this.makeReporter(onProgress, run);
+      const lock = ProjectLockService.acquire(run.projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+      }
+      try {
+        return await this.buildPushDeploy(
+          { ...board, outputDir: run.projectDir },
+          run.writtenFiles,
+          `Resume ${board.name}: ${new Date().toISOString()}`,
+          reporter,
+          run,
+        );
+      } catch (error: any) {
+        return this.failure(run, { board }, error.message);
+      } finally {
+        lock.release();
+      }
+    }
+
+    this.note(onProgress, `Resuming run ${runId} by replaying the original ${run.action} action.`);
+    const opts = run.options as Record<string, any>;
+    switch (run.action) {
+      case 'create':
+        return this.createFromDataSource({
+          dataFile: String(opts.dataFile ?? ''),
+          title: opts.title,
+          type: opts.type,
+          prompt: opts.prompt,
+        }, onProgress);
+      case 'update':
+        return this.updateByPrompt({
+          dashboard: String(opts.dashboard ?? ''),
+          prompt: String(opts.prompt ?? ''),
+          dataFile: opts.dataFile,
+        }, onProgress);
+      case 'refresh':
+        return this.updateBySelector(String(opts.dashboard ?? ''), onProgress);
+      default:
+        return { success: false, error: `Cannot resume a ${run.action} run.`, errorCode: 'E_VALIDATION' };
+    }
+  }
+
+  /**
+   * Roll the generated app back to the previous deploy tag, then rebuild,
+   * push, and redeploy that snapshot.
+   */
+  async rollback(selector: string, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+    const board = this.findBoard(selector);
+    if (!board) {
+      return { success: false, error: `Dashboard not found: ${selector}`, errorCode: 'E_DASHBOARD_NOT_FOUND' };
+    }
+    const projectDir = board.outputDir || this.registry.getSharedProjectDir();
+    if (!projectDir) {
+      return { success: false, board, error: 'No generated app workspace found.', errorCode: 'E_UNKNOWN' };
+    }
+
+    const run = this.runs.createRun('rollback', { dashboard: selector });
+    run.boardId = board.id;
+    run.boardName = board.name;
+    run.boardTitle = board.title;
+    run.projectDir = projectDir;
+    this.runs.save(run);
+
+    const reporter = this.makeReporter(onProgress, run);
+    const lock = ProjectLockService.acquire(projectDir);
+    if (!lock.success) {
+      return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+    }
+    try {
+      reporter.log('Rolling back to the previous deploy tag...');
+      const restore = await this.projectManager.restorePreviousDeploy(projectDir, reporter.progress);
+      if (!restore.success) {
+        return this.failure(run, { board }, restore.error ?? 'Rollback failed');
+      }
+      return await this.buildPushDeploy(
+        { ...board, outputDir: projectDir },
+        [],
+        `Rollback ${board.name} to ${restore.tag}: ${new Date().toISOString()}`,
+        reporter,
+        run,
+      );
+    } catch (error: any) {
+      return this.failure(run, { board }, error.message);
+    } finally {
+      lock.release();
     }
   }
 
@@ -615,13 +946,56 @@ Requirements:
 8. Return all changed files using the required //CODE_START format.`;
   }
 
+  /** Progress note that reaches both the line callback and the event sink. */
+  private note(onProgress: UpdateProgress | undefined, line: string): void {
+    onProgress?.(line);
+    this.events?.({ event: 'log', message: line });
+  }
+
+  private makeReporter(onProgress?: UpdateProgress, run?: RunRecord): PipelineReporter {
+    return new PipelineReporter(
+      onProgress,
+      this.events,
+      run ? (phase) => this.runs.markPhase(run, phase) : undefined,
+    );
+  }
+
+  private failure(
+    run: RunRecord | undefined,
+    partial: Partial<DashboardUpdateResult>,
+    error: string,
+  ): DashboardUpdateResult {
+    const errorCode = classifyAgentError(error);
+    if (run) this.runs.fail(run, error, errorCode);
+    this.events?.({ event: 'result', success: false, message: error });
+    return { success: false, error, errorCode, runId: run?.runId, ...partial };
+  }
+
+  private resultFromRun(run: RunRecord): DashboardUpdateResult {
+    const board = run.boardId
+      ? this.listBoards().find((b) => b.id === run.boardId)
+      : undefined;
+    return {
+      success: true,
+      board,
+      writtenFiles: run.writtenFiles,
+      deployUrl: run.deployUrl,
+      runId: run.runId,
+      reused: true,
+      tokenUsage: run.tokenUsage,
+    };
+  }
+
   private async generateAndWriteFiles(
     board: BoardConfig,
     prompt: string,
-    onProgress?: UpdateProgress,
+    reporter: PipelineReporter,
+    run?: RunRecord,
   ): Promise<string[]> {
     const llm = LLMService.createProvider(createLLMConfig(new ConfigService()));
-    onProgress?.('Generating dashboard code with configured LLM...');
+    reporter.phase('generate');
+    reporter.log('Generating dashboard code with configured LLM...');
+    let usageReported = false;
     const response = await llm.complete({
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -632,19 +1006,31 @@ Requirements:
       maxTokens: 8192,
       // Stream liveness so non-interactive agent runners don't treat a long
       // generation as a wedged process and kill it mid-run.
-      onProgress,
+      onProgress: reporter.progress,
+      onUsage: (usage) => {
+        usageReported = true;
+        if (run) this.runs.addTokenUsage(run, { ...usage, estimated: false });
+      },
     });
+    if (!usageReported && run) {
+      this.runs.addTokenUsage(run, {
+        promptTokens: estimateTokens(SYSTEM_PROMPT.length + prompt.length),
+        completionTokens: estimateTokens(response.length),
+        estimated: true,
+      });
+    }
 
     const files = extractFiles(response);
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir || files.length === 0) return [];
 
+    reporter.phase('write');
     const writtenFiles: string[] = [];
     for (const file of files) {
       await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
       writtenFiles.push(file.path);
     }
-    onProgress?.(`Wrote ${writtenFiles.length} file(s): ${writtenFiles.join(', ')}`);
+    reporter.log(`Wrote ${writtenFiles.length} file(s): ${writtenFiles.join(', ')}`);
     return writtenFiles;
   }
 
@@ -666,58 +1052,202 @@ Requirements:
     onProgress?.(`Wrote protected dashboard data: ${path}`);
   }
 
+  /**
+   * Self-healing build: feed the build error (plus an advisory tsc --noEmit
+   * signal) and the current generated files back to the LLM for a repair
+   * pass, then rebuild. Capped at MAX_REPAIR_ATTEMPTS.
+   */
+  private async repairAndRebuild(
+    projectDir: string,
+    writtenFiles: string[],
+    buildError: string | undefined,
+    reporter: PipelineReporter,
+    run?: RunRecord,
+  ): Promise<{ success: boolean; error?: string }> {
+    let lastError = buildError ?? 'Unknown build error';
+
+    for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
+      reporter.log(`Build failed — attempting LLM repair (attempt ${attempt}/${MAX_REPAIR_ATTEMPTS})...`);
+      try {
+        // Advisory type signal — never blocks, only informs the repair.
+        let tscSignal = '';
+        try {
+          const typeResult = await BuildService.typeCheck(projectDir, reporter.progress);
+          if (!typeResult.success && typeResult.errors.length > 0) {
+            tscSignal = typeResult.errors
+              .slice(0, 30)
+              .map((e) => `${e.file}(${e.line},${e.column}): ${e.code} ${e.message}`)
+              .join('\n');
+          }
+        } catch {
+          // tsc unavailable — proceed with the build error alone
+        }
+
+        const fileBlocks = writtenFiles
+          .slice(0, 8)
+          .map((path) => {
+            const fullPath = join(projectDir, 'src', path);
+            if (!existsSync(fullPath)) return '';
+            const content = readFileSync(fullPath, 'utf-8').slice(0, 12000);
+            return `//CODE_START path=${path}\n${content}\n//CODE_END`;
+          })
+          .filter(Boolean)
+          .join('\n\n');
+
+        const repairPrompt = `The generated dashboard code failed to build. Fix the build errors and return corrected files.
+
+Build error output:
+${lastError.slice(0, 6000)}
+${tscSignal ? `\nTypeScript check (advisory):\n${tscSignal}` : ''}
+
+Current generated files:
+${fileBlocks}
+
+Requirements:
+1. Return ONLY the files that need changes, using the required //CODE_START format.
+2. Fix all build errors without changing dashboard behavior or removing features.
+3. Preserve AuthProvider, LoginPage, useAuth wiring and all dashboard tabs.
+4. Do not introduce new dependencies.`;
+
+        const llm = LLMService.createProvider(createLLMConfig(new ConfigService()));
+        const response = await llm.complete({
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: repairPrompt },
+          ],
+          temperature: 0.1,
+          maxTokens: 8192,
+          onProgress: reporter.progress,
+          onUsage: (usage) => {
+            if (run) this.runs.addTokenUsage(run, { ...usage, estimated: false });
+          },
+        });
+
+        const files = extractFiles(response);
+        if (files.length === 0) {
+          reporter.log('Repair attempt returned no files; keeping previous error.');
+          continue;
+        }
+
+        let repaired = 0;
+        for (const file of files) {
+          try {
+            await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
+            repaired++;
+          } catch {
+            // Disallowed path from the repair response — skip it.
+          }
+        }
+        reporter.log(`Repair wrote ${repaired} file(s); rebuilding...`);
+
+        const rebuild = await this.projectManager.build(projectDir, reporter.progress);
+        if (rebuild.success) {
+          reporter.log(`Build repaired on attempt ${attempt}.`);
+          return { success: true };
+        }
+        lastError = rebuild.error ?? lastError;
+      } catch (err: any) {
+        // e.g. no LLM configured, provider auth failure — repair cannot proceed.
+        reporter.log(`Repair attempt failed: ${err.message}`);
+        break;
+      }
+    }
+
+    return { success: false, error: lastError };
+  }
+
   private async buildPushDeploy(
     board: BoardConfig,
     writtenFiles: string[],
     commitMessage: string,
-    onProgress?: UpdateProgress,
+    reporter: PipelineReporter,
+    run?: RunRecord,
   ): Promise<DashboardUpdateResult> {
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir) {
-      return { success: false, board, writtenFiles, error: 'No generated app workspace found.' };
+      return this.failure(run, { board, writtenFiles }, 'No generated app workspace found.');
     }
 
+    reporter.phase('build');
     const info = this.projectManager.getProjectInfo(projectDir);
     if (info && !info.hasNodeModules) {
-      onProgress?.('Installing dependencies...');
-      const installResult = await this.projectManager.install(projectDir, onProgress);
+      reporter.log('Installing dependencies...');
+      const installResult = await this.projectManager.install(projectDir, reporter.progress);
       if (!installResult.success) {
-        return { success: false, board, writtenFiles, error: `Install failed: ${installResult.error}` };
+        return this.failure(run, { board, writtenFiles }, `Install failed: ${installResult.error}`);
       }
     }
 
-    onProgress?.('Building project...');
-    const buildResult = await this.projectManager.build(projectDir, onProgress);
-    if (!buildResult.success) {
-      return { success: false, board, writtenFiles, error: `Build failed: ${buildResult.error}` };
+    reporter.log('Building project...');
+    let buildResult: { success: boolean; error?: string } = await this.projectManager.build(projectDir, reporter.progress);
+    if (!buildResult.success && writtenFiles.length > 0) {
+      buildResult = await this.repairAndRebuild(projectDir, writtenFiles, buildResult.error, reporter, run);
     }
-    onProgress?.('Build successful');
+    if (!buildResult.success) {
+      return this.failure(run, { board, writtenFiles }, `Build failed: ${buildResult.error}`);
+    }
+    reporter.log('Build successful');
 
-    onProgress?.('Pushing to GitHub...');
-    const pushResult = await this.projectManager.commitAndPush(projectDir, commitMessage, onProgress);
+    reporter.phase('push');
+    reporter.log('Pushing to GitHub...');
+    const pushResult = await this.projectManager.commitAndPush(projectDir, commitMessage, reporter.progress);
     const pushedToGitHub = pushResult.success && pushResult.pushed === true;
     if (!pushResult.success) {
-      onProgress?.(`GitHub push skipped/failed: ${pushResult.error || 'Unknown error'}`);
-      onProgress?.('Continuing with Vercel deployment...');
+      reporter.log(`GitHub push skipped/failed: ${pushResult.error || 'Unknown error'}`);
+      reporter.log('Continuing with Vercel deployment...');
     }
 
-    onProgress?.('Deploying to Vercel...');
-    const deployResult = await this.projectManager.deploy(projectDir, onProgress);
+    reporter.phase('deploy');
+    reporter.log('Deploying to Vercel...');
+    const deployResult = await this.projectManager.deploy(projectDir, reporter.progress);
     if (!deployResult.success) {
       if (pushedToGitHub && isVercelAuthError(deployResult.error)) {
-        onProgress?.('Pushed to GitHub. Vercel Git integration should deploy this commit automatically.');
-        onProgress?.('Direct Vercel CLI deploy was skipped because local Vercel auth is not available.');
-        return { success: true, board, writtenFiles };
+        reporter.log('Pushed to GitHub. Vercel Git integration should deploy this commit automatically.');
+        reporter.log('Direct Vercel CLI deploy was skipped because local Vercel auth is not available.');
+        reporter.phase('done');
+        reporter.result(true);
+        if (run) {
+          this.runs.complete(run, {
+            boardId: board.id, boardName: board.name, boardTitle: board.title,
+            projectDir, writtenFiles,
+          });
+        }
+        return { success: true, board, writtenFiles, runId: run?.runId, tokenUsage: run?.tokenUsage };
       }
-      return { success: false, board, writtenFiles, error: `Deploy failed: ${deployResult.error}` };
+      return this.failure(run, { board, writtenFiles }, `Deploy failed: ${deployResult.error}`);
     }
 
-    onProgress?.(`Deployed: ${deployResult.url || 'Success'}`);
+    // Tag the deploy so rollback has a stable target (best-effort).
+    const tagResult = await this.projectManager.tagDeploy(projectDir, reporter.progress);
+
+    let verified: boolean | undefined;
+    if (deployResult.url) {
+      reporter.phase('verify');
+      const verification = await DeployVerificationService.verify(deployResult.url, reporter.progress);
+      verified = verification.success;
+      if (!verified) {
+        reporter.log(`Warning: deployed, but ${verification.error}`);
+      }
+    }
+
+    reporter.log(`Deployed: ${deployResult.url || 'Success'}`);
+    reporter.phase('done');
+    reporter.result(true);
+    if (run) {
+      this.runs.complete(run, {
+        boardId: board.id, boardName: board.name, boardTitle: board.title,
+        projectDir, writtenFiles, deployUrl: deployResult.url,
+      });
+    }
     return {
       success: true,
       board,
       writtenFiles,
       deployUrl: deployResult.url,
+      deployTag: tagResult.tag,
+      verified,
+      runId: run?.runId,
+      tokenUsage: run?.tokenUsage,
     };
   }
 

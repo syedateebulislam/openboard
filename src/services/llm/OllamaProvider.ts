@@ -69,6 +69,12 @@ export class OllamaProvider implements LLMProvider {
         content: m.content,
       })),
     });
+    if (options.onUsage && (response.prompt_eval_count || response.eval_count)) {
+      options.onUsage({
+        promptTokens: response.prompt_eval_count ?? 0,
+        completionTokens: response.eval_count ?? 0,
+      });
+    }
     return response.message.content;
   }
 

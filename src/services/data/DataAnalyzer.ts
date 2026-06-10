@@ -130,9 +130,15 @@ export class DataAnalyzer {
       lines.push(line);
     }
 
-    lines.push('', 'Sample rows (first 3):');
+    const sampleCount = Math.min(3, analysis.sampleRows.length);
+    lines.push('', `Sample rows (showing ${sampleCount} of ${analysis.rowCount} total; the deployed dashboard loads the full dataset):`);
     for (const row of analysis.sampleRows.slice(0, 3)) {
       lines.push('  ' + JSON.stringify(row));
+    }
+
+    const mixedColumns = analysis.columns.filter((col) => col.type === 'mixed').map((col) => col.name);
+    if (mixedColumns.length > 0) {
+      lines.push('', `Type-inference warning: column(s) with mixed/ambiguous types: ${mixedColumns.join(', ')}. Handle both numeric and string values defensively.`);
     }
 
     const summary = lines.join('\n');

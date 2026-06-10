@@ -5,6 +5,8 @@ import type { Screen } from '../App.js';
 import type { BoardConfig } from '../types/board.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
+import { PipelineProgress } from '../components/PipelineProgress.js';
+import type { PipelinePhase } from '../services/project/pipelinePhases.js';
 import { UI_COLORS } from '../theme.js';
 
 // Re-exported so the generated-UI cleanup helper keeps a stable import path.
@@ -23,6 +25,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected }: Props) {
   const [boards, setBoards] = useState<BoardConfig[]>(() => registry.listBoards());
   const [message, setMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [pipeline, setPipeline] = useState<{ phase: PipelinePhase; pct: number; phaseStartedAt: number } | null>(null);
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
 
   const items: MenuItem[] = [
@@ -97,7 +100,18 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected }: Props) {
       setIsProcessing(true);
       setMessage(`Removing "${board.title}" and updating the deployed app...`);
       try {
-        const result = await new DashboardUpdateService().removeDashboard(board, (line) => setMessage(line));
+        const service = new DashboardUpdateService(undefined, undefined, undefined, undefined, (event) => {
+          if (event.event === 'result' || event.phase === 'done') {
+            setPipeline(null);
+            return;
+          }
+          if (event.event === 'phase' && event.phase) {
+            setPipeline({ phase: event.phase, pct: event.pct ?? 0, phaseStartedAt: Date.now() });
+          } else if (event.event === 'log' && event.phase && event.pct !== undefined) {
+            setPipeline((prev) => (prev && prev.phase === event.phase ? { ...prev, pct: event.pct! } : prev));
+          }
+        });
+        const result = await service.removeDashboard(board, (line) => setMessage(line));
         setBoards(registry.listBoards());
         setPendingRemoveId(null);
         if (result.success) {
@@ -113,6 +127,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected }: Props) {
         const msg = error instanceof Error ? error.message : String(error);
         setMessage(`Could not remove "${board.title}": ${msg}`);
       } finally {
+        setPipeline(null);
         setIsProcessing(false);
       }
     }
@@ -136,7 +151,11 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected }: Props) {
       )}
       {isProcessing && (
         <Box marginTop={1}>
-          <Text color="yellow">Processing generated UI cleanup...</Text>
+          {pipeline ? (
+            <PipelineProgress phase={pipeline.phase} pct={pipeline.pct} phaseStartedAt={pipeline.phaseStartedAt} />
+          ) : (
+            <Text color="yellow">Processing generated UI cleanup...</Text>
+          )}
         </Box>
       )}
       <Box marginTop={1}>

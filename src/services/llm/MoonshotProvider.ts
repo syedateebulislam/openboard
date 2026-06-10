@@ -78,6 +78,12 @@ export class MoonshotProvider implements LLMProvider {
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens ?? 4096,
       });
+      if (options.onUsage && response.usage) {
+        options.onUsage({
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+        });
+      }
       return response.choices[0]?.message?.content ?? '';
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : String(err);

@@ -331,6 +331,77 @@ export class ProjectManager {
   }
 
   /**
+   * List deploy tags (deploy-N) in the generated repo, ascending by N.
+   */
+  async listDeployTags(projectDir: string): Promise<string[]> {
+    if (!existsSync(join(projectDir, '.git'))) return [];
+    const result = await crossSpawn('git', ['tag', '--list', 'deploy-*'], { cwd: projectDir, timeoutMs: 10_000 });
+    if (result.code !== 0) return [];
+    return result.stdout
+      .split('\n')
+      .map((tag) => tag.trim())
+      .filter((tag) => /^deploy-\d+$/.test(tag))
+      .sort((a, b) => Number(a.slice(7)) - Number(b.slice(7)));
+  }
+
+  /**
+   * Tag HEAD as the next deploy-N after a successful deploy, so rollback has
+   * a stable target. Pushes the tag when a remote exists (best-effort).
+   */
+  async tagDeploy(projectDir: string, onProgress?: ProgressCallback): Promise<{ success: boolean; tag?: string; error?: string }> {
+    try {
+      if (!existsSync(join(projectDir, '.git'))) {
+        return { success: false, error: 'Not a git repository' };
+      }
+      const tags = await this.listDeployTags(projectDir);
+      const next = tags.length > 0 ? Number(tags[tags.length - 1].slice(7)) + 1 : 1;
+      const tag = `deploy-${next}`;
+      const tagResult = await crossSpawn('git', ['tag', tag], { cwd: projectDir, timeoutMs: 10_000 });
+      if (tagResult.code !== 0) return { success: false, error: tagResult.stderr };
+
+      const remote = await crossSpawn('git', ['remote'], { cwd: projectDir, timeoutMs: 10_000 });
+      if (remote.stdout.trim()) {
+        await crossSpawn('git', ['push', 'origin', tag], { cwd: projectDir, timeoutMs: 30_000 });
+      }
+      onProgress?.(`Tagged deployment: ${tag}`);
+      return { success: true, tag };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Restore the working tree to the previous deploy tag and commit the
+   * rollback. The caller is responsible for rebuild + push + redeploy.
+   */
+  async restorePreviousDeploy(projectDir: string, onProgress?: ProgressCallback): Promise<{ success: boolean; tag?: string; error?: string }> {
+    try {
+      const tags = await this.listDeployTags(projectDir);
+      if (tags.length < 2) {
+        return { success: false, error: 'No previous deploy tag to roll back to (need at least 2 tagged deploys).' };
+      }
+      const prev = tags[tags.length - 2];
+
+      // read-tree --reset -u restores index AND working tree to the tag,
+      // including deleting files added since — an exact snapshot restore.
+      const readTree = await crossSpawn('git', ['read-tree', '--reset', '-u', prev], { cwd: projectDir, timeoutMs: 30_000 });
+      if (readTree.code !== 0) return { success: false, error: readTree.stderr };
+
+      const author = await GitHubService.ensureCommitAuthor(projectDir);
+      if (!author.success) return { success: false, error: author.error };
+
+      const commit = await crossSpawn('git', ['commit', '-m', `rollback: restore ${prev}`], { cwd: projectDir, timeoutMs: 30_000, useShell: false });
+      if (commit.code !== 0 && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
+        return { success: false, error: commit.stderr };
+      }
+      onProgress?.(`Restored working tree to ${prev}`);
+      return { success: true, tag: prev };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
    * Pre-deploy checks — fix common issues in generated projects before deploying.
    * Runs automatically before every Vercel deployment.
    *
@@ -743,6 +814,7 @@ export class ProjectManager {
         /window\.location\.hostname[\s\S]{0,500}setUser\s*\(/.test(content) ? 'hostname-gated client auth bypass' : undefined,
         /setUser\s*\([\s\S]{0,500}window\.location\.hostname/.test(content) ? 'hostname-gated client auth bypass' : undefined,
         /setUser\s*\(\s*\{\s*username\s*:\s*['"]dev['"]/.test(content) ? 'client-side dev auth bypass' : undefined,
+        /dangerouslySetInnerHTML/.test(content) ? 'dangerouslySetInnerHTML usage' : undefined,
       ].filter(Boolean);
 
       if (violations.length > 0) {

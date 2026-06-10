@@ -414,6 +414,21 @@ describe('ProjectManager', () => {
       expect(result.error).toContain('JWT secret env name');
     });
 
+    it('should fail if frontend source uses dangerouslySetInnerHTML', async () => {
+      const board = makeBoard({ name: 'dangerous-html' });
+      const scaffoldResult = await pm.scaffold(board);
+      writeFileSync(
+        join(scaffoldResult.projectDir!, 'src', 'components', 'RawHtml.tsx'),
+        "export function RawHtml({ html }: { html: string }) { return <div dangerouslySetInnerHTML={{ __html: html }} />; }",
+        'utf-8',
+      );
+
+      const result = pm.preDeployChecks(scaffoldResult.projectDir!);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('dangerouslySetInnerHTML usage');
+    });
+
     it('should remove duplicate dashboard tabs the agent flow may append', async () => {
       const board = makeBoard({ name: 'dup-tabs' });
       const scaffoldResult = await pm.scaffold(board);

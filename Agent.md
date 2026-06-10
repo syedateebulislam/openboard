@@ -1,5 +1,22 @@
 # Agent Automation Contract
 
+## Quickstart (60 seconds)
+
+```bash
+# 1. One-time human setup (LLM provider + GitHub + Vercel + dashboard login):
+openboard           # interactive TUI, follow the setup wizard
+
+# 2. Create a dashboard from a data file:
+openboard agent create --data "./data/uber_rides.csv" --name "Uber Rides" --json
+
+# 3. Update it later with a prompt (selector comes from step 2 output):
+openboard agent update --dashboard "uber-rides" --prompt "Add a monthly trend chart" --json
+```
+
+Parse stdout JSON for `success`, `dashboardSelector`, `deployUrl`, and `errorCode` on failure. Progress streams to stderr.
+
+---
+
 This file is for automation agents, scheduled jobs, and cron-style tools that need to create or update OpenBoard dashboards without opening the interactive TUI.
 
 OpenBoard owns the complete workflow:
@@ -142,9 +159,59 @@ openboard update --all
 
 This relies on local prompt history stored per dashboard. It works after a dashboard has had at least one successful initial generation or prompt update.
 
+## Query Commands
+
+```bash
+openboard agent list --json                          # all dashboards + deploy URLs + data staleness
+openboard agent status --dashboard "uber-rides" --json   # one dashboard, incl. dataStale flag
+openboard agent runs --json                          # recent pipeline runs + failure summary
+```
+
+`agent status` reports `dataStale: true` when a linked data file changed after the last generation — use it to decide between `openboard update --dashboard <selector>` (refresh) and doing nothing.
+
+## Dry Run
+
+Validate intent cheaply before paying for generation:
+
+```bash
+openboard agent create --data "./data/uber_rides.csv" --name "Uber Rides" --dry-run --json
+```
+
+Returns a `plan` (title, selector, type, rowCount, columnCount, dataSummary) without calling the LLM, writing files, or deploying.
+
+## Idempotency
+
+Pass `--idempotency-key <key>` to `agent create`. If a previous run with the same key succeeded, OpenBoard returns that run's result (`"reused": true`) instead of creating a duplicate dashboard. Use this when your orchestrator retries on timeout.
+
+## Resume
+
+Every create/update run persists state under `~/.openboard/runs/`. If a run fails after generation succeeded (e.g. build or deploy failed), resume re-runs only the build → push → deploy → verify tail — no LLM cost:
+
+```bash
+openboard agent runs --json                # find the failed runId
+openboard agent resume <run-id> --json
+```
+
+## Rollback
+
+Each successful deploy tags the generated repo (`deploy-N`). Roll back to the previous deploy and redeploy it:
+
+```bash
+openboard rollback --dashboard "uber-rides"
+openboard agent rollback --dashboard "uber-rides" --json
+```
+
 ## JSON Mode
 
-Use `--json` for reliable machine parsing.
+Use `--json` for reliable machine parsing. Final result JSON goes to stdout; structured NDJSON progress events stream to stderr, one JSON object per line:
+
+```json
+{"event":"phase","phase":"generate","pct":8,"message":"Generating dashboard code"}
+{"event":"log","message":"  codex still generating… 30s elapsed","phase":"generate","pct":12}
+{"event":"result","success":true,"pct":100}
+```
+
+Track `phase` + `pct` for progress UIs; a phase that stops emitting `log` events for several minutes is wedged.
 
 ```bash
 openboard agent create --data "./data/uber_rides.csv" --name "Uber Rides" --json
@@ -161,9 +228,15 @@ Success shape:
   "dashboardSelector": "uber-rides",
   "projectDir": "projects/openboard-app-workspace-...",
   "deployUrl": "https://example.vercel.app",
+  "deployTag": "deploy-4",
+  "verified": true,
+  "runId": "run-2026-06-10-ab12cd34",
+  "tokenUsage": { "promptTokens": 5200, "completionTokens": 3100, "estimated": false },
   "writtenFiles": ["App.tsx", "components/UberRidesDashboard.tsx"]
 }
 ```
+
+`verified` is the post-deploy health check (app shell + auth API respond at the deploy URL). `verified: false` means the deploy completed but the URL is not yet healthy — re-check before reporting success to a user.
 
 Failure shape:
 
@@ -172,10 +245,36 @@ Failure shape:
   "success": false,
   "action": "update",
   "dashboardSelector": "uber-rides",
+  "runId": "run-2026-06-10-ab12cd34",
   "error": "Dashboard not found: uber-rides",
+  "errorCode": "E_DASHBOARD_NOT_FOUND",
   "writtenFiles": []
 }
 ```
+
+## Error Codes
+
+Branch on `errorCode`, never on the prose `error` string:
+
+| Code | Meaning | Suggested agent action |
+|---|---|---|
+| `E_VALIDATION` | Missing/invalid flags | Fix the command |
+| `E_DATA_NOT_FOUND` | Data file missing | Check the path |
+| `E_DATA_PARSE` | Data file unparseable | Check the file format |
+| `E_DASHBOARD_NOT_FOUND` | Unknown selector | `agent list` to discover selectors |
+| `E_NO_LLM` | No LLM configured | Ask a human to run setup |
+| `E_LLM_EMPTY` / `E_LLM_FAILED` | Generation failed | Retry once, then escalate |
+| `E_SCAFFOLD_FAILED` / `E_INSTALL_FAILED` | Workspace setup failed | Escalate |
+| `E_BUILD_FAILED` | Build failed after self-repair attempts | `agent resume <runId>` retries build only |
+| `E_PUSH_FAILED` | Git push failed | Check GitHub auth |
+| `E_DEPLOY_AUTH` | Vercel auth missing | Ask a human to re-auth |
+| `E_DEPLOY_FAILED` | Deploy failed | `agent resume <runId>` |
+| `E_VERIFY_FAILED` | Deployed but URL unhealthy | Re-check the URL later |
+| `E_LOCKED` | Another run holds the project lock | Wait and retry |
+| `E_RUN_NOT_FOUND` | Bad run id for resume | `agent runs` to list ids |
+| `E_UNKNOWN` | Unclassified | Read `error`, escalate |
+
+Build failures trigger an automatic self-repair loop (up to 2 LLM repair passes) before `E_BUILD_FAILED` is returned.
 
 ## Exit Codes
 
@@ -204,7 +303,9 @@ OpenBoard stores:
 ```text
 ~/.openboard/config.json
 ~/.openboard/prompt-history/<dashboard-id>.json
+~/.openboard/runs/<run-id>.json
 projects/openboard-app-workspace-<id>/
+projects/openboard-app-workspace-<id>/.openboard.lock   (present only while a run is active)
 ```
 
 Always quote Windows paths:

@@ -14,6 +14,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChatMessageComponent } from '../components/ChatMessage.js';
 import { LoadingRemark } from '../components/LoadingRemark.js';
+import { PipelineProgress } from '../components/PipelineProgress.js';
+import { PipelineReporter, PHASE_ORDER } from '../services/project/pipelinePhases.js';
+import type { PipelinePhase } from '../services/project/pipelinePhases.js';
+import { RunStateService } from '../services/project/RunStateService.js';
 import { parseCommand, HELP_TEXT, COMMANDS_TEXT, CHAT_COMMANDS, formatUnknownCommandMessage } from '../utils/commandParser.js';
 import type { ChatMessage, BoardConfig } from '../types/board.js';
 import type { LLMProvider, LLMMessage } from '../types/llm.js';
@@ -158,6 +162,7 @@ export function ChatScreen({
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pipeline, setPipeline] = useState<{ phase: PipelinePhase; pct: number; phaseStartedAt: number } | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<'deploy' | 'push' | null>(null);
   const [llmProvider, setLlmProvider] = useState<LLMProvider | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -294,6 +299,40 @@ export function ChatScreen({
     };
   }, [appendLog]);
 
+  // Typical per-phase durations from run history, for "usually ~Ns" hints.
+  const typicalDurations = useMemo(() => {
+    const map: Partial<Record<PipelinePhase, number>> = {};
+    try {
+      const runs = new RunStateService();
+      for (const phase of PHASE_ORDER) {
+        if (phase === 'done') continue;
+        map[phase] = runs.typicalPhaseDuration(phase);
+      }
+    } catch {
+      // history unavailable — hints are optional
+    }
+    return map;
+  }, []);
+
+  /**
+   * Pipeline reporter whose event sink drives the on-screen progress bar.
+   * Pass `reporter.progress` wherever an onProgress callback is expected and
+   * call `reporter.phase(...)` at stage boundaries.
+   */
+  const makePipelineReporter = useCallback((onProgress: (line: string) => void): PipelineReporter => {
+    return new PipelineReporter(onProgress, (event) => {
+      if (event.event === 'result' || event.phase === 'done') {
+        setPipeline(null);
+        return;
+      }
+      if (event.event === 'phase' && event.phase) {
+        setPipeline({ phase: event.phase, pct: event.pct ?? 0, phaseStartedAt: Date.now() });
+      } else if (event.event === 'log' && event.phase && event.pct !== undefined) {
+        setPipeline((prev) => (prev && prev.phase === event.phase ? { ...prev, pct: event.pct! } : prev));
+      }
+    });
+  }, []);
+
   const getActiveProjectDir = useCallback((): string => {
     if (board.outputDir) return board.outputDir;
     const sharedDir = new BoardRegistryService().getSharedProjectDir();
@@ -343,9 +382,49 @@ export function ChatScreen({
       ['Prompt history exists', historyCount > 0],
     ];
 
+    // Registry ↔ disk reconciliation: registered boards whose workspace is gone.
+    const registryLines: string[] = [];
+    try {
+      const boards = new BoardRegistryService().listBoards();
+      const orphaned = boards.filter((b) => b.outputDir && !existsSync(b.outputDir));
+      registryLines.push(`Registered dashboards: ${boards.length}`);
+      if (orphaned.length > 0) {
+        registryLines.push(`WARN ${orphaned.length} dashboard(s) point at missing project dirs:`);
+        for (const b of orphaned) registryLines.push(`  - ${b.name}: ${b.outputDir}`);
+      } else {
+        registryLines.push('OK Registry matches disk: all project dirs exist');
+      }
+    } catch {
+      registryLines.push('Registry reconciliation unavailable.');
+    }
+
+    // Run history: success rate, failure hot spots, recorded token usage.
+    const runLines: string[] = [];
+    try {
+      const summary = new RunStateService().summarize();
+      if (summary.total > 0) {
+        runLines.push(`Runs (last ${summary.total}): ${summary.succeeded} succeeded, ${summary.failed} failed`);
+        const phases = Object.entries(summary.failuresByPhase).sort((a, b) => b[1] - a[1]);
+        if (phases.length > 0) {
+          runLines.push(`Failures by phase: ${phases.map(([phase, count]) => `${phase}=${count}`).join(', ')}`);
+        }
+        if (summary.totalTokens > 0) {
+          runLines.push(`LLM tokens recorded: ${summary.totalTokens.toLocaleString()}`);
+        }
+      } else {
+        runLines.push('No recorded pipeline runs yet.');
+      }
+    } catch {
+      runLines.push('Run history unavailable.');
+    }
+
     return [
       'OpenBoard Doctor',
       ...checks.map(([label, ok]) => `${ok ? 'OK' : 'WARN'} ${label}: ${yesNo(Boolean(ok))}`),
+      '',
+      ...registryLines,
+      '',
+      ...runLines,
       '',
       `Project: ${projectDir || 'not set'}`,
       `Data: ${dataFile || 'not linked'}`,
@@ -371,9 +450,11 @@ export function ChatScreen({
     async (projectDir: string, label: string): Promise<void> => {
       setIsLoading(true);
       const logId = startLogMsg(label);
-      const onProgress = createProgressCallback(logId);
+      const reporter = makePipelineReporter(createProgressCallback(logId));
+      const onProgress = reporter.progress;
 
       try {
+        reporter.phase('build');
         onProgress('Running pre-deploy checks...');
         const preDeploy = projectManager.preDeployChecks(projectDir, onProgress);
         if (!preDeploy.success) {
@@ -399,6 +480,7 @@ export function ChatScreen({
         }
         onProgress('Build successful');
 
+        reporter.phase('push');
         onProgress('Pushing to GitHub...');
         const pushResult = await projectManager.commitAndPush(
           projectDir,
@@ -414,17 +496,20 @@ export function ChatScreen({
           onProgress(`Pushed to GitHub (${pushResult.commitHash?.slice(0, 7)})${repoInfo}`);
         }
 
+        reporter.phase('deploy');
         onProgress('Deploying to Vercel...');
         const deployResult = await projectManager.deploy(projectDir, onProgress);
         reportDeployResult(deployResult, pushResult.success && pushResult.pushed === true, onProgress);
+        reporter.phase('done');
       } catch (error: any) {
         onProgress(`Pipeline error: ${error.message}`);
       } finally {
+        setPipeline(null);
         finishLog(logId);
         setIsLoading(false);
       }
     },
-    [createProgressCallback, finishLog, startLogMsg],
+    [createProgressCallback, finishLog, startLogMsg, makePipelineReporter],
   );
 
   /**
@@ -668,13 +753,16 @@ For the current board "${board.title}":
           if (pendingConfirm === 'deploy') {
             setIsLoading(true);
             const logId = startLogMsg('Confirmed. Starting full deploy pipeline...');
-            const onProgress = createProgressCallback(logId);
+            const reporter = makePipelineReporter(createProgressCallback(logId));
+            const onProgress = reporter.progress;
 
             try {
+              reporter.phase('build');
               onProgress('Running pre-deploy checks...');
               const preDeploy = projectManager.preDeployChecks(projectDir, onProgress);
               if (!preDeploy.success) {
                 onProgress(`Pre-deploy checks failed: ${preDeploy.error}`);
+                setPipeline(null);
                 finishLog(logId);
                 setIsLoading(false);
                 setPendingConfirm(null);
@@ -687,6 +775,7 @@ For the current board "${board.title}":
 
               if (!buildResult.success) {
                 onProgress(`Build failed: ${buildResult.error}`);
+                setPipeline(null);
                 finishLog(logId);
                 setIsLoading(false);
                 setPendingConfirm(null);
@@ -695,6 +784,7 @@ For the current board "${board.title}":
               onProgress('Build successful');
 
               // Step 2: Commit and push to GitHub
+              reporter.phase('push');
               onProgress('Pushing to GitHub...');
               const pushResult = await projectManager.commitAndPush(
                 projectDir,
@@ -711,14 +801,18 @@ For the current board "${board.title}":
               }
 
               // Step 3: Deploy to Vercel
+              reporter.phase('deploy');
               onProgress('Deploying to Vercel...');
               const deployResult = await projectManager.deploy(projectDir, onProgress);
               reportDeployResult(deployResult, pushResult.success && pushResult.pushed === true, onProgress);
 
+              reporter.phase('done');
+              setPipeline(null);
               finishLog(logId);
               setIsLoading(false);
             } catch (error: any) {
               onProgress(`Deploy pipeline error: ${error.message}`);
+              setPipeline(null);
               finishLog(logId);
               setIsLoading(false);
             }
@@ -830,12 +924,21 @@ For the current board "${board.title}":
         const projectStatus = info
           ? `Project: ${activeProjectDir}\n  Installed: ${info.hasNodeModules ? 'yes' : 'no'} | Built: ${info.hasDist ? 'yes' : 'no'} | Git: ${info.hasGit ? 'yes' : 'no'}`
           : 'Project: not scaffolded';
+        let tokenInfo = '';
+        try {
+          const summary = new RunStateService().summarize();
+          if (summary.totalTokens > 0) {
+            tokenInfo = `\nLLM tokens recorded across runs: ${summary.totalTokens.toLocaleString()}`;
+          }
+        } catch {
+          // run history optional
+        }
         addMsg(
           newMsg(
             'system',
             `Board: ${board.name}\nType: ${board.type}\n${projectStatus}\nDeploy URL: ${
               board.deployUrl ?? 'Not deployed'
-            }\nComponents: ${board.components.join(', ') || 'None generated'}\n${providerInfo}`,
+            }\nComponents: ${board.components.join(', ') || 'None generated'}\n${providerInfo}${tokenInfo}`,
           ),
         );
         return;
@@ -856,9 +959,11 @@ For the current board "${board.title}":
         }
         setIsLoading(true);
         const logId = startLogMsg(`Building project in ${projectDir}...`);
-        const onProgress = createProgressCallback(logId);
+        const reporter = makePipelineReporter(createProgressCallback(logId));
+        const onProgress = reporter.progress;
 
         try {
+          reporter.phase('build');
           // Auto-install if node_modules missing
           const info = projectManager.getProjectInfo(projectDir);
           if (info && !info.hasNodeModules) {
@@ -866,6 +971,7 @@ For the current board "${board.title}":
             const installResult = await projectManager.install(projectDir, onProgress);
             if (!installResult.success) {
               onProgress(`Install failed: ${installResult.error}`);
+              setPipeline(null);
               finishLog(logId);
               setIsLoading(false);
               return;
@@ -879,10 +985,12 @@ For the current board "${board.title}":
             onProgress(`Build complete. Output: ${result.outputDir}`);
           }
 
+          setPipeline(null);
           finishLog(logId);
           setIsLoading(false);
         } catch (error: any) {
           onProgress(`Build error: ${error.message}`);
+          setPipeline(null);
           finishLog(logId);
           setIsLoading(false);
         }
@@ -911,11 +1019,14 @@ For the current board "${board.title}":
 
         setIsLoading(true);
         const logId = startLogMsg(`Updating "${board.title}" from latest data source...`);
-        const onProgress = createProgressCallback(logId);
+        const reporter = makePipelineReporter(createProgressCallback(logId));
+        const onProgress = reporter.progress;
 
         try {
+          reporter.phase('parse');
           onProgress(`Reading data: ${dataFile}`);
           const parsed = await DataParserService.parse(dataFile);
+          reporter.phase('analyze');
           const analysis = DataAnalyzer.analyze(parsed);
           const latestSummary = DataAnalyzer.generateSummary(analysis);
           onProgress(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
@@ -958,11 +1069,13 @@ Requirements:
 7. Return all changed files using the required //CODE_START format.`;
 
           finishLog(logId);
+          reporter.phase('generate');
           const writtenFiles = await sendToLLM(updatePrompt, {
             recordPrompt: false,
             promptSource: 'update',
             dataSummary: latestSummary,
           });
+          setPipeline(null);
 
           if (writtenFiles.length === 0) {
             addMsg(newMsg('error', 'Update did not write any files. Build/push/deploy skipped.'));
@@ -973,6 +1086,7 @@ Requirements:
           await runBuildPushDeploy(projectDir, `Building, pushing, and deploying "${board.title}" after data update...`);
         } catch (error: any) {
           onProgress(`Update failed: ${error.message}`);
+          setPipeline(null);
           finishLog(logId);
           setIsLoading(false);
         }
@@ -1074,7 +1188,7 @@ Requirements:
         await sendToLLM(text);
       }
     },
-    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmError, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource],
+    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmError, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter],
   );
 
   // ESC: go back to welcome screen
@@ -1148,8 +1262,17 @@ Requirements:
         ))}
       </Box>
 
-      {/* Loading indicator */}
-      {isLoading && <LoadingRemark />}
+      {/* Loading indicator — phase-weighted progress bar when a pipeline is active */}
+      {isLoading && (pipeline ? (
+        <PipelineProgress
+          phase={pipeline.phase}
+          pct={pipeline.pct}
+          phaseStartedAt={pipeline.phaseStartedAt}
+          typicalMs={typicalDurations[pipeline.phase]}
+        />
+      ) : (
+        <LoadingRemark />
+      ))}
 
       {commandSuggestions.length > 0 && (
         <Box flexDirection="column">

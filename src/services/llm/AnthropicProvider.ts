@@ -84,6 +84,12 @@ export class AnthropicProvider implements LLMProvider {
         system,
         messages: msgs as Anthropic.MessageParam[],
       });
+      if (options.onUsage && response.usage) {
+        options.onUsage({
+          promptTokens: response.usage.input_tokens,
+          completionTokens: response.usage.output_tokens,
+        });
+      }
       const block = response.content[0];
       return block.type === 'text' ? block.text : '';
     } catch (err: unknown) {

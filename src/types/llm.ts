@@ -22,6 +22,12 @@ export interface LLMCompletionOptions {
    * looking wedged. Providers without streaming may ignore it.
    */
   onProgress?: (line: string) => void;
+  /**
+   * Optional token-usage sink. Providers that report usage (OpenAI, Anthropic,
+   * Moonshot, Ollama) call this once per completion; providers that cannot
+   * (Codex CLI) skip it and callers fall back to a chars/4 estimate.
+   */
+  onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
 }
 
 export interface LLMValidationResult {

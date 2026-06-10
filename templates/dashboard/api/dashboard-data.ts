@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from './_auth';
-import { PROTECTED_DASHBOARD_DATA } from './_data/protected-data';
+import { requireAuth } from './_auth.js';
+import { PROTECTED_DASHBOARD_DATA } from './_data/protected-data.js';
 
 const DASHBOARD_NAME = /^[a-z0-9-]+$/;
 

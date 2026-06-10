@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { buildAuthCookie, clearAuthCookie, verifyAuth } from './_auth';
+import { buildAuthCookie, clearAuthCookie, verifyAuth } from './_auth.js';
 
 // Simple in-memory rate limiter (resets on cold start, but effective for basic protection)
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();

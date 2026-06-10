@@ -228,9 +228,7 @@ export class TemplateService {
     await writeFile(
       resolve(dataRoot, 'protected-data.ts'),
       [
-        'export const PROTECTED_DASHBOARD_DATA = ',
-        JSON.stringify(aggregate, null, 2),
-        ' as const;',
+        `export const PROTECTED_DASHBOARD_DATA = ${JSON.stringify(aggregate, null, 2)} as const;`,
         '',
         'export type ProtectedDashboardName = keyof typeof PROTECTED_DASHBOARD_DATA;',
         '',
