@@ -200,7 +200,7 @@ describe('ProjectManager', () => {
       expect(installResult.success).toBe(true);
 
       const buildResult = await pm.build(scaffoldResult.projectDir!);
-      expect(buildResult.success).toBe(true);
+      expect(buildResult.success, `build failed: ${buildResult.error}`).toBe(true);
       // Vite produces a dist/ folder
       expect(existsSync(join(scaffoldResult.projectDir!, 'dist'))).toBe(true);
     }, 720_000); // install + vite build on cold CI runners
@@ -538,7 +538,7 @@ export default function App() {
 
       // 3. Build
       const buildResult = await pm.build(projectDir);
-      expect(buildResult.success).toBe(true);
+      expect(buildResult.success, `build failed: ${buildResult.error}`).toBe(true);
       expect(existsSync(join(projectDir, 'dist'))).toBe(true);
 
       // 4. Git init + commit
