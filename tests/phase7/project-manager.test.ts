@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, realpathSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +22,10 @@ import type { BoardConfig } from '../../src/types/board.js';
 function makeTempDir(): string {
   const dir = join(tmpdir(), `openboard-test-${randomUUID().slice(0, 8)}`);
   mkdirSync(dir, { recursive: true });
-  return dir;
+  // On windows-latest runners TEMP is an 8.3 short path (C:\Users\RUNNER~1\...).
+  // Vite resolves index.html to the long form, and the short/long mismatch
+  // makes it emit a relative-path asset name that Rollup rejects. Canonicalize.
+  return realpathSync.native(dir);
 }
 
 function makeBoard(overrides: Partial<BoardConfig> = {}): BoardConfig {
