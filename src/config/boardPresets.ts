@@ -19,7 +19,7 @@ export const BOARD_PRESETS: BoardPreset[] = [
     icon: '❤️',
     description: 'Apple Health, Fitbit, Garmin data analysis',
     defaultPrompt:
-      'Create a health dashboard showing daily steps trends, heart rate patterns, sleep quality, and calorie tracking. Include time-series charts and weekly summaries.',
+      'Create a polished, mobile-first health dashboard. Top: a row of KPI summary cards (avg daily steps, resting heart rate, avg sleep hours, calories) with trend arrows vs last week. Below: time-series charts for steps, heart rate, and sleep quality with 7-day moving averages, plus a weekly summary heatmap. Add an "Insights" section with 2-3 auto-generated observations (e.g. best/worst sleep days, activity streaks, anomalies). Use a responsive grid that collapses to a single column on small screens, touch-friendly tooltips, soft card shadows, rounded corners, and a calm green/teal palette with dark-mode-friendly colors.',
     dataHints: ['steps', 'heart_rate', 'sleep_hours', 'calories', 'weight', 'date'],
   },
   {
@@ -28,7 +28,7 @@ export const BOARD_PRESETS: BoardPreset[] = [
     icon: '💰',
     description: 'Bank transactions, spending categories, budget tracking',
     defaultPrompt:
-      'Create a finance dashboard showing spending trends by category, income vs expenses, monthly comparison, and top spending categories with pie chart breakdown.',
+      'Create a rich, mobile-first expense tracking dashboard. Top: KPI cards for total spend this month, income vs expenses (net), avg daily spend, and biggest single expense — each with a delta vs previous month. Charts: monthly spending trend line with income overlay, category breakdown as a donut chart with legend, top 5 spending categories bar chart, and a recent-transactions list with category icons. Add a "Spending Insights" panel highlighting unusual spikes, fastest-growing categories, recurring subscriptions detected, and a simple budget health indicator. Use a responsive card grid (1 column on mobile, 2-3 on desktop), large touch targets, currency formatting, color-coded amounts (red expenses, green income), and a clean modern look with subtle shadows and rounded cards.',
     dataHints: ['date', 'amount', 'category', 'description', 'account', 'type'],
   },
   {
@@ -37,7 +37,7 @@ export const BOARD_PRESETS: BoardPreset[] = [
     icon: '🛒',
     description: 'Grocery spending, items, stores, budget tracking',
     defaultPrompt:
-      'Create a grocery dashboard showing spending by store, items by category, budget vs actual, and price trends over time.',
+      'Create an engaging, mobile-first grocery spending dashboard. Top: KPI cards for total grocery spend this month, budget vs actual with a progress bar, avg basket size, and most-visited store. Charts: spending by store (horizontal bars), items by category (donut), weekly spend trend line, and a price-watch table showing items whose unit price rose or fell the most over time. Add an "Insights" section with savings tips: cheapest store per category, items bought most frequently, and projected month-end spend vs budget. Layout must be a responsive grid collapsing to one column on phones, with sticky KPI cards, touch-friendly charts, warm orange/green accents, currency formatting, and clear over/under-budget color coding.',
     dataHints: ['date', 'store', 'item', 'price', 'quantity', 'category'],
   },
   {

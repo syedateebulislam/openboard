@@ -31,41 +31,45 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f' }}>
-      <div style={{ background: '#12121a', border: '1px solid #1e1e2e', borderRadius: '12px', padding: '2rem', width: '100%', maxWidth: '400px' }} role="main" aria-label="Login form">
-        <h1 style={{ color: '#e8e8f0', marginBottom: '1.5rem', textAlign: 'center' }}>📊 Dashboard Login</h1>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)', padding: '1rem' }}>
+      <div className="card" style={{ width: '100%', maxWidth: '400px' }} role="main" aria-label="Login form">
+        <h1 className="app-title" style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>OpenBoard</h1>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+          Sign in to view your dashboards
+        </p>
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1rem' }}>
-            <label htmlFor="username" style={{ display: 'block', color: '#9090a0', marginBottom: '0.5rem' }}>Username</label>
+            <label htmlFor="username" style={{ display: 'block', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontSize: '0.875rem' }}>Username</label>
             <input
               id="username"
-              type="text" 
-              value={username} 
+              className="input-field"
+              type="text"
+              value={username}
               onChange={e => setUsername(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem', background: '#0a0a0f', border: '1px solid #1e1e2e', borderRadius: '6px', color: '#e8e8f0' }}
-              required 
+              required
               autoFocus
               autoComplete="username"
               aria-describedby={error ? 'login-error' : undefined}
             />
           </div>
           <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="password" style={{ display: 'block', color: '#9090a0', marginBottom: '0.5rem' }}>Password</label>
+            <label htmlFor="password" style={{ display: 'block', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontSize: '0.875rem' }}>Password</label>
             <input
               id="password"
-              type="password" 
-              value={password} 
+              className="input-field"
+              type="password"
+              value={password}
               onChange={e => setPassword(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem', background: '#0a0a0f', border: '1px solid #1e1e2e', borderRadius: '6px', color: '#e8e8f0' }}
               required
               autoComplete="current-password"
             />
           </div>
-          {error && <p id="login-error" role="alert" style={{ color: '#ef4444', marginBottom: '1rem', textAlign: 'center' }}>{error}</p>}
+          {error && <p id="login-error" role="alert" style={{ color: 'var(--danger)', marginBottom: '1rem', textAlign: 'center' }}>{error}</p>}
           <button
-            type="submit" 
+            type="submit"
+            className="btn-primary"
+            style={{ width: '100%' }}
             disabled={loading}
-            style={{ width: '100%', padding: '0.75rem', background: '#7c3aed', border: 'none', borderRadius: '6px', color: '#fff', fontWeight: 'bold', cursor: loading ? 'not-allowed' : 'pointer' }}
             aria-busy={loading}
           >
             {loading ? 'Signing in...' : 'Sign In'}

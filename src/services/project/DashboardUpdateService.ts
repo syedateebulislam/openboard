@@ -873,7 +873,8 @@ Requirements:
     const currentApp = this.readCurrentApp(board.outputDir);
     const boards = this.registry.listBoards();
     const preset = getPreset(board.type);
-    const intent = userPrompt?.trim() || preset.defaultPrompt || 'Create a useful executive analytics dashboard from this dataset.';
+    const intent = userPrompt?.trim() || preset.defaultPrompt ||
+      'Create a polished, mobile-first analytics dashboard from this dataset. Start with KPI summary cards for the most important aggregate metrics (with deltas vs the previous period where dates exist), followed by 2-4 charts that best fit the data shape (trends over time, category breakdowns, top-N rankings), and an "Insights" section with 2-3 auto-generated observations such as spikes, outliers, or notable trends. Use a responsive card grid that collapses to one column on small screens, touch-friendly tooltips, rounded cards with subtle shadows, and clear number formatting.';
 
     return `Generate an initial dashboard tab for "${board.title}" inside the existing OpenBoard master React app.
 

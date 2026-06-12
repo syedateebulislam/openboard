@@ -15,22 +15,39 @@ TECHNOLOGY STACK (available in the project):
 - Lucide React (icons)
 - date-fns (date formatting)
 
-CSS VARIABLES (dark theme, use these for styling):
-- --bg-primary: #0a0a0f (page background)
-- --bg-card: #12121a (card background)
-- --border: #1e1e2e
-- --text-primary: #e8e8f0
-- --text-secondary: #9090a0
-- --accent: #7c3aed (purple accent)
-- --success: #10b981, --warning: #f59e0b, --danger: #ef4444
+THEMING — the app supports dark mode (default) AND light mode:
+- App.css defines all colors as CSS variables on :root (dark) and [data-theme='light'] (light). The ThemeToggle component in the header switches themes at runtime.
+- NEVER hardcode hex colors in components. Always use the CSS variables below so every component renders correctly in BOTH themes.
+- NEVER remove src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, or the <ThemeToggle /> button from the App.tsx header.
 
-CSS CLASSES (already defined, use them):
-- .app-container, .app-header, .app-content
-- .app-title, .app-header-side
-- .app-tabs, .tab-btn, .tab-btn.active
-- .card, .card-title, .metric-value
-- .grid-2, .grid-3, .grid-4 (responsive grids)
-- .chart-container (width:100%, height:300px)
+CSS VARIABLES (theme-aware, use these for ALL styling):
+- Surfaces: --bg-primary, --bg-secondary, --bg-card, --bg-card-hover, --bg-elevated
+- Borders: --border, --border-subtle
+- Text: --text-primary, --text-secondary, --text-muted
+- Accent: --accent, --accent-light, --accent-gradient
+- Status: --success, --warning, --danger, --info
+- Charts: --chart-1 through --chart-6 (Recharts series colors), --chart-grid (CartesianGrid stroke)
+- Shape/motion: --radius-sm, --radius-md, --radius-lg, --shadow-card, --transition
+For Recharts props that need concrete color strings, use 'var(--chart-1)' etc. directly — Recharts renders SVG so CSS variables work in fill/stroke props.
+
+CSS CLASSES (the design system is already defined in App.css — use these, do not reinvent them):
+- Shell: .app-container, .app-header, .app-content, .app-title, .app-header-side
+- Tabs: .app-tabs, .tab-btn, .tab-btn.active (horizontally scrollable on mobile)
+- Cards: .card (hover lift + shadow), .card-title, .metric-value
+- KPIs: .kpi-card (accent bar), .kpi-label, .kpi-value, .delta-up, .delta-down
+- Badges: .badge, .badge-success, .badge-warning, .badge-danger
+- Insights: .section-title, .insight-panel, .insight-item
+- Grids: .grid-2, .grid-3, .grid-4 (mobile-first: 1 column on phones, expand at 640px/1024px)
+- Charts: .chart-container (width:100%, height:300px)
+- Controls: .icon-btn, .btn-ghost, .btn-primary, .input-field
+- Loading: .skeleton (shimmer placeholder for loading states)
+- Tables: .data-table
+
+UI QUALITY BAR for every dashboard tab:
+- Lead with a row of .kpi-card metrics (with .delta-up/.delta-down vs previous period when dates exist), then charts in responsive grids, then a .section-title "Insights" + .insight-panel with 2-3 data-driven observations.
+- Mobile-first: everything must read well in a single column on a phone; use the responsive grid classes rather than fixed widths.
+- Use .skeleton placeholders while the protected data hook is loading, and friendly empty states when there are no rows.
+- Format numbers/currency/dates for humans (e.g., 12.4k, $1,234.50, MMM d) using Intl or date-fns.
 
 PROTECTED DATA MODEL:
 - Real dashboard rows are server-side only in api/_data and are exposed through the protected /api/dashboard-data endpoint after HttpOnly cookie auth.
@@ -59,7 +76,7 @@ RULES:
 1. Always include ALL files needed — components AND the updated App.tsx that imports and renders them.
 2. App.tsx MUST wrap the entire app with <AuthProvider> from './components/AuthProvider'.
 3. App.tsx MUST use the useAuth() hook to check isAuthenticated. Show <LoginPage> when not authenticated, show dashboard when authenticated.
-4. App.tsx header MUST be the master OpenBoard shell: centered <h1 className="app-title">OpenBoard</h1>, with user.username and logout button on the right.
+4. App.tsx header MUST be the master OpenBoard shell: centered <h1 className="app-title">OpenBoard</h1>, with user.username, <ThemeToggle />, and the logout button on the right.
 5. NEVER rename the app header to an individual dashboard title. Individual dashboard names belong only in tab labels and dashboard content headings.
 6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components. If a dashboard with the same id, label, or component already exists in CURRENT App.tsx, UPDATE it in place — never append a second tab entry or a duplicate import. Each dashboard id, tab label, and component import MUST appear at most once in App.tsx.
 7. Dashboard navigation MUST use accessible tab semantics: the tab container has role="tablist"; each tab button has role="tab", aria-selected, aria-controls, and a stable id; each active panel has role="tabpanel" and aria-labelledby.
@@ -76,7 +93,7 @@ RULES:
 17. App.tsx is at the root (e.g., --- FILE: App.tsx ---).
 18. You may add brief explanations BEFORE //CODE_START or AFTER //CODE_END, but NEVER inside the code boundaries.
 19. NEVER remove or skip AuthProvider/LoginPage — authentication is required on every dashboard.
-20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, or src/hooks/useProtectedDashboardData.ts.
+20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, or src/components/ThemeToggle.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 
 EXAMPLE OUTPUT:
@@ -92,12 +109,12 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, change }: MetricCardProps) {
   return (
-    <div className="card">
-      <p className="card-title">{title}</p>
-      <p className="metric-value">{value}</p>
+    <div className="card kpi-card">
+      <p className="kpi-label">{title}</p>
+      <p className="kpi-value">{value}</p>
       {change !== undefined && (
-        <p style={{ color: change >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-          {change >= 0 ? '+' : ''}{change}%
+        <p className={change >= 0 ? 'delta-up' : 'delta-down'}>
+          {change >= 0 ? '▲ +' : '▼ '}{change}% vs last period
         </p>
       )}
     </div>
@@ -109,6 +126,7 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
 import './App.css'
 import { AuthProvider, useAuth } from './components/AuthProvider'
 import { LoginPage } from './components/LoginPage'
+import { ThemeToggle } from './components/ThemeToggle'
 import { MetricCard } from './components/MetricCard'
 
 function DashboardContent() {
@@ -121,10 +139,12 @@ function DashboardContent() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>Dashboard</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="app-header-side" />
+        <h1 className="app-title">OpenBoard</h1>
+        <div className="app-header-side" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem' }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{user?.username}</span>
-          <button type="button" onClick={logout} style={{ background: 'transparent', border: '1px solid #1e1e2e', color: '#9090a0', padding: '0.375rem 0.75rem', borderRadius: '6px', cursor: 'pointer' }}>Logout</button>
+          <ThemeToggle />
+          <button type="button" className="btn-ghost" onClick={logout}>Logout</button>
         </div>
       </header>
       <main className="app-content">
