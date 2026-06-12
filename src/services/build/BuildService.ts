@@ -48,7 +48,9 @@ function runCommand(
 
 export class BuildService {
   static async install(projectDir: string, onProgress?: ProgressCallback): Promise<BuildResult> {
-    const { code, stderr } = await runCommand('npm', ['install'], projectDir, 120_000, onProgress);
+    // Cold-cache installs on slow machines/CI runners routinely exceed 2
+    // minutes; npm itself reports real failures well before this ceiling.
+    const { code, stderr } = await runCommand('npm', ['install'], projectDir, 600_000, onProgress);
     if (code !== 0) return { success: false, error: stderr };
     return { success: true };
   }
@@ -80,7 +82,7 @@ export class BuildService {
   }
 
   static async build(projectDir: string, onProgress?: ProgressCallback): Promise<BuildResult> {
-    const { code, stderr } = await runCommand('npx', ['vite', 'build'], projectDir, 120_000, onProgress);
+    const { code, stderr } = await runCommand('npx', ['vite', 'build'], projectDir, 300_000, onProgress);
     if (code !== 0) return { success: false, error: stderr };
     return { success: true, outputDir: 'dist' };
   }

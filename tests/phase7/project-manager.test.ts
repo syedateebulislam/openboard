@@ -178,7 +178,7 @@ describe('ProjectManager', () => {
       const installResult = await pm.install(scaffoldResult.projectDir!);
       expect(installResult.success).toBe(true);
       expect(existsSync(join(scaffoldResult.projectDir!, 'node_modules'))).toBe(true);
-    }, 120_000); // npm install can be slow
+    }, 660_000); // cold-cache npm install on CI runners can take minutes
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -203,7 +203,7 @@ describe('ProjectManager', () => {
       expect(buildResult.success).toBe(true);
       // Vite produces a dist/ folder
       expect(existsSync(join(scaffoldResult.projectDir!, 'dist'))).toBe(true);
-    }, 120_000);
+    }, 720_000); // install + vite build on cold CI runners
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -555,6 +555,6 @@ export default function App() {
       expect(info!.hasNodeModules).toBe(true);
       expect(info!.hasDist).toBe(true);
       expect(info!.hasGit).toBe(true);
-    }, 180_000);
+    }, 900_000); // full lifecycle: cold install + build + git on CI runners
   });
 });
