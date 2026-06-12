@@ -224,7 +224,7 @@ type LLMSettingsStep = 'provider' | 'apiKey' | 'model' | 'ollamaHost' | 'saving'
 
 const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back' }> = [
   { label: 'OpenAI API Key', value: 'openai' },
-  { label: 'OpenAI Codex / ChatGPT subscription', value: 'openai-codex' },
+  { label: '(Recommended) OpenAI Codex / ChatGPT subscription', value: 'openai-codex' },
   { label: 'Anthropic', value: 'anthropic' },
   { label: 'Moonshot AI', value: 'moonshot' },
   { label: 'Ollama', value: 'ollama' },
