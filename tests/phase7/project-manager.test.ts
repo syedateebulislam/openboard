@@ -345,6 +345,20 @@ describe('ProjectManager', () => {
       expect(result.error).toContain('App.tsx');
     });
 
+    it('should refresh stale product-owned shell files from the template', async () => {
+      const board = makeBoard({ name: 'shell-stale' });
+      const scaffoldResult = await pm.scaffold(board);
+      writeFileSync(join(scaffoldResult.projectDir!, 'src', 'App.css'), '/* stale shell */', 'utf-8');
+      unlinkSync(join(scaffoldResult.projectDir!, 'src', 'components', 'BrandLogo.tsx'));
+
+      const result = pm.preDeployChecks(scaffoldResult.projectDir!);
+
+      expect(result.success).toBe(true);
+      const css = readFileSync(join(scaffoldResult.projectDir!, 'src', 'App.css'), 'utf-8');
+      expect(css).toContain('--accent: #c17f53');
+      expect(existsSync(join(scaffoldResult.projectDir!, 'src', 'components', 'BrandLogo.tsx'))).toBe(true);
+    });
+
     it('should repair missing protected dashboard data support files', async () => {
       const board = makeBoard({ name: 'data-api-missing' });
       const scaffoldResult = await pm.scaffold(board);

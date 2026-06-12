@@ -474,6 +474,11 @@ export class ProjectManager {
     //     across (re)generations — agent retries can add the same tab twice.
     this.dedupeAppDashboards(projectDir, onProgress);
 
+    // 4c. Refresh product-owned shell files (design system + brand assets)
+    //     from the template so existing workspaces pick up OpenBoard UI
+    //     updates without a re-scaffold.
+    this.syncProductShellFiles(projectDir, onProgress);
+
     // 5. Ensure auth/data protection files exist
     const authProviderPath = join(projectDir, 'src', 'components', 'AuthProvider.tsx');
     const loginPagePath = join(projectDir, 'src', 'components', 'LoginPage.tsx');
@@ -642,6 +647,40 @@ export class ProjectManager {
         success: false,
         error: `Could not read dashboard credentials: ${error.message}. Open Settings > Reset dashboard login, save credentials, then run /deploy again.`,
       };
+    }
+  }
+
+  /**
+   * Product-owned shell files: the OpenBoard design system and brand assets
+   * every generated app must share. Refreshed from the template on each
+   * pre-deploy pass so existing workspaces pick up UI updates. LLM-owned
+   * files (App.tsx, dashboard components) are never touched here. None of
+   * these files contain {{TEMPLATE}} variables, so a raw copy is safe.
+   */
+  private static readonly PRODUCT_SHELL_FILES = [
+    'src/App.css',
+    'src/index.css',
+    'src/components/BrandLogo.tsx',
+    'src/components/ThemeToggle.tsx',
+    'src/hooks/useTheme.ts',
+    'public/favicon.svg',
+  ];
+
+  private syncProductShellFiles(projectDir: string, onProgress?: ProgressCallback): void {
+    for (const relativePath of ProjectManager.PRODUCT_SHELL_FILES) {
+      const sourcePath = join(this.templatesDir, ...relativePath.split('/'));
+      if (!existsSync(sourcePath)) continue;
+      const targetPath = join(projectDir, ...relativePath.split('/'));
+      try {
+        const source = readFileSync(sourcePath, 'utf-8');
+        const current = existsSync(targetPath) ? readFileSync(targetPath, 'utf-8') : null;
+        if (current === source) continue;
+        mkdirSync(dirname(targetPath), { recursive: true });
+        writeFileSync(targetPath, source, 'utf-8');
+        onProgress?.(`  Refreshed product shell file: ${relativePath}`);
+      } catch {
+        // Best-effort — the build step surfaces real problems.
+      }
     }
   }
 
