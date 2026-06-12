@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop-v2]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      # Lifecycle tests commit inside scaffolded projects; runners ship with
+      # no git identity, which ensureCommitAuthor correctly rejects.
+      - run: |
+          git config --global user.name "OpenBoard CI"
+          git config --global user.email "ci@openboard.dev"
       - run: npm ci
       - run: npm run lint
       - run: npm run build
