@@ -21,8 +21,8 @@ describe('Accessibility safeguards', () => {
   it('should keep template focus and contrast hooks visible', () => {
     const css = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.css'), 'utf-8');
 
-    expect(css).toContain('--text-secondary: #c7c7d2');
-    expect(css).toContain('--border: #3f4058');
+    expect(css).toContain('--text-secondary: #c9c3b9');
+    expect(css).toContain('--border: #56524a');
     expect(css).toContain(':focus-visible');
     expect(css).toContain('outline: 2px solid');
   });

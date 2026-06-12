@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useAuth } from './AuthProvider';
+import { BrandLogo } from './BrandLogo';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -33,7 +34,10 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-primary)', padding: '1rem' }}>
       <div className="card" style={{ width: '100%', maxWidth: '400px' }} role="main" aria-label="Login form">
-        <h1 className="app-title" style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>OpenBoard</h1>
+        <div className="app-brand" style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
+          <BrandLogo size={28} />
+          <h1 className="app-title" style={{ fontSize: '1.5rem' }}>OpenBoard</h1>
+        </div>
         <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
           Sign in to view your dashboards
         </p>

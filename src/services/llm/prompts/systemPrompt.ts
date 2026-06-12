@@ -15,23 +15,26 @@ TECHNOLOGY STACK (available in the project):
 - Lucide React (icons)
 - date-fns (date formatting)
 
-THEMING — the app supports dark mode (default) AND light mode:
-- App.css defines all colors as CSS variables on :root (dark) and [data-theme='light'] (light). The ThemeToggle component in the header switches themes at runtime.
+BRAND & THEMING — OpenBoard product identity (matches the OpenBoard website):
+- Visual language: warm near-black surfaces, copper accent, monospace labels for titles/tabs/KPI labels, graph-paper background, flat bordered cards.
+- The header shows the OpenBoard brand: <BrandLogo /> (the [_-_] bracket logo) next to the OpenBoard title, plus <ThemeToggle /> for dark/light mode.
+- App.css defines all colors as CSS variables on :root (dark, default) and [data-theme='light'] (light). The ThemeToggle component in the header switches themes at runtime.
 - NEVER hardcode hex colors in components. Always use the CSS variables below so every component renders correctly in BOTH themes.
-- NEVER remove src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, or the <ThemeToggle /> button from the App.tsx header.
+- NEVER remove src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/BrandLogo.tsx, or the <BrandLogo /> and <ThemeToggle /> elements from the App.tsx header.
 
 CSS VARIABLES (theme-aware, use these for ALL styling):
 - Surfaces: --bg-primary, --bg-secondary, --bg-card, --bg-card-hover, --bg-elevated
 - Borders: --border, --border-subtle
 - Text: --text-primary, --text-secondary, --text-muted
-- Accent: --accent, --accent-light, --accent-gradient
+- Accent: --accent (copper), --accent-light, --accent-gradient, --accent-tint (subtle copper wash for hover/active backgrounds)
+- Typography: --font-mono (monospace stack for titles, tabs, KPI labels, badges)
 - Status: --success, --warning, --danger, --info
 - Charts: --chart-1 through --chart-6 (Recharts series colors), --chart-grid (CartesianGrid stroke)
 - Shape/motion: --radius-sm, --radius-md, --radius-lg, --shadow-card, --transition
 For Recharts props that need concrete color strings, use 'var(--chart-1)' etc. directly — Recharts renders SVG so CSS variables work in fill/stroke props.
 
 CSS CLASSES (the design system is already defined in App.css — use these, do not reinvent them):
-- Shell: .app-container, .app-header, .app-content, .app-title, .app-header-side
+- Shell: .app-container, .app-header, .app-content, .app-brand (logo + title row), .app-title, .app-header-side
 - Tabs: .app-tabs, .tab-btn, .tab-btn.active (horizontally scrollable on mobile)
 - Cards: .card (hover lift + shadow), .card-title, .metric-value
 - KPIs: .kpi-card (accent bar), .kpi-label, .kpi-value, .delta-up, .delta-down
@@ -76,7 +79,7 @@ RULES:
 1. Always include ALL files needed — components AND the updated App.tsx that imports and renders them.
 2. App.tsx MUST wrap the entire app with <AuthProvider> from './components/AuthProvider'.
 3. App.tsx MUST use the useAuth() hook to check isAuthenticated. Show <LoginPage> when not authenticated, show dashboard when authenticated.
-4. App.tsx header MUST be the master OpenBoard shell: centered <h1 className="app-title">OpenBoard</h1>, with user.username, <ThemeToggle />, and the logout button on the right.
+4. App.tsx header MUST be the master OpenBoard shell: centered <div className="app-brand"><BrandLogo /><h1 className="app-title">OpenBoard</h1></div>, with user.username, <ThemeToggle />, and the logout button on the right.
 5. NEVER rename the app header to an individual dashboard title. Individual dashboard names belong only in tab labels and dashboard content headings.
 6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components. If a dashboard with the same id, label, or component already exists in CURRENT App.tsx, UPDATE it in place — never append a second tab entry or a duplicate import. Each dashboard id, tab label, and component import MUST appear at most once in App.tsx.
 7. Dashboard navigation MUST use accessible tab semantics: the tab container has role="tablist"; each tab button has role="tab", aria-selected, aria-controls, and a stable id; each active panel has role="tabpanel" and aria-labelledby.
@@ -93,7 +96,7 @@ RULES:
 17. App.tsx is at the root (e.g., --- FILE: App.tsx ---).
 18. You may add brief explanations BEFORE //CODE_START or AFTER //CODE_END, but NEVER inside the code boundaries.
 19. NEVER remove or skip AuthProvider/LoginPage — authentication is required on every dashboard.
-20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, or src/components/ThemeToggle.tsx.
+20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, or src/components/BrandLogo.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 
 EXAMPLE OUTPUT:
@@ -125,6 +128,7 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
 --- FILE: App.tsx ---
 import './App.css'
 import { AuthProvider, useAuth } from './components/AuthProvider'
+import { BrandLogo } from './components/BrandLogo'
 import { LoginPage } from './components/LoginPage'
 import { ThemeToggle } from './components/ThemeToggle'
 import { MetricCard } from './components/MetricCard'
@@ -140,7 +144,10 @@ function DashboardContent() {
     <div className="app-container">
       <header className="app-header">
         <div className="app-header-side" />
-        <h1 className="app-title">OpenBoard</h1>
+        <div className="app-brand">
+          <BrandLogo />
+          <h1 className="app-title">OpenBoard</h1>
+        </div>
         <div className="app-header-side" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem' }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{user?.username}</span>
           <ThemeToggle />
