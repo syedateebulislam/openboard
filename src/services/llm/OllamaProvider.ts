@@ -10,7 +10,7 @@
  *  - Standard chat completions with streaming support
  */
 
-import { Ollama } from 'ollama';
+import type { Ollama } from 'ollama';
 import type {
   LLMProvider,
   LLMCompletionOptions,
@@ -21,12 +21,23 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class OllamaProvider implements LLMProvider {
   readonly name = 'ollama';
-  private client: Ollama;
+  private clientPromise?: Promise<Ollama>;
+  private host: string;
   private model: string;
 
   constructor(host: string, model: string) {
-    this.client = new Ollama({ host });
+    this.host = host;
     this.model = model;
+  }
+
+  /** Lazily import and instantiate the Ollama SDK on first use to keep TUI startup fast. */
+  private getClient(): Promise<Ollama> {
+    if (!this.clientPromise) {
+      this.clientPromise = import('ollama').then(
+        ({ Ollama }) => new Ollama({ host: this.host }),
+      );
+    }
+    return this.clientPromise;
   }
 
   /**
@@ -36,7 +47,8 @@ export class OllamaProvider implements LLMProvider {
    */
   async validate(): Promise<LLMValidationResult> {
     try {
-      await this.client.list();
+      const client = await this.getClient();
+      await client.list();
       return { valid: true };
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : String(err);
@@ -53,7 +65,8 @@ export class OllamaProvider implements LLMProvider {
    * Returns model names from Ollama's /api/tags endpoint.
    */
   async listModels(): Promise<string[]> {
-    const response = await this.client.list();
+    const client = await this.getClient();
+    const response = await client.list();
     return response.models.map((m) => m.name);
   }
 
@@ -62,7 +75,8 @@ export class OllamaProvider implements LLMProvider {
    * Returns the full assistant message content as a string.
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
-    const response = await this.client.chat({
+    const client = await this.getClient();
+    const response = await client.chat({
       model: this.model,
       messages: options.messages.map((m) => ({
         role: m.role,
@@ -83,7 +97,8 @@ export class OllamaProvider implements LLMProvider {
    * Yields { text, done } chunks. chunk.done indicates stream completion.
    */
   async *stream(options: LLMCompletionOptions): AsyncIterable<LLMStreamChunk> {
-    const stream = await this.client.chat({
+    const client = await this.getClient();
+    const stream = await client.chat({
       model: this.model,
       messages: options.messages.map((m) => ({
         role: m.role,

@@ -8,7 +8,7 @@
  *  - No list models endpoint — returns hardcoded known model list
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type {
   LLMProvider,
   LLMCompletionOptions,
@@ -20,12 +20,23 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'anthropic';
-  private client: Anthropic;
+  private clientPromise?: Promise<Anthropic>;
+  private apiKey: string;
   private model: string;
 
   constructor(apiKey: string, model: string) {
-    this.client = new Anthropic({ apiKey });
+    this.apiKey = apiKey;
     this.model = model;
+  }
+
+  /** Lazily import and instantiate the Anthropic SDK on first use to keep TUI startup fast. */
+  private getClient(): Promise<Anthropic> {
+    if (!this.clientPromise) {
+      this.clientPromise = import('@anthropic-ai/sdk').then(
+        ({ default: Anthropic }) => new Anthropic({ apiKey: this.apiKey }),
+      );
+    }
+    return this.clientPromise;
   }
 
   /**
@@ -35,7 +46,8 @@ export class AnthropicProvider implements LLMProvider {
    */
   async validate(): Promise<LLMValidationResult> {
     try {
-      await this.client.messages.create({
+      const client = await this.getClient();
+      await client.messages.create({
         model: this.model,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
@@ -78,7 +90,8 @@ export class AnthropicProvider implements LLMProvider {
   async complete(options: LLMCompletionOptions): Promise<string> {
     const { system, msgs } = this.separateSystem(options.messages);
     try {
-      const response = await this.client.messages.create({
+      const client = await this.getClient();
+      const response = await client.messages.create({
         model: this.model,
         max_tokens: options.maxTokens ?? 4096,
         system,
@@ -108,7 +121,8 @@ export class AnthropicProvider implements LLMProvider {
    */
   async *stream(options: LLMCompletionOptions): AsyncIterable<LLMStreamChunk> {
     const { system, msgs } = this.separateSystem(options.messages);
-    const stream = this.client.messages.stream({
+    const client = await this.getClient();
+    const stream = client.messages.stream({
       model: this.model,
       max_tokens: options.maxTokens ?? 4096,
       system,

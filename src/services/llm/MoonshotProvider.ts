@@ -8,7 +8,7 @@
  * Models: moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k, etc.
  */
 
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import type {
   LLMProvider,
   LLMCompletionOptions,
@@ -19,16 +19,25 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class MoonshotProvider implements LLMProvider {
   readonly name = 'moonshot';
-  private client: OpenAI;
+  private clientPromise?: Promise<OpenAI>;
+  private apiKey: string;
   private model: string;
 
   constructor(apiKey: string, model: string) {
-    // Moonshot uses OpenAI-compatible API
-    this.client = new OpenAI({
-      apiKey,
-      baseURL: 'https://api.moonshot.cn/v1',
-    });
+    this.apiKey = apiKey;
     this.model = model;
+  }
+
+  /** Lazily import and instantiate the OpenAI SDK on first use to keep TUI startup fast. */
+  private getClient(): Promise<OpenAI> {
+    if (!this.clientPromise) {
+      // Moonshot uses OpenAI-compatible API
+      this.clientPromise = import('openai').then(
+        ({ default: OpenAI }) =>
+          new OpenAI({ apiKey: this.apiKey, baseURL: 'https://api.moonshot.cn/v1' }),
+      );
+    }
+    return this.clientPromise;
   }
 
   /**
@@ -40,7 +49,8 @@ export class MoonshotProvider implements LLMProvider {
     try {
       // Test with a minimal completion request instead of list models
       // Some providers don't support model listing
-      const testResponse = await this.client.chat.completions.create({
+      const client = await this.getClient();
+      const testResponse = await client.chat.completions.create({
         model: this.model,
         messages: [{ role: 'user', content: 'hi' }],
         max_tokens: 1,
@@ -62,7 +72,8 @@ export class MoonshotProvider implements LLMProvider {
    * List available Moonshot models.
    */
   async listModels(): Promise<string[]> {
-    const response = await this.client.models.list();
+    const client = await this.getClient();
+    const response = await client.models.list();
     return response.data.map((m) => m.id);
   }
 
@@ -72,7 +83,8 @@ export class MoonshotProvider implements LLMProvider {
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
     try {
-      const response = await this.client.chat.completions.create({
+      const client = await this.getClient();
+      const response = await client.chat.completions.create({
         model: this.model,
         messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
         temperature: options.temperature ?? 0.7,
@@ -106,7 +118,8 @@ export class MoonshotProvider implements LLMProvider {
    * Yields { text, done } chunks. Final chunk has done: true.
    */
   async *stream(options: LLMCompletionOptions): AsyncIterable<LLMStreamChunk> {
-    const stream = await this.client.chat.completions.create({
+    const client = await this.getClient();
+    const stream = await client.chat.completions.create({
       model: this.model,
       messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
       stream: true,

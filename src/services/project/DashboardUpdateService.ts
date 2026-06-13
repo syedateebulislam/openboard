@@ -205,7 +205,7 @@ ${currentApp}
 Requirements:
 1. Return ONLY an updated App.tsx file block using the required //CODE_START format.
 2. Remove the tab, route/branch, imports, labels, and visible content for "${removedBoard.title}".
-3. Preserve AuthProvider, LoginPage, useAuth, username display, and logout behavior.
+3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
 4. Preserve every remaining dashboard and its imports.
 5. Preserve the centered OpenBoard master header exactly: <h1 className="app-title">OpenBoard</h1>.
 6. Do not modify unrelated styling or auth behavior.`;
@@ -521,7 +521,7 @@ Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
 3. Preserve other dashboard tabs in the shared OpenBoard app.
-4. Preserve AuthProvider, LoginPage, useAuth, username display, and logout behavior.
+4. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
 5. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
 6. Return all changed files using the required //CODE_START format.`;
 
@@ -901,7 +901,7 @@ ${currentApp}
 Requirements:
 1. Add "${board.title}" as its own dashboard tab in the shared OpenBoard UI.
 2. Preserve all existing tabs/components in App.tsx.
-3. Preserve AuthProvider, LoginPage, useAuth, username display, and logout behavior.
+3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
 4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
@@ -939,7 +939,7 @@ ${currentApp}
 Requirements:
 1. Apply the requested change only to the "${board.title}" dashboard tab unless the prompt explicitly asks otherwise.
 2. Preserve other dashboard tabs/components in the shared OpenBoard app.
-3. Preserve AuthProvider, LoginPage, useAuth, username display, and logout behavior.
+3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
 4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.

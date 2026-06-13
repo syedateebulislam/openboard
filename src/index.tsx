@@ -105,7 +105,7 @@ if (cli.flags.version) {
   console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
   console.log(`${B}${F}║${L}        [_-_] O p e n B o a r d        ${F}║${R}`);
   console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
-  console.log(`${B}${F}║${S}                v1.0.3                 ${F}║${R}`);
+  console.log(`${B}${F}║${S}                v1.0.5                 ${F}║${R}`);
   console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
   process.exit(0);
 }

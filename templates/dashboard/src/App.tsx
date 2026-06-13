@@ -19,9 +19,9 @@ function DashboardContent() {
           <BrandLogo />
           <h1 className="app-title">OpenBoard</h1>
         </div>
-        <div className="app-header-side" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem' }}>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-            {user?.username}
+        <div className="app-header-side app-header-actions">
+          <span className="app-greeting">
+            Hi, <strong>{user?.username}</strong>
           </span>
           <ThemeToggle />
           <button type="button" className="btn-ghost" onClick={logout}>

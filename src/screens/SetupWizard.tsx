@@ -68,8 +68,8 @@ interface SetupWizardProps {
 // ---------------------------------------------------------------------------
 
 const LLM_PROVIDERS = [
-  { label: 'OpenAI API Key (GPT-4o, GPT-4 Turbo)', value: 'openai' },
   { label: '(Recommended) OpenAI Codex / ChatGPT subscription (browser login)', value: 'openai-codex' },
+  { label: 'OpenAI API Key (GPT-4o, GPT-4 Turbo)', value: 'openai' },
   { label: 'Anthropic (Claude Sonnet, Opus)', value: 'anthropic' },
   { label: 'Moonshot AI (Kimi 2.5, Kimi models)', value: 'moonshot' },
   { label: 'Ollama (Local, free)', value: 'ollama' },

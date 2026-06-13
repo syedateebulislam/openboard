@@ -11,7 +11,7 @@
  *  - Context window overflow
  */
 
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import type {
   LLMProvider,
   LLMCompletionOptions,
@@ -22,12 +22,23 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = 'openai';
-  private client: OpenAI;
+  private clientPromise?: Promise<OpenAI>;
+  private apiKey: string;
   private model: string;
 
   constructor(apiKey: string, model: string) {
-    this.client = new OpenAI({ apiKey });
+    this.apiKey = apiKey;
     this.model = model;
+  }
+
+  /** Lazily import and instantiate the OpenAI SDK on first use to keep TUI startup fast. */
+  private getClient(): Promise<OpenAI> {
+    if (!this.clientPromise) {
+      this.clientPromise = import('openai').then(
+        ({ default: OpenAI }) => new OpenAI({ apiKey: this.apiKey }),
+      );
+    }
+    return this.clientPromise;
   }
 
   /**
@@ -38,7 +49,8 @@ export class OpenAIProvider implements LLMProvider {
    */
   async validate(): Promise<LLMValidationResult> {
     try {
-      await this.client.models.list();
+      const client = await this.getClient();
+      await client.models.list();
       return { valid: true };
     } catch (err: unknown) {
       const rawMsg = err instanceof Error ? err.message : String(err);
@@ -55,7 +67,8 @@ export class OpenAIProvider implements LLMProvider {
    * List available OpenAI models, filtered to GPT models only.
    */
   async listModels(): Promise<string[]> {
-    const response = await this.client.models.list();
+    const client = await this.getClient();
+    const response = await client.models.list();
     return response.data.map((m) => m.id).filter((id) => id.startsWith('gpt'));
   }
 
@@ -65,7 +78,8 @@ export class OpenAIProvider implements LLMProvider {
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
     try {
-      const response = await this.client.chat.completions.create({
+      const client = await this.getClient();
+      const response = await client.chat.completions.create({
         model: this.model,
         messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
         temperature: options.temperature ?? 0.7,
@@ -99,7 +113,8 @@ export class OpenAIProvider implements LLMProvider {
    * Yields { text, done } chunks. Final chunk has done: true.
    */
   async *stream(options: LLMCompletionOptions): AsyncIterable<LLMStreamChunk> {
-    const stream = await this.client.chat.completions.create({
+    const client = await this.getClient();
+    const stream = await client.chat.completions.create({
       model: this.model,
       messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
       stream: true,
