@@ -1,6 +1,6 @@
 # OpenBoard Architecture
 
-> Version: 1.0.6  
+> Version: 1.0.7  
 > Current branch: develop  
 > Scope: OpenBoard TUI, non-interactive CLI, shared generated dashboard app
 

@@ -1,0 +1,17 @@
+flowchart TB
+    subgraph OB["OpenBoard CLI and TUI (Ink)"]
+        T[TUI screens]
+        AG[Agent commands]
+        S[Services: data, llm, project, deploy]
+    end
+    D[(CSV or JSON data)]
+    L[[Configured LLM provider]]
+    APP[Shared generated React app]
+    GH[(GitHub repo)]
+    V[(Vercel deployment)]
+    D --> S
+    T --> S
+    AG --> S
+    S <--> L
+    S --> APP
+    APP --> GH --> V

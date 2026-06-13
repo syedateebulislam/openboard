@@ -41,7 +41,7 @@ export function WelcomeScreen({ onNavigate }: Props) {
         </Text>
         <Text>
           <Text bold color={UI_COLORS.border}>║</Text>
-          <Text color={UI_COLORS.subtitle}>                v1.0.6                 </Text>
+          <Text color={UI_COLORS.subtitle}>                v1.0.7                 </Text>
           <Text bold color={UI_COLORS.border}>║</Text>
         </Text>
         <Text bold color={UI_COLORS.border}>╚═══════════════════════════════════════╝</Text>
