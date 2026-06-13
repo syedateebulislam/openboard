@@ -151,7 +151,9 @@
    .tabs-toggler and drops down. Glass = translucent --glass-bg + backdrop blur. */
 .app-tabs {
   position: relative;
-  margin: 1.25rem 2rem 0.75rem;
+  /* No horizontal margin: .app-tabs sits inside .app-content's gutter, so the
+     navbar's left/right edges align with the dashboard title, cards, and badge. */
+  margin: 1.25rem 0 0.75rem;
 }
 
 /* The frosted pill bar (desktop default). */
@@ -467,7 +469,7 @@
   .kpi-value { font-size: 1.375rem; }
 
   /* ----- Tabs collapse into a navbar with a toggler ----- */
-  .app-tabs { margin: 0.875rem 1rem 0.625rem; }
+  .app-tabs { margin: 0.875rem 0 0.625rem; }
 
   .tabs-toggler {
     display: flex;
