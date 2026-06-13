@@ -8,8 +8,9 @@ OpenBoard turns CSV/JSON data into a deployed analytics app. It creates one shar
 
 The workflow is:
 
-```text
-Set up providers -> add data source -> internal LLM chat -> deploy
+```mermaid
+flowchart LR
+    A[Set up providers] --> B[Add data source] --> C[Internal LLM chat] --> D[Deploy]
 ```
 
 ## Launch
@@ -157,6 +158,13 @@ Sys: Confirmed. Starting full deploy pipeline...
 ```
 
 The deploy pipeline:
+
+```mermaid
+flowchart TD
+    A[Build generated React app] --> B[Commit and push to GitHub]
+    B --> C[Link and deploy to Vercel]
+    C --> D[Inject dashboard credentials where Vercel auth is available]
+```
 
 1. Build generated React app.
 2. Commit and push to GitHub.

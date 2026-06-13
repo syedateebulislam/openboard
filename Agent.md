@@ -21,16 +21,16 @@ This file is for automation agents, scheduled jobs, and cron-style tools that ne
 
 OpenBoard owns the complete workflow:
 
-```text
-agent command
-  -> parse CSV/JSON
-  -> analyze fields and rows
-  -> call configured internal LLM
-  -> write generated React files
-  -> record prompt history
-  -> build
-  -> push to GitHub
-  -> deploy to Vercel, or rely on Vercel Git integration after push
+```mermaid
+flowchart TD
+    A[agent command] --> B["parse CSV/JSON"]
+    B --> C[analyze fields and rows]
+    C --> D[call configured internal LLM]
+    D --> E[write generated React files]
+    E --> F[record prompt history]
+    F --> G[build]
+    G --> H[push to GitHub]
+    H --> I["deploy to Vercel (or Vercel Git integration after push)"]
 ```
 
 ## Prerequisites

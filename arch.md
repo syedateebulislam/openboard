@@ -8,18 +8,52 @@
 
 OpenBoard is an Ink-based terminal application that generates one shared authenticated React dashboard app. The first dashboard creates the app workspace. Later dashboards are added as tabs in the same generated UI.
 
-```text
-Human TUI flow:
-openboard -> Dashboards -> Add new dashboard to UI -> internal LLM chat -> /deploy
+```mermaid
+flowchart TB
+    subgraph OB["OpenBoard CLI and TUI (Ink)"]
+        T[TUI screens]
+        AG[Agent commands]
+        S[Services: data, llm, project, deploy]
+    end
+    D[(CSV or JSON data)]
+    L[[Configured LLM provider]]
+    APP[Shared generated React app]
+    GH[(GitHub repo)]
+    V[(Vercel deployment)]
+    D --> S
+    T --> S
+    AG --> S
+    S <--> L
+    S --> APP
+    APP --> GH --> V
+```
 
-Agent flow:
-openboard agent create/update -> DashboardUpdateService -> build -> push -> deploy
+**Human TUI flow**
 
-Data refresh flow:
-openboard update --dashboard <selector> -> prompt history -> regenerate -> build -> push -> deploy
+```mermaid
+flowchart LR
+    A([openboard]) --> B[Dashboards] --> C[Add new dashboard to UI] --> D[Internal LLM chat] --> E["/deploy"]
+```
 
-Remove flow:
-Dashboards -> Remove -> DashboardUpdateService.removeDashboard -> LLM App.tsx cleanup -> delete orphaned components + protected data -> registry remove -> build -> push -> deploy
+**Agent flow**
+
+```mermaid
+flowchart LR
+    A["openboard agent create or update"] --> B[DashboardUpdateService] --> C[build] --> D[push] --> E[deploy]
+```
+
+**Data refresh flow**
+
+```mermaid
+flowchart LR
+    A["openboard update --dashboard"] --> B[prompt history] --> C[regenerate] --> D[build] --> E[push] --> F[deploy]
+```
+
+**Remove flow**
+
+```mermaid
+flowchart LR
+    A["Dashboards: Remove"] --> B[removeDashboard] --> C[LLM App.tsx cleanup] --> D[delete orphaned components and protected data] --> E[registry remove] --> F[build, push, deploy]
 ```
 
 ## Top-Level Modules
@@ -247,43 +281,24 @@ Supported providers:
 
 ## Data And Generation Flow
 
-```text
-DataParserService
-  -> parse CSV/JSON
-DataAnalyzer
-  -> infer types, row count, column stats, categorical hints
-LLM prompt
-  -> current board context
-  -> registered dashboard list
-  -> current App.tsx when available
-  -> data summary
-LLM response
-  -> codeExtractor extracts //CODE_START blocks
-TemplateService
-  -> writes generated files into shared app workspace
-PromptHistoryService
-  -> records prompt, source, written files, data summary
+```mermaid
+flowchart TD
+    A["DataParserService: parse CSV/JSON"] --> B["DataAnalyzer: infer types, row count, column stats, categorical hints"]
+    B --> C["LLM prompt: board context, registered dashboards, current App.tsx, data summary"]
+    C --> D[LLM response]
+    D --> E["codeExtractor: extract //CODE_START blocks"]
+    E --> F["TemplateService: write generated files into shared workspace"]
+    F --> G["PromptHistoryService: record prompt, source, written files, data summary"]
 ```
 
 ## Deployment Flow
 
-```text
-ProjectManager.preDeployChecks
-  -> relax generated app TypeScript checks
-  -> ensure .env in .gitignore
-  -> verify auth components
-ProjectManager.build
-  -> npm install if needed
-  -> generated app build
-GitHubService
-  -> commit
-  -> repair invalid openboard@local author if needed
-  -> push to origin or create repo
-VercelService
-  -> validate auth
-  -> link
-  -> inject DASHBOARD_USERNAME, DASHBOARD_PASSWORD_HASH, JWT_SECRET
-  -> vercel --prod
+```mermaid
+flowchart TD
+    A["ProjectManager.preDeployChecks: relax TS checks, ensure .env in .gitignore, verify auth, sync shell files"] --> B["ProjectManager.build: npm install if needed, generated app build"]
+    B --> C["GitHubService: commit, repair invalid author, push to origin or create repo"]
+    C --> D["VercelService: validate auth, link, inject DASHBOARD_USERNAME / DASHBOARD_PASSWORD_HASH / JWT_SECRET, vercel --prod"]
+    D --> E["DeployVerificationService: health-check the deploy URL"]
 ```
 
 If GitHub push succeeds but direct Vercel CLI auth fails, OpenBoard reports that Vercel Git integration may still deploy the pushed commit.
