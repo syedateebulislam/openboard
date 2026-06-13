@@ -663,6 +663,7 @@ export class ProjectManager {
     'src/components/BrandLogo.tsx',
     'src/components/ThemeToggle.tsx',
     'src/components/LoginPage.tsx',
+    'src/components/DashboardTabs.tsx',
     'src/hooks/useTheme.ts',
     'public/favicon.svg',
   ];

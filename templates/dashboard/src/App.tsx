@@ -1,15 +1,21 @@
 import './App.css'
+import { useState } from 'react'
 import { AuthProvider, useAuth } from './components/AuthProvider'
 import { BrandLogo } from './components/BrandLogo'
 import { LoginPage } from './components/LoginPage'
 import { ThemeToggle } from './components/ThemeToggle'
+import { DashboardTabs } from './components/DashboardTabs'
+import type { DashboardTabItem } from './components/DashboardTabs'
 
 function DashboardContent() {
   const { isAuthenticated, user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState('welcome');
 
   if (!isAuthenticated) {
     return <LoginPage />;
   }
+
+  const tabs: DashboardTabItem[] = [{ id: 'welcome', label: 'Welcome' }];
 
   return (
     <div className="app-container">
@@ -29,18 +35,16 @@ function DashboardContent() {
           </button>
         </div>
       </header>
-      <nav className="app-tabs" role="tablist" aria-label="Dashboard tabs">
-        <button type="button" className="tab-btn active" role="tab" aria-selected="true" aria-controls="panel-welcome" id="tab-welcome">
-          Welcome
-        </button>
-      </nav>
-      <main className="app-content" role="tabpanel" id="panel-welcome" aria-labelledby="tab-welcome">
-        <div className="card kpi-card">
-          <p className="kpi-label">Welcome</p>
-          <p className="kpi-value">Dashboard Ready</p>
-          <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-            Your OpenBoard master UI is ready. Add dashboards as tabs from OpenBoard.
-          </p>
+      <main className="app-content">
+        <DashboardTabs tabs={tabs} activeId={activeTab} onSelect={setActiveTab} />
+        <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+          <div className="card kpi-card">
+            <p className="kpi-label">Welcome</p>
+            <p className="kpi-value">Dashboard Ready</p>
+            <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+              Your OpenBoard master UI is ready. Add dashboards as tabs from OpenBoard.
+            </p>
+          </div>
         </div>
       </main>
     </div>

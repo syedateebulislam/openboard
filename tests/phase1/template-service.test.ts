@@ -47,6 +47,7 @@ describe('TemplateService', () => {
         'src/App.css',
         'src/index.css',
         'src/components/LoginPage.tsx',
+        'src/components/DashboardTabs.tsx',
         'src/components/AuthProvider.tsx',
         'src/hooks/useProtectedDashboardData.ts',
         'src/types/auth.ts',

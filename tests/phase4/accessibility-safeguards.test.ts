@@ -8,14 +8,18 @@ import { buildDataProcessingPrompt } from '../../src/services/llm/prompts/dataPr
 
 describe('Accessibility safeguards', () => {
   it('should scaffold dashboard tabs with semantic tab roles', () => {
+    const tabs = readFileSync(join(process.cwd(), 'templates/dashboard/src/components/DashboardTabs.tsx'), 'utf-8');
     const app = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.tsx'), 'utf-8');
 
-    expect(app).toContain('role="tablist"');
-    expect(app).toContain('role="tab"');
-    expect(app).toContain('aria-selected="true"');
-    expect(app).toContain('aria-controls="panel-welcome"');
+    // Accessible tab semantics live in the shared DashboardTabs shell component.
+    expect(tabs).toContain('role="tablist"');
+    expect(tabs).toContain('role="tab"');
+    expect(tabs).toContain('aria-selected');
+    expect(tabs).toContain('aria-controls={`panel-${tab.id}`}');
+    // App.tsx renders the component and an associated tab panel.
+    expect(app).toContain('<DashboardTabs');
     expect(app).toContain('role="tabpanel"');
-    expect(app).toContain('aria-labelledby="tab-welcome"');
+    expect(app).toContain('aria-labelledby={`tab-${activeTab}`}');
   });
 
   it('should keep template focus and contrast hooks visible', () => {
@@ -28,7 +32,7 @@ describe('Accessibility safeguards', () => {
   });
 
   it('should instruct the LLM to preserve accessible tabs and charts', () => {
-    expect(SYSTEM_PROMPT).toContain('role="tablist"');
+    expect(SYSTEM_PROMPT).toContain('DashboardTabs');
     expect(SYSTEM_PROMPT).toContain('aria-selected');
     expect(SYSTEM_PROMPT).toContain('role="tabpanel"');
     expect(SYSTEM_PROMPT).toContain('must not rely on color alone');

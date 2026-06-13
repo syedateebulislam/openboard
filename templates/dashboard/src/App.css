@@ -44,6 +44,7 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-card-hover: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
   --header-blur-bg: rgba(11, 11, 13, 0.82);
+  --glass-bg: rgba(19, 19, 22, 0.52);
   --transition: 150ms ease;
 }
 
@@ -78,6 +79,7 @@
   --shadow-card: 0 1px 2px rgba(40, 32, 20, 0.06);
   --shadow-card-hover: 0 10px 30px -18px rgba(40, 32, 20, 0.35);
   --header-blur-bg: rgba(247, 245, 241, 0.82);
+  --glass-bg: rgba(255, 253, 250, 0.58);
 }
 
 /* ----- App shell (graph-paper background, like the website) ----- */
@@ -144,25 +146,63 @@
   font-weight: 600;
 }
 
-/* ----- Tabs (liquid-glass pill bar; scrollable on small screens) ----- */
+/* ----- Tabs: responsive liquid-glass navbar -----
+   Desktop: a frosted pill bar (.tabs-list). Mobile: collapses behind
+   .tabs-toggler and drops down. Glass = translucent --glass-bg + backdrop blur. */
 .app-tabs {
+  position: relative;
+  margin: 1.25rem 2rem 0.75rem;
+}
+
+/* The frosted pill bar (desktop default). */
+.tabs-list {
   display: flex;
   gap: 0.375rem;
   align-items: center;
-  /* floating glass bar, gutter-aligned with content; bottom margin separates it from charts */
-  margin: 1.25rem 2rem 0.75rem;
   padding: 0.375rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background-color: var(--header-blur-bg);
-  background-image: linear-gradient(180deg, var(--bg-card-hover), var(--bg-secondary));
-  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
-  backdrop-filter: blur(12px) saturate(140%);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
   overflow-x: auto;
   scrollbar-width: none;
 }
-.app-tabs::-webkit-scrollbar { display: none; }
+.tabs-list::-webkit-scrollbar { display: none; }
+
+/* Navbar toggler — hidden on desktop, shown on mobile. */
+.tabs-toggler { display: none; }
+
+.tabs-toggler-icon {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.tabs-toggler-icon span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform var(--transition), opacity var(--transition);
+}
+.app-tabs.open .tabs-toggler-icon span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.app-tabs.open .tabs-toggler-icon span:nth-child(2) { opacity: 0; }
+.app-tabs.open .tabs-toggler-icon span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .tab-btn {
   padding: 0.5rem 1.125rem;
@@ -421,11 +461,51 @@
 /* ----- Mobile shell adjustments ----- */
 @media (max-width: 640px) {
   .app-header { padding: 0.875rem 1rem; grid-template-columns: auto 1fr auto; }
-  .app-tabs { margin: 0.875rem 1rem 0.625rem; padding: 0.3125rem; }
   .app-greeting { font-size: 0.8125rem; }
   .app-content { padding: 0.25rem 1rem 1rem; }
   .metric-value { font-size: 1.5rem; }
   .kpi-value { font-size: 1.375rem; }
+
+  /* ----- Tabs collapse into a navbar with a toggler ----- */
+  .app-tabs { margin: 0.875rem 1rem 0.625rem; }
+
+  .tabs-toggler {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--glass-bg);
+    box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    backdrop-filter: blur(18px) saturate(180%);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Collapsed by default; .open drops the list down as a glass menu. */
+  .tabs-list {
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    margin-top: 0.375rem;
+    overflow: visible;
+    box-shadow: var(--shadow-card-hover);
+  }
+  .app-tabs.open .tabs-list { display: flex; }
+
+  .tabs-list .tab-btn {
+    width: 100%;
+    text-align: left;
+    border-radius: var(--radius-md);
+  }
 }
 
 /* ----- Reduced motion ----- */

@@ -82,7 +82,7 @@ RULES:
 4. App.tsx header MUST be the master OpenBoard shell: centered <div className="app-brand"><BrandLogo /><h1 className="app-title">OpenBoard</h1></div>, and on the right a <div className="app-header-side app-header-actions"> containing a greeting <span className="app-greeting">Hi, <strong>{user?.username}</strong></span>, then <ThemeToggle />, then the logout button. Always render the signed-in user as the "Hi, <name>" greeting — never a bare username.
 5. NEVER rename the app header to an individual dashboard title. Individual dashboard names belong only in tab labels and dashboard content headings.
 6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components. If a dashboard with the same id, label, or component already exists in CURRENT App.tsx, UPDATE it in place — never append a second tab entry or a duplicate import. Each dashboard id, tab label, and component import MUST appear at most once in App.tsx.
-7. Dashboard navigation MUST use accessible tab semantics: the tab container has role="tablist"; each tab button has role="tab", aria-selected, aria-controls, and a stable id; each active panel has role="tabpanel" and aria-labelledby.
+7. Dashboard navigation MUST be rendered with the shared <DashboardTabs> shell component from './components/DashboardTabs' — never hand-roll the tab bar or its buttons. Build a tabs array of { id, label } items, track the active id with useState, and render <DashboardTabs tabs={tabs} activeId={activeId} onSelect={setActiveId} />. Directly below it render the active dashboard inside <div role="tabpanel" id={\`panel-\${activeId}\`} aria-labelledby={\`tab-\${activeId}\`}>. DashboardTabs already provides role=tablist/tab, aria-selected, aria-controls, stable ids, the frosted-glass pill bar, and the responsive mobile navbar/toggler — do NOT duplicate that markup or restyle it. If a CURRENT App.tsx still hand-rolls the tab bar inline (its own <nav className="app-tabs"> with mapped tab buttons), migrate it to <DashboardTabs> while preserving every tab and panel — this tab-bar migration is the one allowed exception to the minimal-edit guidance in rule 9.
 8. When removing a dashboard, remove only that dashboard's tab/content/imports. Preserve the OpenBoard header shell and all other tabs.
 9. Do not rebuild App.tsx from scratch if CURRENT App.tsx is provided. Treat it as the source of truth and minimally extend or edit it.
 10. Use Recharts for all charts. Use ResponsiveContainer for responsive sizing.
@@ -96,7 +96,7 @@ RULES:
 17. App.tsx is at the root (e.g., --- FILE: App.tsx ---).
 18. You may add brief explanations BEFORE //CODE_START or AFTER //CODE_END, but NEVER inside the code boundaries.
 19. NEVER remove or skip AuthProvider/LoginPage — authentication is required on every dashboard.
-20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, or src/components/BrandLogo.tsx.
+20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, or src/components/BrandLogo.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 
 EXAMPLE OUTPUT:
@@ -127,18 +127,24 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
 
 --- FILE: App.tsx ---
 import './App.css'
+import { useState } from 'react'
 import { AuthProvider, useAuth } from './components/AuthProvider'
 import { BrandLogo } from './components/BrandLogo'
 import { LoginPage } from './components/LoginPage'
 import { ThemeToggle } from './components/ThemeToggle'
+import { DashboardTabs } from './components/DashboardTabs'
+import type { DashboardTabItem } from './components/DashboardTabs'
 import { MetricCard } from './components/MetricCard'
 
 function DashboardContent() {
   const { isAuthenticated, user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState('overview');
 
   if (!isAuthenticated) {
     return <LoginPage />;
   }
+
+  const tabs: DashboardTabItem[] = [{ id: 'overview', label: 'Overview' }];
 
   return (
     <div className="app-container">
@@ -155,10 +161,13 @@ function DashboardContent() {
         </div>
       </header>
       <main className="app-content">
-        <div className="grid-3">
-          <MetricCard title="Revenue" value="$12,450" change={8.2} />
-          <MetricCard title="Users" value="1,234" change={-2.1} />
-          <MetricCard title="Orders" value="456" change={15.3} />
+        <DashboardTabs tabs={tabs} activeId={activeTab} onSelect={setActiveTab} />
+        <div role="tabpanel" id={\`panel-\${activeTab}\`} aria-labelledby={\`tab-\${activeTab}\`}>
+          <div className="grid-3">
+            <MetricCard title="Revenue" value="$12,450" change={8.2} />
+            <MetricCard title="Users" value="1,234" change={-2.1} />
+            <MetricCard title="Orders" value="456" change={15.3} />
+          </div>
         </div>
       </main>
     </div>
