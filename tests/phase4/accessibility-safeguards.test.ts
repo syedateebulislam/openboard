@@ -31,6 +31,16 @@ describe('Accessibility safeguards', () => {
     expect(css).toContain('outline: 2px solid');
   });
 
+  it('should keep the tab bar backward compatible with pre-DashboardTabs apps', () => {
+    const css = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.css'), 'utf-8');
+
+    // Apps generated before <DashboardTabs> render .tab-btn directly inside
+    // .app-tabs. This fallback styles that legacy structure as the glass bar so
+    // an un-migrated App.tsx that receives the new synced App.css does not lose
+    // its navbar before it is regenerated.
+    expect(css).toContain('.app-tabs:has(> .tab-btn)');
+  });
+
   it('should instruct the LLM to preserve accessible tabs and charts', () => {
     expect(SYSTEM_PROMPT).toContain('DashboardTabs');
     expect(SYSTEM_PROMPT).toContain('aria-selected');

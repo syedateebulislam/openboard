@@ -156,6 +156,27 @@
   margin: 1.25rem 0 0.75rem;
 }
 
+/* Backward compatibility (pre-1.0.5 apps): before the DashboardTabs component,
+   tab buttons were rendered directly inside .app-tabs with no .tabs-list wrapper.
+   If an upgraded app receives this new App.css but its App.tsx has not yet been
+   regenerated to use <DashboardTabs>, style .app-tabs itself as the frosted pill
+   bar so the navbar never visually collapses. New apps put .tab-btn inside
+   .tabs-list, so this direct-child rule never matches them. */
+.app-tabs:has(> .tab-btn) {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+  padding: 0.375rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
 /* The frosted pill bar (desktop default). */
 .tabs-list {
   display: flex;
