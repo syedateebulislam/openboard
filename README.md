@@ -76,6 +76,7 @@ Internal chat commands start with `/`.
 | `/update` | Regenerate from latest linked data using prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
 | `/history` | Show prompt history for the dashboard |
+| `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/status` | Show dashboard/project status |
 | `/config` | Open settings |
@@ -120,8 +121,10 @@ See [Agent.md](./Agent.md) for the full automation contract.
 openboard start
 openboard update --dashboard <id-or-name-or-title>
 openboard update --all
+openboard rollback --dashboard <id-or-name-or-title>
 openboard agent create --data <file> --name <title> [--type custom] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
+openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help
 ```

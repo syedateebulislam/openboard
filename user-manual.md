@@ -136,6 +136,7 @@ Commands must start with `/`.
 | `/update` | Regenerate from latest linked data using saved prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
 | `/history` | Show prompt history |
+| `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/status` | Show dashboard/project status |
 | `/config` | Open settings |
@@ -200,6 +201,7 @@ Settings supports:
 - Update LLM provider
 - Re-enter GitHub token
 - Re-enter Vercel token
+- Reset dashboard login
 - Run full setup wizard
 
 Use Settings when tokens cannot be decrypted or external auth fails.
@@ -225,6 +227,7 @@ openboard agent create --data ./data.csv --name "Sales"
 openboard agent update --dashboard sales --prompt "Add a monthly revenue trend"
 openboard update --dashboard sales
 openboard update --all
+openboard rollback --dashboard sales
 ```
 
 ## Troubleshooting

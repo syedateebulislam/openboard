@@ -1,7 +1,7 @@
 # OpenBoard Architecture
 
 > Version: 1.0.5  
-> Current branch: develop-v2  
+> Current branch: develop  
 > Scope: OpenBoard TUI, non-interactive CLI, shared generated dashboard app
 
 ## Overview
@@ -45,27 +45,34 @@ src/
     StatusBadge.tsx
   services/
     auth/AuthService.ts
+    build/BuildService.ts
     config/ConfigService.ts
     data/DataParserService.ts
     data/DataAnalyzer.ts
     deploy/GitHubService.ts
     deploy/VercelService.ts
     deploy/PreviewService.ts
+    deploy/DeployVerificationService.ts
     llm/LLMService.ts
     llm/OpenAIProvider.ts
     llm/OpenAICodexProvider.ts
     llm/AnthropicProvider.ts
     llm/OllamaProvider.ts
     llm/MoonshotProvider.ts
+    llm/prompts/systemPrompt.ts
     project/ProjectManager.ts
     project/BoardRegistryService.ts
     project/PromptHistoryService.ts
     project/DashboardUpdateService.ts
+    project/RunStateService.ts
+    project/ProjectLockService.ts
+    project/pipelinePhases.ts
     template/TemplateService.ts
   utils/
     commandParser.ts
     codeExtractor.ts
     crossSpawn.ts
+    errorCodes.ts
     logger.ts
 templates/dashboard/
 projects/
@@ -84,8 +91,10 @@ openboard
 openboard start
 openboard update --dashboard <selector>
 openboard update --all
+openboard rollback --dashboard <selector>
 openboard agent create --data <file> --name <title> [--type custom] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
+openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help
 ```
@@ -108,6 +117,7 @@ settings
 settings-llm
 settings-github
 settings-vercel
+settings-dashboard-auth
 deploy
 ```
 
@@ -165,6 +175,7 @@ While loading, `LoadingRemark` displays a compact spinner plus a rotating sarcas
 | `/update` | Regenerate using latest data and saved prompt history, then build/push/deploy |
 | `/data` | Parse and summarize linked data source |
 | `/history` | Show prompt history |
+| `/logs` | Show latest operation log |
 | `/doctor` | Show readiness checks |
 | `/status` | Show project/dashboard status |
 | `/config` | Open settings |
