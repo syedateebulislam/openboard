@@ -814,36 +814,54 @@ Requirements:
 
       const allWritten: string[] = [];
       let lastBoard: BoardConfig | undefined;
+      const failures: string[] = [];
       let modified = 0;
-      for (const board of boards) {
+      reporter.log(`Applying to ${boards.length} dashboard(s): "${userPrompt}"`);
+      for (let i = 0; i < boards.length; i++) {
+        const board = boards[i];
+        const label = `${board.title} (${i + 1}/${boards.length})`;
         const dataFile = dataFileOverride ? resolve(dataFileOverride) : board.dataFiles[0];
         if (!dataFile) {
-          reporter.log(`Skipping "${board.title}": no linked data source.`);
+          reporter.log(`Skipping ${label}: no linked data source.`);
+          failures.push(`${board.title}: no linked data source`);
           continue;
         }
-        reporter.log(`\n=== Modifying ${board.title} ===`);
-        reporter.phase('parse');
-        reporter.log(`Reading data: ${dataFile}`);
-        const parsed = await DataParserService.parse(dataFile);
-        reporter.phase('analyze');
-        const summary = DataAnalyzer.generateSummary(DataAnalyzer.analyze(parsed));
-        const result = await this.generateForBoard(
-          board,
-          projectDir,
-          dataFile,
-          parsed,
-          summary,
-          userPrompt,
-          reporter,
-          undefined,
-        );
-        allWritten.push(...result.writtenFiles);
-        lastBoard = result.board;
-        modified += 1;
+        try {
+          reporter.log(`\n=== Modifying ${label} ===`);
+          reporter.phase('parse');
+          reporter.log(`Reading data: ${dataFile}`);
+          const parsed = await DataParserService.parse(dataFile);
+          reporter.phase('analyze');
+          const summary = DataAnalyzer.generateSummary(DataAnalyzer.analyze(parsed));
+          const result = await this.generateForBoard(
+            board,
+            projectDir,
+            dataFile,
+            parsed,
+            summary,
+            userPrompt,
+            reporter,
+            undefined,
+          );
+          allWritten.push(...result.writtenFiles);
+          lastBoard = result.board;
+          modified += 1;
+          reporter.log(`Updated ${label}.`);
+        } catch (boardError: any) {
+          // Isolate per-board failures so one bad dashboard doesn't abort the
+          // whole batch before the shared deploy.
+          reporter.log(`Failed to modify ${label}: ${boardError.message}`);
+          failures.push(`${board.title}: ${boardError.message}`);
+        }
       }
 
       if (modified === 0) {
-        return this.failure(undefined, {}, 'No dashboards could be modified (none have a linked data source).');
+        return this.failure(undefined, {}, `No dashboards were modified. ${failures.join('; ')}`.trim());
+      }
+      if (failures.length > 0) {
+        reporter.log(`\nDeploying ${modified} updated dashboard(s); ${failures.length} failed: ${failures.join('; ')}`);
+      } else {
+        reporter.log(`\nAll ${modified} dashboard(s) updated. Building and deploying once...`);
       }
 
       return await this.buildPushDeploy(

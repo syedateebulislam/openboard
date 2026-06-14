@@ -21,15 +21,14 @@ import type { ProjectManager } from '../../src/services/project/ProjectManager.j
 import type { TemplateService } from '../../src/services/template/TemplateService.js';
 
 // Stub the LLM so generation returns a valid //CODE_START block without network.
-const completeMock = vi.fn(async () =>
-  [
-    '//CODE_START',
-    '--- FILE: components/Generated.tsx ---',
-    'export default function Generated() { return null }',
-    '--- END FILE ---',
-    '//CODE_END',
-  ].join('\n'),
-);
+const VALID_CODE = [
+  '//CODE_START',
+  '--- FILE: components/Generated.tsx ---',
+  'export default function Generated() { return null }',
+  '--- END FILE ---',
+  '//CODE_END',
+].join('\n');
+const completeMock = vi.fn(async () => VALID_CODE);
 vi.mock('../../src/services/llm/LLMService.js', () => ({
   LLMService: { createProvider: () => ({ complete: completeMock }) },
 }));
@@ -129,7 +128,9 @@ describe('Bulk dashboard operations', () => {
   const configDir = makeTempDir('cfg');
 
   beforeEach(() => {
-    completeMock.mockClear();
+    // Reset implementation too, so a per-test mockResolvedValue can't leak.
+    completeMock.mockReset();
+    completeMock.mockResolvedValue(VALID_CODE);
     runsDir = makeTempDir('runs');
     workspace = makeTempDir('ws');
     // A configured LLM provider so the internal createLLMConfig() does not throw;
@@ -187,6 +188,39 @@ describe('Bulk dashboard operations', () => {
       expect(projectManager.deploy).toHaveBeenCalledTimes(1);
       // History recorded for each board.
       expect(history.append).toHaveBeenCalledTimes(2);
+    });
+
+    it('isolates a per-board generation failure and still deploys the rest', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      // First board's generation returns no code block -> throws, is caught.
+      completeMock.mockResolvedValueOnce('sorry, no files this time');
+      const boards = [
+        makeBoard({ name: 'a', title: 'A', dataFiles: [csv] }),
+        makeBoard({ name: 'b', title: 'B', dataFiles: [csv] }),
+      ];
+      const registry = fakeRegistry(boards, workspace);
+      const { service, projectManager } = makeService({ registry, runsDir });
+
+      const result = await service.updateAllWithPrompt('add a footer');
+
+      expect(result.success).toBe(true);          // second board succeeded
+      expect(completeMock).toHaveBeenCalledTimes(2); // both attempted
+      expect(projectManager.deploy).toHaveBeenCalledTimes(1); // still one deploy
+    });
+
+    it('fails only when every board fails', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      completeMock.mockResolvedValueOnce('no files at all');
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv] })];
+      const registry = fakeRegistry(boards, workspace);
+      const { service, projectManager } = makeService({ registry, runsDir });
+
+      const result = await service.updateAllWithPrompt('add a footer');
+
+      expect(result.success).toBe(false);
+      expect(projectManager.deploy).not.toHaveBeenCalled();
     });
 
     it('skips dashboards with no linked data source', async () => {
