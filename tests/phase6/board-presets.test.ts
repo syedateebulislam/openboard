@@ -49,9 +49,10 @@ describe('Board Presets', () => {
       expect(health.dataHints).toContain('sleep_hours');
     });
 
-    it('should have custom preset with empty defaults', () => {
+    it('should have custom preset with no data hints but a real default prompt', () => {
       const custom = getPreset('custom');
-      expect(custom.defaultPrompt).toBe('');
+      // Prompts now live in prompts/dashboard/*.md; custom is no longer empty.
+      expect(custom.defaultPrompt.length).toBeGreaterThan(0);
       expect(custom.dataHints).toEqual([]);
     });
 

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
+import { resolveInitialIntent } from '../../config/dashboardPrompts.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
@@ -289,6 +290,7 @@ export class DashboardUpdateService {
     try {
       const dataFile = resolve(options.dataFile);
       const title = options.title?.trim() || titleFromDataFile(dataFile);
+      const typeProvided = options.type !== undefined;
       const type = options.type ?? 'custom';
       getPreset(type);
 
@@ -358,7 +360,7 @@ export class DashboardUpdateService {
 
       const writtenFiles = await this.generateAndWriteFiles(
         initializedBoard,
-        this.buildInitialPrompt(initializedBoard, dataSummary, options.prompt),
+        this.buildInitialPrompt(initializedBoard, dataSummary, options.prompt, typeProvided),
         reporter,
         run,
       );
@@ -869,12 +871,15 @@ Requirements:
     }
   }
 
-  private buildInitialPrompt(board: BoardConfig, dataSummary: string, userPrompt?: string): string {
+  private buildInitialPrompt(
+    board: BoardConfig,
+    dataSummary: string,
+    userPrompt?: string,
+    typeProvided = true,
+  ): string {
     const currentApp = this.readCurrentApp(board.outputDir);
     const boards = this.registry.listBoards();
-    const preset = getPreset(board.type);
-    const intent = userPrompt?.trim() || preset.defaultPrompt ||
-      'Create a polished, mobile-first analytics dashboard from this dataset. Start with KPI summary cards for the most important aggregate metrics (with deltas vs the previous period where dates exist), followed by 2-4 charts that best fit the data shape (trends over time, category breakdowns, top-N rankings), and an "Insights" section with 2-3 auto-generated observations such as spikes, outliers, or notable trends. Use a responsive card grid that collapses to one column on small screens, touch-friendly tooltips, rounded cards with subtle shadows, and clear number formatting.';
+    const intent = resolveInitialIntent({ userPrompt, type: board.type, typeProvided });
 
     return `Generate an initial dashboard tab for "${board.title}" inside the existing OpenBoard master React app.
 

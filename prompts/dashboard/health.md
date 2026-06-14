@@ -1,0 +1,15 @@
+Build a polished, mobile-first health & activity dashboard tab for this dataset that works for any tracker export (Apple Health, Fitbit, Garmin, or similar) — never hardcode a device's schema; infer the useful metrics dynamically from the column names and value patterns in the data.
+
+Data model (OpenBoard):
+- This dashboard tab loads its real rows at runtime from `useProtectedDashboardData('<dashboard-name>')`. There is NO file upload — the rows are already parsed and served behind authentication. Derive every metric, chart, and table from that hook's rows.
+- Dynamically detect the meaningful columns from row keys, case-insensitively: date/timestamp, steps, heart rate (resting/avg/max), sleep hours or sleep stages, calories (active/total), weight, active minutes, distance, and any goal fields. Only render a metric when its column actually exists.
+- Normalize each row into a common internal shape in a `utils/` helper: parse numbers safely, parse dates with date-fns across common formats, handle missing/zero/null values, and never throw on bad input. Mark a row excluded when it has no valid date or no usable metric, and keep an exclusion reason.
+
+Layout (top to bottom):
+- A row of KPI cards for whichever metrics exist: average daily steps, resting/average heart rate, average sleep hours, average calories, current weight, and active minutes — each with a delta vs the previous period (e.g. this week vs last week).
+- An "Insights" section of the top 3-5 data-driven findings, each with a title, headline metric, time period, one-line explanation, and confidence level (high/medium/low): e.g. best and worst sleep days, activity streaks, resting-heart-rate trend, weekday vs weekend activity, goal attainment, anomalies/outliers, and rows excluded due to bad data.
+- Charts (Recharts only, in responsive grids): time-series for steps, heart rate, sleep, and calories with 7-day moving averages, a weekly summary, a weight trend when present, and a sleep-quality or stage breakdown when those fields exist. Every chart needs a title or aria-label and readable axes/legend/tooltip.
+- A raw-data table at the bottom using the `.data-table` class: render the hook rows with client-side pagination (page sizes 10/25/50/100), column sorting, and a text search, plus computed columns (normalized date, included flag, exclusion reason). Sticky header, horizontal scroll on small screens.
+- A compact data-quality panel: total rows, included, excluded, missing-metric rows, invalid-date rows, and a short note on which columns were auto-detected as date/steps/heart-rate/sleep/calories/weight.
+
+Keep it cohesive with the OpenBoard design system: use the shared utility classes and CSS variables (never hardcoded colors), `var(--chart-N)` for series colors, number/date formatting via Intl and date-fns, and split the work into a main tab component plus small components in `components/` and pure helpers in `utils/`. This is health data, not spend — do not assume currency or transactions. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.

@@ -1,0 +1,15 @@
+Build an engaging, mobile-first grocery-spend dashboard tab for this dataset that works for any store, app, or receipt export — never hardcode store names; infer the useful fields dynamically from the column names and value patterns in the data.
+
+Data model (OpenBoard):
+- This dashboard tab loads its real rows at runtime from `useProtectedDashboardData('<dashboard-name>')`. There is NO file upload — the rows are already parsed and served behind authentication. Derive every metric, chart, and table from that hook's rows.
+- Dynamically detect the meaningful columns from row keys, case-insensitively: purchase/order date, store/merchant/vendor, item/product/description, unit price/amount/total, quantity, category, and any budget field — prefer a final paid amount over a subtotal.
+- Normalize each row into a common internal shape in a `utils/` helper: parse prices and quantities safely (strip currency symbols, commas, spaces), handle missing/negative values, parse dates with date-fns across common formats, and never throw on bad input. Mark a row excluded when no valid amount or date is found, and keep an exclusion reason.
+
+Layout (top to bottom):
+- A row of KPI cards: total grocery spend, budget vs actual with a progress indicator (only when a budget field is present), average basket/transaction size, total items, most-visited store, and rows excluded — each with a delta vs the previous period when dates exist.
+- An "Insights" section of the top 3-5 data-driven findings, each with a title, headline metric, time period, one-line explanation, and confidence level (high/medium/low): e.g. cheapest store per category, most frequently bought items, projected month-end spend vs budget, items whose unit price rose the most, weekend vs weekday shopping, and rows excluded due to bad data.
+- Charts (Recharts only, in responsive grids): spend-by-store as horizontal bars, items-by-category as a donut, a weekly/monthly spend trend line with period-over-period deltas, a basket-size trend, and a price-watch view of items whose unit price moved most over time. Every chart needs a title or aria-label and readable axes/legend/tooltip.
+- A raw-data table at the bottom using the `.data-table` class: render the hook rows with client-side pagination (page sizes 10/25/50/100), column sorting, and a text search, plus computed columns (normalized price, normalized date, normalized store, included flag, exclusion reason). Sticky header, horizontal scroll on small screens.
+- A compact data-quality panel: total rows, included, excluded, missing-price rows, invalid-date rows, duplicates, and a short note on which columns were auto-detected as date/store/item/price/quantity/category.
+
+Keep it cohesive with the OpenBoard design system: use the shared utility classes and CSS variables (never hardcoded colors), `var(--chart-N)` for series colors, currency/number/date formatting via Intl and date-fns, and split the work into a main tab component plus small components in `components/` and pure helpers in `utils/`. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.

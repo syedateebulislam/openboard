@@ -305,8 +305,10 @@ if (!command || command === 'start') {
       process.exit(1);
     }
 
-    const type = (cli.flags.type ?? 'custom') as 'health' | 'finance' | 'grocery' | 'custom';
-    if (!['health', 'finance', 'grocery', 'custom'].includes(type)) {
+    // Leave type undefined when --type is omitted so the create flow can pick
+    // the distinct "agent default" prompt instead of silently using 'custom'.
+    const type = cli.flags.type as 'health' | 'finance' | 'grocery' | 'custom' | undefined;
+    if (type !== undefined && !['health', 'finance', 'grocery', 'custom'].includes(type)) {
       const error = 'Invalid --type. Use one of: health, finance, grocery, custom.';
       if (jsonMode) printJson({ success: false, action: 'create', error, errorCode: 'E_VALIDATION' });
       else console.error(error);
