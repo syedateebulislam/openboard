@@ -705,39 +705,20 @@ Requirements:
         return this.failure(run, { board }, lock.error ?? 'Project lock failed');
       }
 
-      const updatedInputBoard: BoardConfig = {
-        ...board,
-        outputDir: projectDir,
-        dataFiles: [dataFile, ...board.dataFiles.filter((file) => file !== dataFile)],
-        dataSummary: latestSummary,
-      };
-      await this.writeProtectedData(updatedInputBoard, parsed, latestSummary, reporter.progress);
-
-      const prompt = this.buildPromptUpdatePrompt(updatedInputBoard, latestSummary, userPrompt);
-      const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, reporter, run);
-      if (writtenFiles.length === 0) {
-        return this.failure(run, { board: updatedInputBoard }, 'LLM did not return any writable files.');
-      }
+      const { board: updatedBoard, writtenFiles } = await this.generateForBoard(
+        board,
+        projectDir,
+        dataFile,
+        parsed,
+        latestSummary,
+        userPrompt,
+        reporter,
+        run,
+      );
       if (run) {
         run.writtenFiles = writtenFiles;
         this.runs.save(run);
       }
-
-      const updatedBoard: BoardConfig = {
-        ...updatedInputBoard,
-        components: [...new Set([...updatedInputBoard.components, ...writtenFiles])],
-        generatedAt: new Date().toISOString(),
-      };
-      this.registry.upsertBoard(updatedBoard);
-      this.history.append({
-        boardId: updatedBoard.id,
-        boardName: updatedBoard.name,
-        boardTitle: updatedBoard.title,
-        source: 'manual',
-        prompt: userPrompt,
-        writtenFiles,
-        dataSummary: latestSummary,
-      });
 
       return await this.buildPushDeploy(
         updatedBoard,
@@ -748,6 +729,210 @@ Requirements:
       );
     } catch (error: any) {
       return this.failure(run, { board }, error.message);
+    } finally {
+      lock?.release();
+    }
+  }
+
+  /**
+   * Generate and write a single board's files from a user prompt against
+   * already-parsed data, then record the board in the registry + prompt
+   * history. Does NOT acquire a lock, build, or deploy — callers compose those.
+   * Shared by single-board updates and the bulk "modify all" flow so they
+   * deploy the shared workspace exactly once. Throws if the LLM writes nothing.
+   */
+  private async generateForBoard(
+    board: BoardConfig,
+    projectDir: string,
+    dataFile: string,
+    parsed: Awaited<ReturnType<typeof DataParserService.parse>>,
+    dataSummary: string,
+    userPrompt: string,
+    reporter: PipelineReporter,
+    run: RunRecord | undefined,
+  ): Promise<{ board: BoardConfig; writtenFiles: string[] }> {
+    const updatedInputBoard: BoardConfig = {
+      ...board,
+      outputDir: projectDir,
+      dataFiles: [dataFile, ...board.dataFiles.filter((file) => file !== dataFile)],
+      dataSummary,
+    };
+    await this.writeProtectedData(updatedInputBoard, parsed, dataSummary, reporter.progress);
+
+    const prompt = this.buildPromptUpdatePrompt(updatedInputBoard, dataSummary, userPrompt);
+    const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, reporter, run);
+    if (writtenFiles.length === 0) {
+      throw new Error('LLM did not return any writable files.');
+    }
+
+    const updatedBoard: BoardConfig = {
+      ...updatedInputBoard,
+      components: [...new Set([...updatedInputBoard.components, ...writtenFiles])],
+      generatedAt: new Date().toISOString(),
+    };
+    this.registry.upsertBoard(updatedBoard);
+    this.history.append({
+      boardId: updatedBoard.id,
+      boardName: updatedBoard.name,
+      boardTitle: updatedBoard.title,
+      source: 'manual',
+      prompt: userPrompt,
+      writtenFiles,
+      dataSummary,
+    });
+
+    return { board: updatedBoard, writtenFiles };
+  }
+
+  /**
+   * Apply one prompt to EVERY registered dashboard, then build/push/deploy the
+   * shared workspace exactly once. Used by the TUI "Modify all dashboards" chat
+   * and `openboard agent update --all --prompt "..."`.
+   */
+  async updateAllWithPrompt(
+    userPrompt: string,
+    onProgress?: UpdateProgress,
+    dataFileOverride?: string,
+  ): Promise<DashboardUpdateResult> {
+    const reporter = this.makeReporter(onProgress);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
+    try {
+      const boards = this.listBoards();
+      if (boards.length === 0) {
+        return { success: false, error: 'No dashboards are registered.', errorCode: 'E_VALIDATION' };
+      }
+      const projectDir = this.registry.getSharedProjectDir() || boards[0].outputDir;
+      if (!projectDir) {
+        return { success: false, error: 'No generated app workspace found.', errorCode: 'E_UNKNOWN' };
+      }
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return { success: false, error: lock.error ?? 'Project lock failed', errorCode: 'E_LOCKED' };
+      }
+
+      const allWritten: string[] = [];
+      let lastBoard: BoardConfig | undefined;
+      let modified = 0;
+      for (const board of boards) {
+        const dataFile = dataFileOverride ? resolve(dataFileOverride) : board.dataFiles[0];
+        if (!dataFile) {
+          reporter.log(`Skipping "${board.title}": no linked data source.`);
+          continue;
+        }
+        reporter.log(`\n=== Modifying ${board.title} ===`);
+        reporter.phase('parse');
+        reporter.log(`Reading data: ${dataFile}`);
+        const parsed = await DataParserService.parse(dataFile);
+        reporter.phase('analyze');
+        const summary = DataAnalyzer.generateSummary(DataAnalyzer.analyze(parsed));
+        const result = await this.generateForBoard(
+          board,
+          projectDir,
+          dataFile,
+          parsed,
+          summary,
+          userPrompt,
+          reporter,
+          undefined,
+        );
+        allWritten.push(...result.writtenFiles);
+        lastBoard = result.board;
+        modified += 1;
+      }
+
+      if (modified === 0) {
+        return this.failure(undefined, {}, 'No dashboards could be modified (none have a linked data source).');
+      }
+
+      return await this.buildPushDeploy(
+        { ...(lastBoard ?? boards[0]), outputDir: projectDir },
+        [...new Set(allWritten)],
+        `Modify all dashboards: ${new Date().toISOString()}`,
+        reporter,
+        undefined,
+      );
+    } catch (error: any) {
+      return this.failure(undefined, {}, error.message);
+    } finally {
+      lock?.release();
+    }
+  }
+
+  /**
+   * Remove EVERY dashboard: reset the generated app to the empty OpenBoard
+   * shell, delete all dashboard components + protected data, clear the registry
+   * + prompt history, then build/push/deploy the shared workspace once. The
+   * workspace folder and GitHub/Vercel project are kept. Used by the TUI
+   * "Remove all dashboards" option and `openboard agent remove --all`.
+   */
+  async removeAllDashboards(onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+    const reporter = this.makeReporter(onProgress);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
+    try {
+      const boards = this.listBoards();
+      if (boards.length === 0) {
+        return { success: false, error: 'No dashboards are registered.', errorCode: 'E_VALIDATION' };
+      }
+      const projectDir = this.registry.getSharedProjectDir() || boards[0].outputDir;
+      if (!projectDir) {
+        // No generated workspace — registry-only removal.
+        for (const board of boards) this.registry.removeBoard(board.id);
+        reporter.log('Removed all dashboards from the registry. No generated app workspace was found.');
+        return { success: true };
+      }
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return { success: false, error: lock.error ?? 'Project lock failed', errorCode: 'E_LOCKED' };
+      }
+
+      reporter.phase('generate');
+      reporter.log('Resetting the generated app to the empty OpenBoard shell...');
+      await this.templateService.restoreAppShell(projectDir);
+
+      reporter.phase('write');
+      const removedFiles: string[] = [];
+      for (const board of boards) {
+        for (const rawPath of board.components) {
+          const normalized = rawPath.replace(/\\/g, '/');
+          if (!/^components\/.+\.tsx$/.test(normalized)) continue;     // dashboard components only
+          if (/AuthProvider|LoginPage|ThemeToggle|BrandLogo/.test(normalized)) continue; // never the shell
+          try {
+            await this.templateService.deleteGeneratedFile(projectDir, normalized);
+            removedFiles.push(normalized);
+          } catch {
+            // Path not allowlisted / unsafe — skip rather than risk a wrong delete.
+          }
+        }
+        await this.templateService.deleteProtectedDashboardData(projectDir, board.name);
+      }
+      reporter.log(`Removed ${removedFiles.length} generated component file(s) and all protected data.`);
+
+      for (const board of boards) this.registry.removeBoard(board.id);
+      reporter.log('Cleared the dashboard registry.');
+
+      const placeholder: BoardConfig = {
+        id: 'all',
+        name: 'openboard-workspace',
+        title: 'OpenBoard',
+        type: 'custom',
+        outputDir: projectDir,
+        dataFiles: [],
+        components: [],
+        createdAt: new Date().toISOString(),
+      };
+      return await this.buildPushDeploy(
+        placeholder,
+        ['App.tsx', ...removedFiles],
+        `Remove all dashboards: ${new Date().toISOString()}`,
+        reporter,
+        undefined,
+      );
+    } catch (error: any) {
+      return this.failure(undefined, {}, error.message);
     } finally {
       lock?.release();
     }

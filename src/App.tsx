@@ -483,6 +483,7 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('welcome');
   const [currentBoard, setCurrentBoard] = useState<BoardConfig>(defaultBoard);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
+  const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
 
   const navigate = (s: Screen) => setScreen(s);
@@ -497,6 +498,7 @@ export function App() {
     if (result.success) {
       setCurrentBoard(result.board);
       setShouldAutoGenerate(true);
+      setAllBoardsMode(false);
       navigate('chat');
     } else {
       setScaffoldError(result.error || 'Failed to scaffold project');
@@ -506,6 +508,16 @@ export function App() {
   const handleBoardSelected = useCallback((board: BoardConfig) => {
     setCurrentBoard(board);
     setShouldAutoGenerate(false);
+    setAllBoardsMode(false);
+    navigate('chat');
+  }, []);
+
+  // "Modify all dashboards" — open the internal chat in all-boards mode, where
+  // each prompt is applied to every dashboard and deployed once.
+  const handleModifyAll = useCallback(() => {
+    setCurrentBoard(defaultBoard);
+    setShouldAutoGenerate(false);
+    setAllBoardsMode(true);
     navigate('chat');
   }, []);
 
@@ -529,14 +541,21 @@ export function App() {
       );
 
     case 'manage-boards':
-      return <ManageBoardsScreen onNavigate={navigate} onBoardSelected={handleBoardSelected} />;
-    
-    case 'chat': 
+      return (
+        <ManageBoardsScreen
+          onNavigate={navigate}
+          onBoardSelected={handleBoardSelected}
+          onModifyAll={handleModifyAll}
+        />
+      );
+
+    case 'chat':
       return (
         <ChatScreen
           board={currentBoard}
           onNavigate={navigate}
           autoGenerateInitial={shouldAutoGenerate}
+          allBoards={allBoardsMode}
         />
       );
     

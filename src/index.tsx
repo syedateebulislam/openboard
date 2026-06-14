@@ -21,6 +21,8 @@ const cli = meow(`
     agent          Agent automation commands:
                      create | onboard   Create dashboard from a data file
                      update             Update a dashboard with a prompt
+                     update --all       Modify every dashboard with one prompt
+                     remove --all       Remove every dashboard (empty the app)
                      list               List registered dashboards
                      status             Show one dashboard's status
                      runs               List recent pipeline runs
@@ -29,7 +31,7 @@ const cli = meow(`
 
   Options
     --dashboard         Dashboard id, name, or title
-    --all               Update all registered dashboards
+    --all               Target all dashboards (regen; with --prompt: modify all; with agent remove: remove all)
     --data              CSV/JSON data source file
     --name              Dashboard display name for creation
     --type              Dashboard type: health, finance, grocery, custom
@@ -46,6 +48,8 @@ const cli = meow(`
     $ openboard update --all
     $ openboard agent create --data ./data/uber.csv --name "Uber Data" --json
     $ openboard agent update --dashboard uber-data --prompt "Add a monthly trend chart"
+    $ openboard agent update --all --prompt "Add a dark footer with a data refresh time"
+    $ openboard agent remove --all --json
     $ openboard agent list --json
     $ openboard agent resume run-2026-06-10-ab12cd34 --json
     $ openboard rollback --dashboard uber-data
@@ -213,6 +217,22 @@ if (!command || command === 'start') {
   const service = makeService();
   const onProgress = lineProgress ?? ((line: string) => console.error(line));
 
+  if (cli.flags.all && cli.flags.prompt) {
+    // Apply one prompt to every dashboard, deploy the shared workspace once.
+    const result = await service.updateAllWithPrompt(cli.flags.prompt, onProgress, cli.flags.data);
+    if (jsonMode) {
+      printJson(result.success ? successPayload('update-all', result) : failurePayload('update-all', result));
+      process.exit(result.success ? 0 : 1);
+    }
+    if (!result.success) {
+      console.error(`Modify-all failed: ${result.error}`);
+      process.exit(1);
+    }
+    console.log('Modified all dashboards.');
+    if (result.deployUrl) console.log(`Deployment: ${result.deployUrl}`);
+    process.exit(0);
+  }
+
   if (cli.flags.all) {
     const results = await service.updateAll(onProgress);
     const failed = results.filter((result) => !result.success);
@@ -354,6 +374,29 @@ if (!command || command === 'start') {
   if (action === 'update') {
     const dashboard = cli.flags.dashboard;
     const prompt = cli.flags.prompt;
+
+    if (cli.flags.all) {
+      // Modify every dashboard with one prompt, deploy the shared workspace once.
+      if (!prompt) {
+        const error = 'Missing required --prompt "..." for agent update --all.';
+        if (jsonMode) printJson({ success: false, action: 'update-all', error, errorCode: 'E_VALIDATION' });
+        else console.error(error);
+        process.exit(1);
+      }
+      const allResult = await service.updateAllWithPrompt(prompt, onProgress, cli.flags.data);
+      if (!allResult.success) {
+        if (jsonMode) printJson(failurePayload('update-all', allResult));
+        else console.error(`Agent modify-all failed: ${allResult.error}`);
+        process.exit(1);
+      }
+      if (jsonMode) printJson(successPayload('update-all', allResult));
+      else {
+        console.log('Modified all dashboards.');
+        if (allResult.deployUrl) console.log(`Deployment: ${allResult.deployUrl}`);
+      }
+      process.exit(0);
+    }
+
     if (!dashboard) {
       const error = 'Missing required --dashboard <id|name|title> for agent update.';
       if (jsonMode) printJson({ success: false, action: 'update', error, errorCode: 'E_VALIDATION' });
@@ -395,6 +438,27 @@ if (!command || command === 'start') {
         console.log('Warning: deployment URL did not pass post-deploy verification.');
       }
       if (result.runId) console.log(`Run id: ${result.runId}`);
+    }
+    process.exit(0);
+  }
+
+  if (action === 'remove') {
+    if (!cli.flags.all) {
+      const error = 'Missing required --all for agent remove (removes every dashboard).';
+      if (jsonMode) printJson({ success: false, action: 'remove-all', error, errorCode: 'E_VALIDATION' });
+      else console.error(error);
+      process.exit(1);
+    }
+    const removeResult = await service.removeAllDashboards(onProgress);
+    if (!removeResult.success) {
+      if (jsonMode) printJson(failurePayload('remove-all', removeResult));
+      else console.error(`Agent remove-all failed: ${removeResult.error}`);
+      process.exit(1);
+    }
+    if (jsonMode) printJson(successPayload('remove-all', removeResult));
+    else {
+      console.log('Removed all dashboards. The generated app now shows the empty OpenBoard shell.');
+      if (removeResult.deployUrl) console.log(`Deployment: ${removeResult.deployUrl}`);
     }
     process.exit(0);
   }
@@ -531,6 +595,8 @@ if (!command || command === 'start') {
   } else {
     console.error('Unknown agent action. Use: openboard agent create --data <file> [--name "..."] [--prompt "..."]');
     console.error('Or: openboard agent update --dashboard <selector> --prompt "..." [--data <file>]');
+    console.error('Or: openboard agent update --all --prompt "..."   (modify every dashboard)');
+    console.error('Or: openboard agent remove --all                  (remove every dashboard)');
     console.error('Or: openboard agent list | status | runs | resume <run-id> | rollback');
   }
   process.exit(1);

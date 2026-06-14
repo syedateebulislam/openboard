@@ -125,9 +125,12 @@ openboard
 openboard start
 openboard update --dashboard <selector>
 openboard update --all
+openboard update --all --prompt "..."           # modify every dashboard with one prompt
 openboard rollback --dashboard <selector>
 openboard agent create --data <file> --name <title> [--type custom] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
+openboard agent update --all --prompt "..." [--json]    # modify every dashboard
+openboard agent remove --all [--json]                   # remove every dashboard (empty the app)
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help
@@ -157,7 +160,7 @@ deploy
 
 Important behavior:
 
-- `manage-boards` is the outside dashboard menu.
+- `manage-boards` is the outside dashboard menu. When dashboards exist it also offers bulk actions: **Modify all** (opens the internal chat in all-boards mode, applying each prompt to every dashboard and deploying once), **Regenerate all** (refresh every dashboard from saved prompt history), and **Remove all** (confirm-gated; resets the app to the empty shell).
 - `create-board` collects preset, data file, and dashboard name.
 - A newly created dashboard opens `ChatScreen` with `autoGenerateInitial=true`.
 - Opening an existing dashboard opens `ChatScreen` with `autoGenerateInitial=false`, so it does not regenerate from scratch.

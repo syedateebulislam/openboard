@@ -143,6 +143,26 @@ Flags:
 | `--data` | no | Override the dashboard's linked data file for this run |
 | `--json` | no | Final result as JSON on stdout; progress logs on stderr |
 
+## Modify All Dashboards With One Prompt
+
+Apply a single instruction to every registered dashboard, then build/push/deploy the shared app once:
+
+```bash
+openboard agent update --all --prompt "Add a footer showing the last data refresh time"
+```
+
+Each dashboard is regenerated from its own linked data with the same prompt; dashboards with no linked data source are skipped. Equivalent non-agent form: `openboard update --all --prompt "..."`.
+
+## Remove All Dashboards
+
+Remove every dashboard at once. The generated app is reset to the empty OpenBoard shell (auth, brand logo, and theme toggle preserved), all dashboard components + protected data are deleted, the registry is cleared, and the app is redeployed once. The workspace folder and GitHub/Vercel project are kept.
+
+```bash
+openboard agent remove --all --json
+```
+
+`--all` is required — there is no single-dashboard `agent remove` (use the TUI for that, or it stays a deliberate bulk-only operation).
+
 ## Refresh From Saved Prompt History
 
 Use this when the data source file has changed and the same dashboard intent should be regenerated without a new user prompt.

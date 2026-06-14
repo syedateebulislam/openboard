@@ -16,7 +16,8 @@ import { ChatMessageComponent } from '../components/ChatMessage.js';
 import { LoadingRemark } from '../components/LoadingRemark.js';
 import { PipelineProgress } from '../components/PipelineProgress.js';
 import { PipelineReporter, PHASE_ORDER } from '../services/project/pipelinePhases.js';
-import type { PipelinePhase } from '../services/project/pipelinePhases.js';
+import type { PipelinePhase, PipelineEventSink } from '../services/project/pipelinePhases.js';
+import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
 import { RunStateService } from '../services/project/RunStateService.js';
 import { parseCommand, HELP_TEXT, COMMANDS_TEXT, CHAT_COMMANDS, formatUnknownCommandMessage } from '../utils/commandParser.js';
 import type { ChatMessage, BoardConfig } from '../types/board.js';
@@ -86,6 +87,8 @@ interface Props {
   onNavigate?: (screen: Screen) => void;
   messages?: ChatMessage[];
   autoGenerateInitial?: boolean;
+  /** All-boards mode: each prompt is applied to every dashboard, deployed once. */
+  allBoards?: boolean;
 }
 
 interface SendToLLMOptions {
@@ -152,11 +155,14 @@ export function ChatScreen({
   onNavigate,
   messages: initialMessages = [],
   autoGenerateInitial = false,
+  allBoards = false,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     newMsg(
       'system',
-      'Type a message to generate components or use slash commands (/help for list)',
+      allBoards
+        ? 'Modify-all mode: each message you send is applied to EVERY dashboard, then the app is deployed once. Slash commands (/deploy, /preview, /status) act on the shared app.'
+        : 'Type a message to generate components or use slash commands (/help for list)',
     ),
     ...initialMessages,
   ]);
@@ -170,7 +176,7 @@ export function ChatScreen({
   const logMsgRef = useRef<string | null>(null);
   const lastOperationLogRef = useRef<string>('');
   const autoGenTriggered = useRef(false);
-  const headerTitle = autoGenerateInitial ? 'New Dashboard' : board.title;
+  const headerTitle = allBoards ? 'All Dashboards' : autoGenerateInitial ? 'New Dashboard' : board.title;
   const headerProvider = llmProvider?.name ?? 'LLM not configured';
   const headerRemark = useMemo(() => pickStaticRemark(), []);
 
@@ -319,25 +325,56 @@ export function ChatScreen({
    * Pass `reporter.progress` wherever an onProgress callback is expected and
    * call `reporter.phase(...)` at stage boundaries.
    */
-  const makePipelineReporter = useCallback((onProgress: (line: string) => void): PipelineReporter => {
-    return new PipelineReporter(onProgress, (event) => {
-      if (event.event === 'result' || event.phase === 'done') {
-        setPipeline(null);
-        return;
-      }
-      if (event.event === 'phase' && event.phase) {
-        setPipeline({ phase: event.phase, pct: event.pct ?? 0, phaseStartedAt: Date.now() });
-      } else if (event.event === 'log' && event.phase && event.pct !== undefined) {
-        setPipeline((prev) => (prev && prev.phase === event.phase ? { ...prev, pct: event.pct! } : prev));
-      }
-    });
+  const pipelineEventSink = useCallback<PipelineEventSink>((event) => {
+    if (event.event === 'result' || event.phase === 'done') {
+      setPipeline(null);
+      return;
+    }
+    if (event.event === 'phase' && event.phase) {
+      setPipeline({ phase: event.phase, pct: event.pct ?? 0, phaseStartedAt: Date.now() });
+    } else if (event.event === 'log' && event.phase && event.pct !== undefined) {
+      setPipeline((prev) => (prev && prev.phase === event.phase ? { ...prev, pct: event.pct! } : prev));
+    }
   }, []);
+
+  const makePipelineReporter = useCallback((onProgress: (line: string) => void): PipelineReporter => {
+    return new PipelineReporter(onProgress, pipelineEventSink);
+  }, [pipelineEventSink]);
 
   const getActiveProjectDir = useCallback((): string => {
     if (board.outputDir) return board.outputDir;
     const sharedDir = new BoardRegistryService().getSharedProjectDir();
     return sharedDir ?? '';
   }, [board.outputDir]);
+
+  // All-boards mode: apply one prompt to every dashboard and deploy once.
+  const runModifyAll = useCallback(async (text: string): Promise<void> => {
+    const projectDir = getActiveProjectDir();
+    if (!projectDir) {
+      addMsg(newMsg('error', 'No generated app workspace found. Create a dashboard first.'));
+      setIsLoading(false);
+      return;
+    }
+    const logId = startLogMsg(`Applying to all dashboards: "${text}"`);
+    const onProgress = createProgressCallback(logId);
+    try {
+      const service = new DashboardUpdateService(undefined, undefined, undefined, undefined, pipelineEventSink);
+      const result = await service.updateAllWithPrompt(text, onProgress);
+      onProgress(
+        result.success
+          ? result.deployUrl
+            ? `Modified all dashboards. Deployed: ${result.deployUrl}`
+            : 'Modified all dashboards.'
+          : `Modify-all failed: ${result.error}`,
+      );
+    } catch (error: any) {
+      onProgress(`Modify-all error: ${error.message}`);
+    } finally {
+      setPipeline(null);
+      finishLog(logId);
+      setIsLoading(false);
+    }
+  }, [getActiveProjectDir, addMsg, startLogMsg, createProgressCallback, pipelineEventSink, finishLog]);
 
   const writeProtectedDataFromSource = useCallback(async (
     dataFile: string,
@@ -1207,10 +1244,14 @@ Requirements:
       // ── LLM message ────────────────────────────────────────────────────────
       if (cmd.type === 'message') {
         setIsLoading(true);
+        if (allBoards) {
+          await runModifyAll(text);
+          return;
+        }
         await sendToLLM(text);
       }
     },
-    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmError, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter],
+    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmError, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll],
   );
 
   // ESC: go back to welcome screen

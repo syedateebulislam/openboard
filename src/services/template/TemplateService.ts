@@ -80,6 +80,18 @@ export class TemplateService {
   }
 
   /**
+   * Reset src/App.tsx to the blank OpenBoard shell from the template. Used by
+   * "remove all dashboards" to deterministically clear every tab while keeping
+   * the auth shell, brand logo, and theme toggle. The template App.tsx has no
+   * {{TEMPLATE}} variables, so a direct copy is safe.
+   */
+  async restoreAppShell(outputDir: string): Promise<void> {
+    const source = resolve(this.templatesDir, 'src', 'App.tsx');
+    const content = await readFile(source, 'utf-8');
+    await this.writeGeneratedFile(outputDir, 'App.tsx', content);
+  }
+
+  /**
    * Write parsed dashboard data for server-only API access.
    * This intentionally writes under api/_data, never src/, so raw rows are not
    * bundled into frontend JavaScript.
