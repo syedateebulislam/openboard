@@ -637,27 +637,49 @@ For the current board "${board.title}":
 
       try {
         let fullContent = '';
+        let receivedContent = false;
 
-        // Stream the response from the LLM
-        for await (const chunk of llmProvider.stream({
-          messages: contextMessages,
-          temperature: 0.7,
-          maxTokens: 4096,
-        })) {
-          fullContent += chunk.text;
-          updateStreamingMsg(streamMsg.id, fullContent, chunk.done);
+        // Liveness ticker. Some providers (notably openai-codex) buffer the
+        // whole response and emit nothing until done — with no feedback the
+        // chat looks frozen at an empty "LLM:" line. Show an elapsed-time
+        // placeholder until the first real text arrives.
+        const startedAt = Date.now();
+        const liveTicker = setInterval(() => {
+          if (receivedContent) return;
+          const elapsed = Math.round((Date.now() - startedAt) / 1000);
+          updateStreamingMsg(
+            streamMsg.id,
+            `⏳ Generating with ${llmProvider.name}… ${elapsed}s elapsed (large models can take a few minutes)`,
+            false,
+          );
+        }, 1000);
 
-          if (chunk.done) break;
-        }
-
-        // If streaming produced no content, fall back to complete()
-        if (!fullContent.trim()) {
-          fullContent = await llmProvider.complete({
+        try {
+          // Stream the response from the LLM
+          for await (const chunk of llmProvider.stream({
             messages: contextMessages,
             temperature: 0.7,
             maxTokens: 4096,
-          });
-          updateStreamingMsg(streamMsg.id, fullContent, true);
+          })) {
+            if (chunk.text) receivedContent = true;
+            fullContent += chunk.text;
+            updateStreamingMsg(streamMsg.id, fullContent, chunk.done);
+
+            if (chunk.done) break;
+          }
+
+          // If streaming produced no content, fall back to complete()
+          if (!fullContent.trim()) {
+            fullContent = await llmProvider.complete({
+              messages: contextMessages,
+              temperature: 0.7,
+              maxTokens: 4096,
+            });
+            receivedContent = true;
+            updateStreamingMsg(streamMsg.id, fullContent, true);
+          }
+        } finally {
+          clearInterval(liveTicker);
         }
 
         // Extract and write any code files from the response
