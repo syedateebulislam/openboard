@@ -23,7 +23,7 @@ import { homedir } from 'node:os';
 // Zod Schema
 // ---------------------------------------------------------------------------
 
-const LLMProviderSchema = z.enum(['openai', 'openai-codex', 'anthropic', 'moonshot', 'ollama']);
+const LLMProviderSchema = z.enum(['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama']);
 
 const LLMConfigSchema = z.object({
   provider: LLMProviderSchema.optional(),
@@ -194,7 +194,7 @@ function validateSet(key: string, value: unknown): void {
   if (key === 'llm.provider') {
     const result = LLMProviderSchema.safeParse(value);
     if (!result.success) {
-      throw new Error(`Invalid provider value: ${String(value)}. Must be one of: openai, openai-codex, anthropic, moonshot, ollama`);
+      throw new Error(`Invalid provider value: ${String(value)}. Must be one of: openai, openai-codex, anthropic, moonshot, gemini, ollama`);
     }
   }
 }

@@ -86,6 +86,8 @@ function getDefaultModel(provider: string): string {
       return 'qwen2.5-coder:7b';
     case 'moonshot':
       return 'moonshot-v1-8k';
+    case 'gemini':
+      return 'gemini-2.5-pro';
     default:
       return 'gpt-4o';
   }

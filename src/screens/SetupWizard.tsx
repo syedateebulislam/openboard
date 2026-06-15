@@ -32,7 +32,7 @@ import { UI_COLORS } from '../theme.js';
 // ---------------------------------------------------------------------------
 
 type WizardStep = 1 | 2 | 3 | 4;
-type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot';
+type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
 
 interface ValidationState {
   status: 'idle' | 'validating' | 'success' | 'error';
@@ -72,6 +72,7 @@ const LLM_PROVIDERS = [
   { label: 'OpenAI API Key (GPT-4o, GPT-4 Turbo)', value: 'openai' },
   { label: 'Anthropic (Claude Sonnet, Opus)', value: 'anthropic' },
   { label: 'Moonshot AI (Kimi 2.5, Kimi models)', value: 'moonshot' },
+  { label: 'Google Gemini (Gemini 2.5 Pro / Flash — AI Pro plan)', value: 'gemini' },
   { label: 'Ollama (Local, free)', value: 'ollama' },
   { label: '← Go Back', value: 'back' },
 ];
@@ -81,6 +82,7 @@ const DEFAULT_MODELS: Record<LLMProviderName, string> = {
   'openai-codex': 'gpt-5.5',
   anthropic: 'claude-sonnet-4-5',
   moonshot: 'moonshot-v1-128k',
+  gemini: 'gemini-2.5-pro',
   ollama: 'qwen2.5-coder:7b',
 };
 
@@ -105,6 +107,11 @@ const MODEL_CHOICES: Record<LLMProviderName, Array<{ label: string; value: strin
     { label: 'Kimi v1-128k (128K context)', value: 'moonshot-v1-128k' },
     { label: 'Kimi v1-32k (32K context)', value: 'moonshot-v1-32k' },
     { label: 'Kimi v1-8k (8K context)', value: 'moonshot-v1-8k' },
+  ],
+  gemini: [
+    { label: 'Gemini 2.5 Pro (Most capable, 1M context — AI Pro plan)', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.5 Flash (Fast, 1M context)', value: 'gemini-2.5-flash' },
+    { label: 'Gemini 2.0 Flash (Fast, 1M context)', value: 'gemini-2.0-flash' },
   ],
   ollama: [
     // 🏆 Best for Code Generation
@@ -290,9 +297,10 @@ function Step1LLMConfig({
           <Text color={UI_COLORS.logo}>Provider: {provider}</Text>
           <Box marginTop={1} flexDirection="column">
             <Text>
-              {provider === 'openai' ? 'OpenAI' : 
-               provider === 'anthropic' ? 'Anthropic' : 
-               provider === 'moonshot' ? 'Moonshot AI' : 
+              {provider === 'openai' ? 'OpenAI' :
+               provider === 'anthropic' ? 'Anthropic' :
+               provider === 'moonshot' ? 'Moonshot AI' :
+               provider === 'gemini' ? 'Google Gemini (AI Studio)' :
                'API'} API Key:
             </Text>
             <TextInput
@@ -300,7 +308,7 @@ function Step1LLMConfig({
               onChange={onApiKeyChange}
               onSubmit={handleKeySubmit}
               mask="*"
-              placeholder={provider === 'moonshot' ? 'sk-...' : 'sk-...'}
+              placeholder={provider === 'gemini' ? 'AIza...' : 'sk-...'}
             />
           </Box>
         </Box>
@@ -714,6 +722,8 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         // For debugging: always show raw error for Moonshot
         if (llmProvider === 'moonshot') {
           errorMsg = `Moonshot error:\n${errorMsg}\n\n(If this doesn't help, check platform.moonshot.cn/console/api-keys)`;
+        } else if (llmProvider === 'gemini') {
+          errorMsg = `Gemini error:\n${errorMsg}\n\n(Get an API key at aistudio.google.com/apikey. Gemini 2.5 Pro needs the Google AI Pro plan or a billing-enabled key.)`;
         } else if (errorMsg.includes('credit balance is too low') || errorMsg.includes('Plans & Billing')) {
           errorMsg = `❌ No credits available!\n\nYour Anthropic account needs credits to use the API.\n\nFix this:\n  1. Go to: console.anthropic.com/settings/plans\n  2. Add billing or purchase credits ($5-10 minimum)\n  3. Try again after credits are added\n\nOr: Use OpenAI or Ollama (free, local) instead.`;
         } else if (errorMsg.includes('authentication_error') || errorMsg.includes('invalid x-api-key')) {

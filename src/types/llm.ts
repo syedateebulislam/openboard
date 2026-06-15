@@ -2,7 +2,7 @@
  * LLM (Large Language Model) type definitions for OpenBoard.
  */
 
-export type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot';
+export type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
 
 /** @deprecated Use LLMProviderName instead */
 export type LLMProvider_Type = LLMProviderName;

@@ -90,12 +90,12 @@ Internal LLM chat for dashboard creation
 
 OpenBoard auto-generates the first dashboard from your data only on this first creation flow.
 
-## Open An Existing Dashboard
+## Modify An Existing Dashboard
 
 1. Open Dashboards.
-2. Select Open: `<dashboard title>`.
+2. Select Modify: `<dashboard title>`.
 
-Opening an existing dashboard does not regenerate the UI from scratch. It opens the internal chat so you can ask for changes.
+Modifying an existing dashboard does not regenerate the UI from scratch. It opens the internal chat so you can ask for changes.
 
 The chat header shows:
 

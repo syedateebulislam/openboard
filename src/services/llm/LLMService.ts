@@ -8,6 +8,8 @@
  *  - openai:    OpenAIProvider (requires apiKey)
  *  - openai-codex: OpenAICodexProvider (uses Codex CLI ChatGPT/API-key login)
  *  - anthropic: AnthropicProvider (requires apiKey)
+ *  - moonshot:  MoonshotProvider (requires apiKey)
+ *  - gemini:    GeminiProvider (requires Google AI Studio apiKey)
  *  - ollama:    OllamaProvider (requires running local Ollama server)
  */
 
@@ -16,6 +18,7 @@ import { OpenAIProvider } from './OpenAIProvider.js';
 import { AnthropicProvider } from './AnthropicProvider.js';
 import { OllamaProvider } from './OllamaProvider.js';
 import { MoonshotProvider } from './MoonshotProvider.js';
+import { GeminiProvider } from './GeminiProvider.js';
 import { OpenAICodexProvider } from './OpenAICodexProvider.js';
 
 export class LLMService {
@@ -54,6 +57,12 @@ export class LLMService {
           throw new Error('Moonshot AI provider requires an apiKey');
         }
         return new MoonshotProvider(config.apiKey, config.model ?? 'moonshot-v1-8k');
+
+      case 'gemini':
+        if (!config.apiKey) {
+          throw new Error('Google Gemini provider requires an apiKey');
+        }
+        return new GeminiProvider(config.apiKey, config.model ?? 'gemini-2.5-pro');
 
       default:
         throw new Error(

@@ -59,7 +59,7 @@ Settings can be re-entered later from the Settings menu.
 OpenBoard uses one master generated React app.
 
 - Add a dashboard: Dashboards -> Add new dashboard to UI.
-- Open a dashboard: Dashboards -> Open: `<dashboard title>`.
+- Modify a dashboard: Dashboards -> Modify: `<dashboard title>`.
 - Remove a dashboard: Dashboards -> Remove: `<dashboard title>`.
 
 Removing a dashboard updates OpenBoard's registry and triggers an LLM cleanup pass to remove the dashboard tab/components from the generated `App.tsx`.

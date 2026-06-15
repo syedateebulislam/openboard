@@ -34,7 +34,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
   const [pendingRemoveAll, setPendingRemoveAll] = useState(false);
 
   const items: MenuItem[] = [
-    { label: '+ Add new dashboard to UI', value: 'add' },
+    { label: '✚ Add new dashboard to UI', value: 'add' },
     ...(pendingRemoveAll
       ? [
           { label: `! Confirm: remove ALL ${boards.length} dashboard(s)`, value: 'confirm-remove-all' } as MenuItem,
@@ -56,11 +56,11 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
       : []),
     ...boards.flatMap((board): MenuItem[] => [
       {
-        label: `Open: ${board.title} (${board.type})`,
+        label: `✎ Modify: ${board.title} (${board.type})`,
         value: `open:${board.id}`,
       },
       {
-        label: `Remove: ${board.title}`,
+        label: `✕ Remove: ${board.title}`,
         value: `remove:${board.id}`,
       },
     ]),

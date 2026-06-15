@@ -76,6 +76,8 @@ function getDefaultModel(provider: string): string {
       return 'qwen2.5-coder:7b';
     case 'moonshot':
       return 'moonshot-v1-8k';
+    case 'gemini':
+      return 'gemini-2.5-pro';
     default:
       return 'gpt-4o';
   }
@@ -205,7 +207,7 @@ export function ChatScreen({
       const baseUrl = config.get('llm.baseUrl') as string | undefined;
 
       const llmConfig = {
-        provider: provider as 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot',
+        provider: provider as 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini',
         model: model || getDefaultModel(provider),
         apiKey,
         baseUrl,

@@ -219,7 +219,7 @@ function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'moonshot' | 'ollama';
+type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'moonshot' | 'gemini' | 'ollama';
 type LLMSettingsStep = 'provider' | 'apiKey' | 'model' | 'ollamaHost' | 'saving';
 
 const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back' }> = [
@@ -227,6 +227,7 @@ const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back'
   { label: '(Recommended) OpenAI Codex / ChatGPT subscription', value: 'openai-codex' },
   { label: 'Anthropic', value: 'anthropic' },
   { label: 'Moonshot AI', value: 'moonshot' },
+  { label: 'Google Gemini', value: 'gemini' },
   { label: 'Ollama', value: 'ollama' },
   { label: '← Go Back', value: 'back' },
 ];
@@ -236,6 +237,7 @@ const DEFAULT_LLM_MODELS: Record<LLMProviderName, string> = {
   'openai-codex': 'gpt-5.5',
   anthropic: 'claude-sonnet-4-5',
   moonshot: 'moonshot-v1-128k',
+  gemini: 'gemini-2.5-pro',
   ollama: 'qwen2.5-coder:7b',
 };
 
