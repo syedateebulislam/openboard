@@ -9,6 +9,7 @@ import type { DashboardUpdateResult } from './services/project/DashboardUpdateSe
 import type { PipelineEvent, PipelineEventSink } from './services/project/pipelinePhases.js';
 import { classifyAgentError } from './utils/errorCodes.js';
 import type { BoardConfig } from './types/board.js';
+import { bannerVersionLine } from './version.js';
 
 const cli = meow(`
   Usage
@@ -109,7 +110,7 @@ if (cli.flags.version) {
   console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
   console.log(`${B}${F}║${L}        [_-_] O p e n B o a r d        ${F}║${R}`);
   console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
-  console.log(`${B}${F}║${S}                v1.0.7                 ${F}║${R}`);
+  console.log(`${B}${F}║${S}${bannerVersionLine()}${F}║${R}`);
   console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
   process.exit(0);
 }

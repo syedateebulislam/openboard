@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { bannerVersionLine } from '../version.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
@@ -41,7 +42,7 @@ export function WelcomeScreen({ onNavigate }: Props) {
         </Text>
         <Text>
           <Text bold color={UI_COLORS.border}>║</Text>
-          <Text color={UI_COLORS.subtitle}>                v1.0.7                 </Text>
+          <Text color={UI_COLORS.subtitle}>{bannerVersionLine()}</Text>
           <Text bold color={UI_COLORS.border}>║</Text>
         </Text>
         <Text bold color={UI_COLORS.border}>╚═══════════════════════════════════════╝</Text>
