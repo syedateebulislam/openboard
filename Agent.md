@@ -283,6 +283,7 @@ Branch on `errorCode`, never on the prose `error` string:
 | `E_DATA_PARSE` | Data file unparseable | Check the file format |
 | `E_DASHBOARD_NOT_FOUND` | Unknown selector | `agent list` to discover selectors |
 | `E_NO_LLM` | No LLM configured | Ask a human to run setup |
+| `E_LLM_QUOTA` | LLM quota/credits/rate limit exhausted | Wait for the limit to reset, top up billing, or switch providers; do not hammer-retry |
 | `E_LLM_EMPTY` / `E_LLM_FAILED` | Generation failed | Retry once, then escalate |
 | `E_SCAFFOLD_FAILED` / `E_INSTALL_FAILED` | Workspace setup failed | Escalate |
 | `E_BUILD_FAILED` | Build failed after self-repair attempts | `agent resume <runId>` retries build only |

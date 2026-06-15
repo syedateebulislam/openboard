@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { classifyAgentError } from '../../src/utils/errorCodes.js';
+import { classifyAgentError, isLLMQuotaError, describeLLMError } from '../../src/utils/errorCodes.js';
 import {
   PHASE_ORDER,
   PHASE_WEIGHTS,
@@ -55,6 +55,26 @@ describe('classifyAgentError', () => {
     expect(classifyAgentError('something inexplicable happened')).toBe('E_UNKNOWN');
     expect(classifyAgentError(undefined)).toBe('E_UNKNOWN');
     expect(classifyAgentError('')).toBe('E_UNKNOWN');
+  });
+
+  it.each([
+    'You exceeded your current quota, please check your plan and billing details.',
+    'Error code: 429 - insufficient_quota',
+    'ERROR: Reconnecting... 5/5',
+    'rate limit reached for requests',
+    'stream disconnected before completion',
+  ])('classifies quota/rate-limit error %j as E_LLM_QUOTA', (message) => {
+    expect(classifyAgentError(message)).toBe('E_LLM_QUOTA');
+    expect(isLLMQuotaError(message)).toBe(true);
+  });
+
+  it('describeLLMError surfaces an actionable quota message, else the raw error', () => {
+    const quota = describeLLMError('insufficient_quota', 'openai-codex');
+    expect(quota).toMatch(/quota or credits/i);
+    expect(quota).toContain('openai-codex');
+    expect(quota).toMatch(/\/config/);
+    expect(describeLLMError('Build failed: vite error')).toBe('Build failed: vite error');
+    expect(isLLMQuotaError('Build failed: vite error')).toBe(false);
   });
 });
 

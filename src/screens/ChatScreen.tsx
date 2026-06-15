@@ -30,6 +30,7 @@ import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer } from '../services/data/DataAnalyzer.js';
 import { SYSTEM_PROMPT } from '../services/llm/prompts/systemPrompt.js';
 import { extractFiles } from '../utils/codeExtractor.js';
+import { describeLLMError, isLLMQuotaError } from '../utils/errorCodes.js';
 import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
@@ -360,13 +361,11 @@ export function ChatScreen({
     try {
       const service = new DashboardUpdateService(undefined, undefined, undefined, undefined, pipelineEventSink);
       const result = await service.updateAllWithPrompt(text, onProgress);
-      onProgress(
-        result.success
-          ? result.deployUrl
-            ? `Modified all dashboards. Deployed: ${result.deployUrl}`
-            : 'Modified all dashboards.'
-          : `Modify-all failed: ${result.error}`,
-      );
+      if (result.success) {
+        onProgress(result.deployUrl ? `Modified all dashboards. Deployed: ${result.deployUrl}` : 'Modified all dashboards.');
+      } else {
+        onProgress(`Modify-all failed: ${describeLLMError(result.error, llmProvider?.name)}`);
+      }
     } catch (error: any) {
       onProgress(`Modify-all error: ${error.message}`);
     } finally {
@@ -374,7 +373,7 @@ export function ChatScreen({
       finishLog(logId);
       setIsLoading(false);
     }
-  }, [getActiveProjectDir, addMsg, startLogMsg, createProgressCallback, pipelineEventSink, finishLog]);
+  }, [getActiveProjectDir, addMsg, startLogMsg, createProgressCallback, pipelineEventSink, finishLog, llmProvider]);
 
   const writeProtectedDataFromSource = useCallback(async (
     dataFile: string,
@@ -750,9 +749,10 @@ For the current board "${board.title}":
         }
         return writtenFiles;
       } catch (err: any) {
-        const errorMessage = err.message || 'Unknown LLM error';
-        updateStreamingMsg(streamMsg.id, `Error: ${errorMessage}`, true);
-        addMsg(newMsg('error', `LLM error: ${errorMessage}`));
+        const rawMessage = err.message || 'Unknown LLM error';
+        const friendly = describeLLMError(rawMessage, llmProvider?.name);
+        updateStreamingMsg(streamMsg.id, isLLMQuotaError(rawMessage) ? friendly : `Error: ${rawMessage}`, true);
+        addMsg(newMsg('error', isLLMQuotaError(rawMessage) ? friendly : `LLM error: ${rawMessage}`));
         return [];
       } finally {
         streamingMsgRef.current = null;
