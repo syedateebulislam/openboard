@@ -13,14 +13,18 @@ import { randomUUID } from 'node:crypto';
 import { codexHome, isCodexAuthError } from '../../src/services/llm/OpenAICodexProvider.js';
 
 describe('Codex auth isolation', () => {
-  const savedHome = process.env.CODEX_HOME;
+  const savedOwn = process.env.OPENBOARD_CODEX_HOME;
+  const savedAmbient = process.env.CODEX_HOME;
 
   afterEach(() => {
-    if (savedHome === undefined) delete process.env.CODEX_HOME;
-    else process.env.CODEX_HOME = savedHome;
+    if (savedOwn === undefined) delete process.env.OPENBOARD_CODEX_HOME;
+    else process.env.OPENBOARD_CODEX_HOME = savedOwn;
+    if (savedAmbient === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedAmbient;
   });
 
   it('defaults to a dedicated home under ~/.openboard, separate from ~/.codex', () => {
+    delete process.env.OPENBOARD_CODEX_HOME;
     delete process.env.CODEX_HOME;
     const home = codexHome();
     expect(home).toBe(join(homedir(), '.openboard', 'codex-home'));
@@ -28,15 +32,23 @@ describe('Codex auth isolation', () => {
     expect(existsSync(home)).toBe(true); // created on access
   });
 
-  it('honors an explicit CODEX_HOME as an opt-out and creates it', () => {
+  it('honors OPENBOARD_CODEX_HOME as an opt-out and creates it', () => {
+    delete process.env.CODEX_HOME;
     const custom = join(tmpdir(), `openboard-codex-${randomUUID().slice(0, 8)}`);
-    process.env.CODEX_HOME = custom;
+    process.env.OPENBOARD_CODEX_HOME = custom;
     try {
       expect(codexHome()).toBe(custom);
       expect(existsSync(custom)).toBe(true);
     } finally {
       try { rmSync(custom, { recursive: true, force: true }); } catch { /* ignore */ }
     }
+  });
+
+  it('IGNORES an inherited CODEX_HOME (e.g. set by a parent tool like OpenClaw)', () => {
+    delete process.env.OPENBOARD_CODEX_HOME;
+    // Simulate OpenClaw spawning `openboard agent` with its own CODEX_HOME.
+    process.env.CODEX_HOME = join(tmpdir(), 'someone-elses-codex-home');
+    expect(codexHome()).toBe(join(homedir(), '.openboard', 'codex-home'));
   });
 
   it('detects codex auth/expiry errors, not normal failures', () => {

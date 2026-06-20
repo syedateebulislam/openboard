@@ -282,11 +282,13 @@ Supported providers:
 | Moonshot | API key |
 | Ollama | Local host |
 
-OpenAI Codex auth is isolated: OpenBoard runs `codex` with its own `CODEX_HOME`
-(`~/.openboard/codex-home` by default; an explicit `CODEX_HOME` env is honored).
+OpenAI Codex auth is isolated: OpenBoard runs `codex` with its own codex home
+(`~/.openboard/codex-home` by default; override with `OPENBOARD_CODEX_HOME`).
 This keeps OpenBoard's ChatGPT/Codex login separate from OpenClaw or manual
 `codex` usage, so a rotating `chatgpt`-mode refresh token isn't invalidated by
-another process (the "auth dies after ~1 hour" symptom). Sign in once via
+another process (the "auth dies after ~1 hour" symptom). The ambient `CODEX_HOME`
+is intentionally ignored so a parent tool (e.g. OpenClaw spawning `openboard
+agent`) can't redirect OpenBoard's codex auth to its own home. Sign in once via
 `openboard` → Settings → LLM → OpenAI Codex; codex then keeps it refreshed.
 
 ## Data And Generation Flow
@@ -333,7 +335,7 @@ Environment variables:
 |---|---|
 | `OPENBOARD_ENCRYPTION_SECRET` | Optional config encryption secret |
 | `OPENBOARD_CONFIG_DIR` | Override config directory |
-| `CODEX_HOME` | Override the codex auth home OpenBoard uses (default `~/.openboard/codex-home`) |
+| `OPENBOARD_CODEX_HOME` | Override OpenBoard's isolated codex auth home (default `~/.openboard/codex-home`; ambient `CODEX_HOME` is ignored) |
 | `OPENBOARD_TEST_MODE` | Disable file logging in tests |
 | `OPENBOARD_DEBUG` | Enable debug logging |
 | `DASHBOARD_USERNAME` | Generated app login username |

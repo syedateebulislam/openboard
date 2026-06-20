@@ -30,10 +30,17 @@ type ProgressCallback = (line: string) => void;
  * means a rotating chatgpt refresh token gets invalidated whenever another
  * process refreshes it — the "auth dies after ~1 hour, re-login fixes it"
  * symptom. With its own home, OpenBoard logs in once and codex keeps it
- * refreshed. An explicit CODEX_HOME (set by the user) is honored as an opt-out.
+ * refreshed.
+ *
+ * The location is OPENBOARD_CODEX_HOME (override) or ~/.openboard/codex-home.
+ * The ambient CODEX_HOME is intentionally IGNORED: when a parent tool like
+ * OpenClaw spawns `openboard agent`, OpenBoard would otherwise inherit that
+ * tool's CODEX_HOME — a differently authed home — making the codex subprocess
+ * look "not logged in". Pinning our own home keeps the agent CLI working
+ * regardless of who launched it.
  */
 export function codexHome(): string {
-  const home = process.env.CODEX_HOME?.trim() || join(homedir(), '.openboard', 'codex-home');
+  const home = process.env.OPENBOARD_CODEX_HOME?.trim() || join(homedir(), '.openboard', 'codex-home');
   try {
     mkdirSync(home, { recursive: true });
   } catch {
