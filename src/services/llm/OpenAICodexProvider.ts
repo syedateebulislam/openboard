@@ -8,9 +8,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import type {
   LLMProvider,
   LLMCompletionOptions,
@@ -22,6 +23,35 @@ import { crossSpawn, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 type ProgressCallback = (line: string) => void;
+
+/**
+ * OpenBoard runs codex with a dedicated CODEX_HOME so its ChatGPT/Codex login
+ * is isolated from OpenClaw and any manual `codex` usage. Sharing one home
+ * means a rotating chatgpt refresh token gets invalidated whenever another
+ * process refreshes it — the "auth dies after ~1 hour, re-login fixes it"
+ * symptom. With its own home, OpenBoard logs in once and codex keeps it
+ * refreshed. An explicit CODEX_HOME (set by the user) is honored as an opt-out.
+ */
+export function codexHome(): string {
+  const home = process.env.CODEX_HOME?.trim() || join(homedir(), '.openboard', 'codex-home');
+  try {
+    mkdirSync(home, { recursive: true });
+  } catch {
+    // Best effort — codex will surface a clearer error if the dir is unusable.
+  }
+  return home;
+}
+
+/** Env for every spawned codex process: inherit the shell env, pin CODEX_HOME. */
+function codexEnv(): Record<string, string | undefined> {
+  return { ...process.env, CODEX_HOME: codexHome() };
+}
+
+/** True when codex output indicates the dedicated home has no/expired login. */
+export function isCodexAuthError(text: string | undefined): boolean {
+  if (!text) return false;
+  return /not logged in|no credentials|unauthorized|401|please (?:run )?`?codex login|authentication required|auth\.json/i.test(text);
+}
 
 function messagesToPrompt(messages: LLMMessage[]): string {
   return messages
@@ -63,7 +93,7 @@ function runWithStdin(
     const proc = spawn(invocation.command, invocation.args, {
       cwd: process.cwd(),
       shell: invocation.useShell,
-      env: process.env,
+      env: codexEnv(),
     });
 
     let stdout = '';
@@ -133,10 +163,12 @@ export class OpenAICodexProvider implements LLMProvider {
   static async loginWithBrowser(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
       onProgress?.('Opening Codex device login. Follow the URL/code shown by Codex.');
+      onProgress?.(`Signing in to OpenBoard's dedicated codex home: ${codexHome()}`);
       const result = await crossSpawn('codex', ['login', '--device-auth'], {
         cwd: process.cwd(),
         timeoutMs: 10 * 60_000,
         onProgress,
+        env: { CODEX_HOME: codexHome() },
       });
 
       if (result.code === 0) {
@@ -158,6 +190,7 @@ export class OpenAICodexProvider implements LLMProvider {
       const result = await crossSpawn('codex', ['login', 'status'], {
         cwd: process.cwd(),
         timeoutMs: 20_000,
+        env: { CODEX_HOME: codexHome() },
       });
 
       if (result.code === 0) {
@@ -220,7 +253,14 @@ export class OpenAICodexProvider implements LLMProvider {
         return result.stdout;
       }
 
-      throw new Error(result.stderr || result.stdout || 'Codex exec failed');
+      const rawError = result.stderr || result.stdout || 'Codex exec failed';
+      if (isCodexAuthError(rawError)) {
+        throw new Error(
+          `OpenAI Codex is not signed in for OpenBoard. OpenBoard keeps its own codex login at ${codexHome()} ` +
+          `(separate from other tools). Open "openboard" → Settings → LLM → OpenAI Codex to sign in once, then retry.`,
+        );
+      }
+      throw new Error(rawError);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(sanitizeErrorMessage(msg));

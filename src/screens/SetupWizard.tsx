@@ -686,7 +686,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         } else {
           setStep1Validation({
             status: 'error',
-            message: result.error ?? 'Codex login failed. Run "codex login" and try again.',
+            message: result.error ?? 'Codex login failed. Re-select OpenAI Codex here to retry — OpenBoard signs in to its own codex home.',
           });
         }
         return;
