@@ -159,6 +159,80 @@ function runWithStdin(
   });
 }
 
+/** Matches codex's "you're signed in" output across its login variants. */
+const LOGIN_SUCCESS = /successfully logged in|already logged in|logged in to/i;
+
+/**
+ * Run `codex login` (browser flow) and resolve as soon as sign-in succeeds.
+ *
+ * codex's browser login starts a local callback server that can linger after
+ * printing "Successfully logged in", so waiting for the process to exit (as a
+ * plain crossSpawn does) wedges the setup wizard on a spinner. Instead, watch
+ * the output: on the success marker, give codex a short grace period to exit on
+ * its own, then confirm with `codex login status` and move on — killing the
+ * lingering process. Also resolves on natural exit and a hard timeout.
+ */
+function runCodexLogin(onProgress?: ProgressCallback, timeoutMs = 5 * 60_000): Promise<LLMValidationResult> {
+  return new Promise((resolve) => {
+    const invocation = resolveSpawnInvocation('codex', ['login']);
+    const proc = spawn(invocation.command, invocation.args, {
+      cwd: process.cwd(),
+      shell: invocation.useShell,
+      env: codexEnv(),
+    });
+
+    let out = '';
+    let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (result: LLMValidationResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      if (graceTimer) clearTimeout(graceTimer);
+      killProcessTree(proc.pid);
+      proc.kill();
+      resolve(result);
+    };
+
+    const hardTimer = setTimeout(
+      () => finish({ valid: false, error: 'Codex login timed out. Re-select OpenAI Codex to retry.' }),
+      timeoutMs,
+    );
+
+    const onData = (chunk: Buffer) => {
+      const text = chunk.toString();
+      out += text;
+      if (onProgress) {
+        for (const line of text.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed) onProgress(trimmed.slice(0, 180));
+        }
+      }
+      if (!graceTimer && LOGIN_SUCCESS.test(out)) {
+        onProgress?.('Sign-in detected, confirming…');
+        // Give codex a moment to flush auth.json and exit on its own; if it
+        // lingers, confirm via status and proceed.
+        graceTimer = setTimeout(() => {
+          if (settled) return;
+          new OpenAICodexProvider('').validate().then((status) => {
+            if (status.valid) finish({ valid: true });
+          }).catch(() => { /* fall through to natural close / hard timeout */ });
+        }, 6_000);
+      }
+    };
+
+    proc.stdout?.on('data', onData);
+    proc.stderr?.on('data', onData);
+    proc.on('close', (code) => {
+      finish(code === 0 || LOGIN_SUCCESS.test(out)
+        ? { valid: true }
+        : { valid: false, error: sanitizeErrorMessage(out || 'Codex login failed') });
+    });
+    proc.on('error', (err) => finish({ valid: false, error: sanitizeErrorMessage(err.message) }));
+  });
+}
+
 export class OpenAICodexProvider implements LLMProvider {
   readonly name = 'openai-codex';
   private model: string;
@@ -169,23 +243,10 @@ export class OpenAICodexProvider implements LLMProvider {
 
   static async loginWithBrowser(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
-      onProgress?.('Opening Codex device login. Follow the URL/code shown by Codex.');
-      onProgress?.(`Signing in to OpenBoard's dedicated codex home: ${codexHome()}`);
-      const result = await crossSpawn('codex', ['login', '--device-auth'], {
-        cwd: process.cwd(),
-        timeoutMs: 10 * 60_000,
-        onProgress,
-        env: { CODEX_HOME: codexHome() },
-      });
-
-      if (result.code === 0) {
-        return { valid: true };
-      }
-
-      return {
-        valid: false,
-        error: sanitizeErrorMessage(result.stderr || result.stdout || 'Codex login failed'),
-      };
+      onProgress?.(`Signing in to OpenBoard's own codex home: ${codexHome()}`);
+      onProgress?.('A browser window will open for OpenAI Codex sign-in. Complete it, then return here.');
+      onProgress?.('Headless/remote? Run: codex login --device-auth (with CODEX_HOME set to the path above).');
+      return await runCodexLogin(onProgress);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { valid: false, error: sanitizeErrorMessage(msg) };
