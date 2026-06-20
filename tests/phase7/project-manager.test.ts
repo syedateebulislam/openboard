@@ -357,6 +357,7 @@ describe('ProjectManager', () => {
       writeFileSync(join(scaffoldResult.projectDir!, 'src', 'App.css'), '/* stale shell */', 'utf-8');
       unlinkSync(join(scaffoldResult.projectDir!, 'src', 'components', 'BrandLogo.tsx'));
       unlinkSync(join(scaffoldResult.projectDir!, 'src', 'components', 'DashboardHeader.tsx'));
+      unlinkSync(join(scaffoldResult.projectDir!, 'src', 'components', 'InsightCard.tsx'));
 
       const result = pm.preDeployChecks(scaffoldResult.projectDir!);
 
@@ -367,6 +368,7 @@ describe('ProjectManager', () => {
       // The per-dashboard header strip is product-owned and synced into
       // existing workspaces too.
       expect(existsSync(join(scaffoldResult.projectDir!, 'src', 'components', 'DashboardHeader.tsx'))).toBe(true);
+      expect(existsSync(join(scaffoldResult.projectDir!, 'src', 'components', 'InsightCard.tsx'))).toBe(true);
     });
 
     it('should repair missing protected dashboard data support files', async () => {

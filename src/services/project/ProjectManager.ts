@@ -665,6 +665,7 @@ export class ProjectManager {
     'src/components/LoginPage.tsx',
     'src/components/DashboardTabs.tsx',
     'src/components/DashboardHeader.tsx',
+    'src/components/InsightCard.tsx',
     'src/hooks/useTheme.ts',
     'public/favicon.svg',
   ];

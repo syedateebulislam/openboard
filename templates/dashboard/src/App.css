@@ -425,6 +425,16 @@
   font-size: 0.9rem;
   line-height: 1.55;
 }
+.insight-item svg { color: var(--accent); }
+/* Spend = cost insight (warm/danger), Save = savings insight (success). */
+.insight-item--spend { border-left-color: var(--danger); }
+.insight-item--spend svg { color: var(--danger); }
+.insight-item--save { border-left-color: var(--success); }
+.insight-item--save svg { color: var(--success); }
+.insight-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.insight-title { font-weight: 600; color: var(--text-primary); }
+.insight-metric { font-family: var(--font-mono); font-size: 0.95rem; color: var(--text-primary); margin-top: 0.125rem; }
+.insight-detail { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.125rem; }
 
 /* ----- Grids (mobile-first responsive) ----- */
 .grid-2, .grid-3, .grid-4 { display: grid; gap: 1rem; grid-template-columns: 1fr; }

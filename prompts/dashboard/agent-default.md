@@ -7,7 +7,7 @@ Data model (OpenBoard):
 
 Layout (top to bottom):
 - A row of KPI summary cards for the most important aggregate metrics, each with a delta vs the previous period when a date column exists.
-- An "Insights" section of the top 3-5 data-driven, non-obvious findings, each with a title, headline metric, time period, one-line explanation, and confidence level (high/medium/low): spikes/outliers, top or fastest-growing categories, period-over-period change, concentration, and rows excluded due to bad data.
+- A REQUIRED "Top Insights" block of the top 3 insights (rendered as InsightCard tiles), each with a title, headline metric, one-line detail, and confidence (high/medium/low). If the data is financial/transactional, make these the top 3 SPENDING & SAVINGS insights (tone "spend"/"save"); otherwise the 3 most useful findings: spikes/outliers, top or fastest-growing categories, period-over-period change, concentration. Secondary observations can follow below.
 - 2-4 charts (Recharts only, in responsive grids) chosen to fit the data: a trend over time when a date exists, category breakdowns (donut/bar), top-N rankings, and distributions. Every chart needs a title or aria-label and readable axes/legend/tooltip.
 - A raw-data table at the bottom using the `.data-table` class: render the hook rows with client-side pagination (page sizes 10/25/50/100), column sorting, and a text search. Sticky header, horizontal scroll on small screens.
 - A compact data-quality panel: total rows, included, excluded, missing-value rows, invalid-date rows, and a short note on which columns were auto-detected as measures, dimensions, and dates.

@@ -40,7 +40,7 @@ CSS CLASSES (the design system is already defined in App.css — use these, do n
 - Cards: .card (hover lift + shadow), .card-title, .metric-value
 - KPIs: .kpi-card (accent bar), .kpi-label, .kpi-value, .delta-up, .delta-down
 - Badges: .badge, .badge-success, .badge-warning, .badge-danger
-- Insights: .section-title, .insight-panel, .insight-item
+- Insights: .section-title, .insight-panel, and the shared <InsightCard> component (.insight-item with .insight-title/.insight-metric/.insight-detail; tone="spend"/"save" tints the accent)
 - Grids: .grid-2, .grid-3, .grid-4 (mobile-first: 1 column on phones, expand at 640px/1024px)
 - Charts: .chart-container (width:100%, height:300px)
 - Controls: .icon-btn, .btn-ghost, .btn-primary, .input-field
@@ -49,7 +49,8 @@ CSS CLASSES (the design system is already defined in App.css — use these, do n
 
 UI QUALITY BAR for every dashboard tab:
 - START every dashboard tab's content with the shared <DashboardHeader> from './components/DashboardHeader': <DashboardHeader title="<Dashboard Name>" rowCount={data?.rows.length} generatedAt={data?.generatedAt} />. It renders the dashboard name on the left and, on the right, the total rows fetched and when the data was last generated — so the user always sees how fresh the dashboard is. Feed rowCount and generatedAt from the useProtectedDashboardData response. Do NOT hand-roll this strip or duplicate its markup.
-- After the header, lead with a row of .kpi-card metrics (with .delta-up/.delta-down vs previous period when dates exist), then charts in responsive grids, then a .section-title "Insights" + .insight-panel with 2-3 data-driven observations.
+- After the header, lead with a row of .kpi-card metrics (with .delta-up/.delta-down vs previous period when dates exist), then charts in responsive grids.
+- ALWAYS include, near the top (right after the KPI row), a REQUIRED "Top Insights" block: a <h3 className="section-title">Top Insights</h3> followed by a <div className="insight-panel"> containing exactly 3 <InsightCard> items from './components/InsightCard', computed from the real data. If the dataset is financial/transactional (amounts, prices, spend, fees, discounts), these MUST be the top 3 SPENDING & SAVINGS insights — e.g. biggest spending category/merchant (tone="spend"), largest saving/discount captured or biggest savings opportunity (tone="save"), fee or cost leakage, fastest-growing expense, or an unusual spike. For non-financial data, surface the 3 most useful data-driven observations instead. Give each InsightCard a title, a headline metric, a one-line detail, and a confidence of high/medium/low. Never hand-roll insight tiles — use <InsightCard>.
 - Mobile-first: everything must read well in a single column on a phone; use the responsive grid classes rather than fixed widths.
 - Use .skeleton placeholders while the protected data hook is loading, and friendly empty states when there are no rows.
 - Format numbers/currency/dates for humans (e.g., 12.4k, $1,234.50, MMM d) using Intl or date-fns.
@@ -98,7 +99,7 @@ RULES:
 17. App.tsx is at the root (e.g., --- FILE: App.tsx ---).
 18. You may add brief explanations BEFORE //CODE_START or AFTER //CODE_END, but NEVER inside the code boundaries.
 19. NEVER remove or skip AuthProvider/LoginPage — authentication is required on every dashboard.
-20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, src/components/DashboardHeader.tsx, or src/components/BrandLogo.tsx.
+20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, src/components/DashboardHeader.tsx, src/components/InsightCard.tsx, or src/components/BrandLogo.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 
 EXAMPLE OUTPUT:
@@ -130,6 +131,7 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
 --- FILE: components/OverviewDashboard.tsx ---
 import { useProtectedDashboardData } from '../hooks/useProtectedDashboardData'
 import { DashboardHeader } from './DashboardHeader'
+import { InsightCard } from './InsightCard'
 import { MetricCard } from './MetricCard'
 
 export function OverviewDashboard() {
@@ -143,9 +145,18 @@ export function OverviewDashboard() {
       {loading && <div className="card skeleton" style={{ height: 96 }} />}
       {!loading && !error && rows.length === 0 && <div className="card">No data yet.</div>}
       {!loading && !error && rows.length > 0 && (
-        <div className="grid-3">
-          <MetricCard title="Total Rows" value={rows.length.toLocaleString()} />
-        </div>
+        <>
+          <div className="grid-3">
+            <MetricCard title="Total Rows" value={rows.length.toLocaleString()} />
+          </div>
+          <h3 className="section-title">Top Insights</h3>
+          <div className="insight-panel">
+            {/* For financial data these are the top 3 spending & savings insights, computed from rows. */}
+            <InsightCard tone="spend" title="Top spending area" metric="—" detail="Computed from the data" confidence="high" />
+            <InsightCard tone="save" title="Biggest saving" metric="—" detail="Computed from the data" confidence="medium" />
+            <InsightCard title="Notable trend" metric="—" detail="Computed from the data" confidence="medium" />
+          </div>
+        </>
       )}
     </div>
   );
