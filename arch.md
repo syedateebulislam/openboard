@@ -127,6 +127,7 @@ openboard update --dashboard <selector>
 openboard update --all
 openboard update --all --prompt "..."           # modify every dashboard with one prompt
 openboard rollback --dashboard <selector>
+openboard agent setup <llm|github|vercel|dashboard|status|all> [flags]   # headless configuration
 openboard agent create --data <file> --name <title> [--type custom] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent update --all --prompt "..." [--json]    # modify every dashboard

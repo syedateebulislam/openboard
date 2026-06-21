@@ -35,7 +35,7 @@ flowchart TD
 
 ## Prerequisites
 
-OpenBoard must be configured once by a human:
+OpenBoard needs four things configured. An agent can set all of them up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)) — only `openai-codex` requires a one-time human browser sign-in.
 
 - LLM provider: OpenAI API key, OpenAI Codex login, Anthropic, Moonshot, or Ollama.
 - GitHub token or authenticated GitHub CLI.
@@ -63,6 +63,44 @@ npm install
 npm run build
 node dist/index.js --help
 ```
+
+## Headless Setup
+
+Configure OpenBoard without the interactive TUI — give an agent the tokens and it wires everything up. Each credential is validated before it is saved (encrypted at rest). `openboard agent setup status` shows what is configured.
+
+```bash
+# Everything in one call (configures whatever inputs you pass):
+openboard agent setup all \
+  --provider openai --api-key "sk-..." \
+  --github-token "ghp_..." \
+  --vercel-token "..." \
+  --username admin --password "at-least-8-chars" --json
+
+# Or one piece at a time:
+openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
+openboard agent setup github --github-token "ghp_..."
+openboard agent setup vercel --vercel-token "..."
+openboard agent setup dashboard --username admin --password "at-least-8-chars"
+openboard agent setup status --json
+```
+
+Flags:
+
+| Flag | For | Meaning |
+|---|---|---|
+| `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `moonshot`, or `ollama` |
+| `--model` | llm | Optional; a sensible default is used per provider |
+| `--api-key` | llm | API key (not needed for `ollama` or `openai-codex`) |
+| `--ollama-host` | llm | Ollama host URL |
+| `--github-token` | github | GitHub token with repo scope |
+| `--vercel-token` | vercel | Vercel API token |
+| `--username` / `--password` | dashboard | Deployed-dashboard login (password ≥ 8 chars) |
+
+Secrets can also come from env vars (preferred — flags can appear in process listings/shell history): `OPENBOARD_LLM_API_KEY`, `OPENBOARD_GITHUB_TOKEN`, `OPENBOARD_VERCEL_TOKEN`, `OPENBOARD_DASHBOARD_PASSWORD`.
+
+Notes:
+- `openai-codex` still needs a one-time browser sign-in (`setup llm --provider openai-codex` only validates that codex is logged in); all key-based providers are fully headless.
+- On failure, JSON includes a per-part `errorCode` (`E_VALIDATION`, `E_LLM_FAILED`, `E_DEPLOY_AUTH`).
 
 ## Create Dashboard
 

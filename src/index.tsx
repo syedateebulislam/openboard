@@ -9,6 +9,7 @@ import type { DashboardUpdateResult } from './services/project/DashboardUpdateSe
 import type { PipelineEvent, PipelineEventSink } from './services/project/pipelinePhases.js';
 import { classifyAgentError } from './utils/errorCodes.js';
 import type { BoardConfig } from './types/board.js';
+import type { SetupPartResult } from './services/config/SetupService.js';
 import { bannerVersionLine } from './version.js';
 
 const cli = meow(`
@@ -20,6 +21,7 @@ const cli = meow(`
     update         Update dashboards non-interactively
     rollback       Roll a dashboard back to the previous deploy
     agent          Agent automation commands:
+                     setup              Headless config (llm|github|vercel|dashboard|status|all)
                      create | onboard   Create dashboard from a data file
                      update             Update a dashboard with a prompt
                      update --all       Modify every dashboard with one prompt
@@ -47,6 +49,8 @@ const cli = meow(`
     $ openboard
     $ openboard update --dashboard uber-data
     $ openboard update --all
+    $ openboard agent setup all --provider openai --api-key sk-... --github-token ghp_... --vercel-token ... --username admin --password secret123
+    $ openboard agent setup status --json
     $ openboard agent create --data ./data/uber.csv --name "Uber Data" --json
     $ openboard agent update --dashboard uber-data --prompt "Add a monthly trend chart"
     $ openboard agent update --all --prompt "Add a dark footer with a data refresh time"
@@ -91,6 +95,30 @@ const cli = meow(`
       type: 'boolean',
     },
     idempotencyKey: {
+      type: 'string',
+    },
+    provider: {
+      type: 'string',
+    },
+    model: {
+      type: 'string',
+    },
+    apiKey: {
+      type: 'string',
+    },
+    ollamaHost: {
+      type: 'string',
+    },
+    githubToken: {
+      type: 'string',
+    },
+    vercelToken: {
+      type: 'string',
+    },
+    username: {
+      type: 'string',
+    },
+    password: {
       type: 'string',
     },
   },
@@ -316,6 +344,73 @@ if (!command || command === 'start') {
   const action = cli.input[1];
   const service = makeService();
   const onProgress = jsonMode ? undefined : (line: string) => console.log(line);
+
+  if (action === 'setup') {
+    const { SetupService } = await import('./services/config/SetupService.js');
+    const setup = new SetupService();
+    const target = (cli.input[2] ?? 'all').toLowerCase();
+
+    // Secrets: flag first, then env fallback (env is preferred — flags can
+    // appear in process listings / shell history).
+    const apiKey = cli.flags.apiKey ?? process.env.OPENBOARD_LLM_API_KEY;
+    const githubToken = cli.flags.githubToken ?? process.env.OPENBOARD_GITHUB_TOKEN;
+    const vercelToken = cli.flags.vercelToken ?? process.env.OPENBOARD_VERCEL_TOKEN;
+    const password = cli.flags.password ?? process.env.OPENBOARD_DASHBOARD_PASSWORD;
+
+    const report = (results: Record<string, unknown>) => {
+      const ok = Object.values(results).every((r) => (r as { configured?: boolean }).configured !== false);
+      if (jsonMode) {
+        printJson({ success: ok, action: 'setup', target, results, status: setup.status() });
+      } else {
+        for (const [part, r] of Object.entries(results)) {
+          const res = r as SetupPartResult;
+          console.log(res.configured ? `✓ ${part}: ${res.detail ?? 'configured'}` : `✗ ${part}: ${res.error}`);
+        }
+      }
+      process.exit(ok ? 0 : 1);
+    };
+
+    if (target === 'status') {
+      const status = setup.status();
+      if (jsonMode) printJson({ success: true, action: 'setup', target: 'status', status });
+      else {
+        console.log(`LLM: ${status.llm ? `${status.llm.provider} (${status.llm.model ?? 'default'})` : 'not configured'}`);
+        console.log(`GitHub: ${status.github ? status.github.username ?? 'configured' : 'not configured'}`);
+        console.log(`Vercel: ${status.vercel ? 'configured' : 'not configured'}`);
+        console.log(`Dashboard login: ${status.dashboardAuth ? 'configured' : 'not configured'}`);
+      }
+      process.exit(0);
+    }
+
+    if (target === 'llm') {
+      report({ llm: await setup.configureLLM({ provider: cli.flags.provider, model: cli.flags.model, apiKey, ollamaHost: cli.flags.ollamaHost }) });
+    } else if (target === 'github') {
+      report({ github: await setup.configureGitHub(githubToken) });
+    } else if (target === 'vercel') {
+      report({ vercel: await setup.configureVercel(vercelToken) });
+    } else if (target === 'dashboard' || target === 'dashboard-auth') {
+      report({ dashboard: await setup.configureDashboardAuth(cli.flags.username, password) });
+    } else if (target === 'all') {
+      // Configure whatever inputs were supplied; skip parts with no input.
+      const results: Record<string, SetupPartResult> = {};
+      if (cli.flags.provider) results.llm = await setup.configureLLM({ provider: cli.flags.provider, model: cli.flags.model, apiKey, ollamaHost: cli.flags.ollamaHost });
+      if (githubToken) results.github = await setup.configureGitHub(githubToken);
+      if (vercelToken) results.vercel = await setup.configureVercel(vercelToken);
+      if (cli.flags.username || password) results.dashboard = await setup.configureDashboardAuth(cli.flags.username, password);
+      if (Object.keys(results).length === 0) {
+        const error = 'Nothing to configure. Pass --provider, --github-token, --vercel-token, and/or --username/--password (or the matching OPENBOARD_* env vars).';
+        if (jsonMode) printJson({ success: false, action: 'setup', target: 'all', error, errorCode: 'E_VALIDATION' });
+        else console.error(error);
+        process.exit(1);
+      }
+      report(results);
+    } else {
+      const error = `Unknown setup target "${target}". Use: llm | github | vercel | dashboard | status | all.`;
+      if (jsonMode) printJson({ success: false, action: 'setup', target, error, errorCode: 'E_VALIDATION' });
+      else console.error(error);
+      process.exit(1);
+    }
+  }
 
   if (action === 'create' || action === 'onboard') {
     const dataFile = cli.flags.data;
@@ -594,7 +689,8 @@ if (!command || command === 'start') {
   if (jsonMode) {
     printJson({ success: false, action: action ?? null, error, errorCode: 'E_VALIDATION' });
   } else {
-    console.error('Unknown agent action. Use: openboard agent create --data <file> [--name "..."] [--prompt "..."]');
+    console.error('Unknown agent action. Use: openboard agent setup <llm|github|vercel|dashboard|status|all> [flags]');
+    console.error('Or: openboard agent create --data <file> [--name "..."] [--prompt "..."]');
     console.error('Or: openboard agent update --dashboard <selector> --prompt "..." [--data <file>]');
     console.error('Or: openboard agent update --all --prompt "..."   (modify every dashboard)');
     console.error('Or: openboard agent remove --all                  (remove every dashboard)');
