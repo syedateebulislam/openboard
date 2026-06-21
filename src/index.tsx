@@ -115,6 +115,9 @@ const cli = meow(`
     vercelToken: {
       type: 'string',
     },
+    codexAccessToken: {
+      type: 'string',
+    },
     username: {
       type: 'string',
     },
@@ -355,7 +358,20 @@ if (!command || command === 'start') {
     const apiKey = cli.flags.apiKey ?? process.env.OPENBOARD_LLM_API_KEY;
     const githubToken = cli.flags.githubToken ?? process.env.OPENBOARD_GITHUB_TOKEN;
     const vercelToken = cli.flags.vercelToken ?? process.env.OPENBOARD_VERCEL_TOKEN;
+    const codexAccessToken = cli.flags.codexAccessToken ?? process.env.OPENBOARD_CODEX_ACCESS_TOKEN;
     const password = cli.flags.password ?? process.env.OPENBOARD_DASHBOARD_PASSWORD;
+
+    // Login progress (codex device-auth URL/code) streams to stderr so it never
+    // corrupts the JSON result on stdout — agents read it as NDJSON-ish lines.
+    const setupProgress = (line: string) => console.error(line);
+    const llmInput = {
+      provider: cli.flags.provider,
+      model: cli.flags.model,
+      apiKey,
+      ollamaHost: cli.flags.ollamaHost,
+      codexAccessToken,
+      onProgress: setupProgress,
+    };
 
     const report = (results: Record<string, unknown>) => {
       const ok = Object.values(results).every((r) => (r as { configured?: boolean }).configured !== false);
@@ -383,7 +399,7 @@ if (!command || command === 'start') {
     }
 
     if (target === 'llm') {
-      report({ llm: await setup.configureLLM({ provider: cli.flags.provider, model: cli.flags.model, apiKey, ollamaHost: cli.flags.ollamaHost }) });
+      report({ llm: await setup.configureLLM(llmInput) });
     } else if (target === 'github') {
       report({ github: await setup.configureGitHub(githubToken) });
     } else if (target === 'vercel') {
@@ -393,7 +409,7 @@ if (!command || command === 'start') {
     } else if (target === 'all') {
       // Configure whatever inputs were supplied; skip parts with no input.
       const results: Record<string, SetupPartResult> = {};
-      if (cli.flags.provider) results.llm = await setup.configureLLM({ provider: cli.flags.provider, model: cli.flags.model, apiKey, ollamaHost: cli.flags.ollamaHost });
+      if (cli.flags.provider) results.llm = await setup.configureLLM(llmInput);
       if (githubToken) results.github = await setup.configureGitHub(githubToken);
       if (vercelToken) results.vercel = await setup.configureVercel(vercelToken);
       if (cli.flags.username || password) results.dashboard = await setup.configureDashboardAuth(cli.flags.username, password);

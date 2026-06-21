@@ -35,7 +35,7 @@ flowchart TD
 
 ## Prerequisites
 
-OpenBoard needs four things configured. An agent can set all of them up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)) — only `openai-codex` requires a one-time human browser sign-in.
+OpenBoard needs four things configured. An agent can set all of them up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
 
 - LLM provider: OpenAI API key, OpenAI Codex login, Anthropic, Moonshot, or Ollama.
 - GitHub token or authenticated GitHub CLI.
@@ -90,16 +90,35 @@ Flags:
 |---|---|---|
 | `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `moonshot`, or `ollama` |
 | `--model` | llm | Optional; a sensible default is used per provider |
-| `--api-key` | llm | API key (not needed for `ollama` or `openai-codex`) |
+| `--api-key` | llm | API key (not needed for `ollama`; for `openai-codex` it triggers a headless `codex login --with-api-key`) |
+| `--codex-access-token` | llm | ChatGPT/Codex access token for a fully-headless `openai-codex` sign-in |
 | `--ollama-host` | llm | Ollama host URL |
 | `--github-token` | github | GitHub token with repo scope |
 | `--vercel-token` | vercel | Vercel API token |
 | `--username` / `--password` | dashboard | Deployed-dashboard login (password ≥ 8 chars) |
 
-Secrets can also come from env vars (preferred — flags can appear in process listings/shell history): `OPENBOARD_LLM_API_KEY`, `OPENBOARD_GITHUB_TOKEN`, `OPENBOARD_VERCEL_TOKEN`, `OPENBOARD_DASHBOARD_PASSWORD`.
+Secrets can also come from env vars (preferred — flags can appear in process listings/shell history): `OPENBOARD_LLM_API_KEY`, `OPENBOARD_GITHUB_TOKEN`, `OPENBOARD_VERCEL_TOKEN`, `OPENBOARD_CODEX_ACCESS_TOKEN`, `OPENBOARD_DASHBOARD_PASSWORD`.
+
+### OpenAI Codex sign-in (headless)
+
+`setup llm --provider openai-codex` signs codex in if it isn't already, using OpenBoard's isolated codex home — no TUI required. Three modes, in priority order:
+
+```bash
+# 1. Fully headless with a ChatGPT/Codex access token (or OPENBOARD_CODEX_ACCESS_TOKEN):
+openboard agent setup llm --provider openai-codex --codex-access-token "..." --json
+
+# 2. Fully headless with an OpenAI API key (codex login --with-api-key):
+openboard agent setup llm --provider openai-codex --api-key "sk-..." --json
+
+# 3. Device-auth (default when no token/key): codex prints a URL + code on stderr;
+#    relay them to the user to authorize, then it completes automatically.
+openboard agent setup llm --provider openai-codex --json
+```
+
+For device-auth, the URL and code stream to **stderr** (stdout stays clean JSON), so an agent can forward them to the user (e.g. via chat). The command blocks until sign-in completes or times out (~10 min).
 
 Notes:
-- `openai-codex` still needs a one-time browser sign-in (`setup llm --provider openai-codex` only validates that codex is logged in); all key-based providers are fully headless.
+- No codex key/token is stored by OpenBoard — the codex CLI holds the auth in `~/.openboard/codex-home`.
 - On failure, JSON includes a per-part `errorCode` (`E_VALIDATION`, `E_LLM_FAILED`, `E_DEPLOY_AUTH`).
 
 ## Create Dashboard

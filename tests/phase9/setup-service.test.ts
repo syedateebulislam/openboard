@@ -19,6 +19,7 @@ function makeDeps(over: Partial<SetupDeps> = {}): SetupDeps {
     validateGitHubToken: vi.fn(async () => ({ login: 'octocat' })),
     ghLogin: vi.fn(async () => {}),
     validateVercelToken: vi.fn(async () => ({ success: true })),
+    codexLogin: vi.fn(async () => ({ valid: true })),
     ...over,
   };
 }
@@ -74,12 +75,39 @@ describe('SetupService (headless setup)', () => {
       expect(config.get('llm.provider')).toBeUndefined();
     });
 
-    it('configures codex without an API key', async () => {
-      const { config, setup } = newService(makeDeps());
+    it('configures codex without an API key when already signed in', async () => {
+      const deps = makeDeps(); // validateLLM valid -> already logged in
+      const { config, setup } = newService(deps);
       const r = await setup.configureLLM({ provider: 'openai-codex' });
       expect(r.configured).toBe(true);
       expect(config.get('llm.provider')).toBe('openai-codex');
       expect(config.has('llm.apiKey')).toBe(false);
+      expect(deps.codexLogin).not.toHaveBeenCalled(); // no login needed
+    });
+
+    it('signs codex in when not logged in, then saves (no key stored)', async () => {
+      const deps = makeDeps({
+        validateLLM: vi.fn(async () => ({ valid: false, error: 'not logged in' })),
+        codexLogin: vi.fn(async () => ({ valid: true })),
+      });
+      const { config, setup } = newService(deps);
+      const r = await setup.configureLLM({ provider: 'openai-codex', codexAccessToken: 'tok_123' });
+      expect(r.configured).toBe(true);
+      expect(deps.codexLogin).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'tok_123' }));
+      expect(config.get('llm.provider')).toBe('openai-codex');
+      expect(config.has('llm.apiKey')).toBe(false);
+    });
+
+    it('fails when codex login fails', async () => {
+      const deps = makeDeps({
+        validateLLM: vi.fn(async () => ({ valid: false })),
+        codexLogin: vi.fn(async () => ({ valid: false, error: 'device-auth timed out' })),
+      });
+      const { config, setup } = newService(deps);
+      const r = await setup.configureLLM({ provider: 'openai-codex' });
+      expect(r.configured).toBe(false);
+      expect(r.errorCode).toBe('E_LLM_FAILED');
+      expect(config.get('llm.provider')).toBeUndefined();
     });
   });
 

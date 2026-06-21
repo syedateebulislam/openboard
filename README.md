@@ -54,6 +54,21 @@ OpenBoard needs these configured once:
 
 Settings can be re-entered later from the Settings menu.
 
+### Headless setup (for agents)
+
+You can configure everything without the TUI — useful when an agent drives OpenBoard. Each credential is validated before it is saved (encrypted at rest):
+
+```bash
+openboard agent setup all \
+  --provider openai --api-key "sk-..." \
+  --github-token "ghp_..." --vercel-token "..." \
+  --username admin --password "min-8-chars" --json
+
+openboard agent setup status --json
+```
+
+OpenAI Codex can be signed in headlessly too — `--codex-access-token`, `--api-key`, or device-auth (codex prints a URL+code on stderr for the agent to relay). Secrets may also come from `OPENBOARD_*` env vars (preferred over flags). See [Agent.md](Agent.md#headless-setup) for the full reference.
+
 ## Dashboards
 
 OpenBoard uses one master generated React app.

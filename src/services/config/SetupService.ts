@@ -12,11 +12,14 @@
 
 import { ConfigService } from './ConfigService.js';
 import { LLMService } from '../llm/LLMService.js';
+import { OpenAICodexProvider } from '../llm/OpenAICodexProvider.js';
 import { GitHubService } from '../deploy/GitHubService.js';
 import { VercelService } from '../deploy/VercelService.js';
 import { AuthService } from '../auth/AuthService.js';
 import type { LLMConfig } from '../../types/llm.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
+
+export type ProgressFn = (line: string) => void;
 
 /** Providers OpenBoard's setup supports (subset of the LLMConfig union). */
 const PROVIDERS = ['openai', 'openai-codex', 'anthropic', 'moonshot', 'ollama'] as const;
@@ -49,6 +52,17 @@ export interface ConfigureLLMInput {
   model?: string;
   apiKey?: string;
   ollamaHost?: string;
+  /** ChatGPT/Codex access token for a fully-headless `openai-codex` sign-in. */
+  codexAccessToken?: string;
+  /** Streams login progress (e.g. the device-auth URL/code) so agents can relay it. */
+  onProgress?: ProgressFn;
+}
+
+/** How codex should sign in when not already authenticated. */
+export interface CodexLoginInput {
+  accessToken?: string;
+  apiKey?: string;
+  onProgress?: ProgressFn;
 }
 
 /** Side effects that hit the network / a CLI — injectable for tests. */
@@ -57,6 +71,12 @@ export interface SetupDeps {
   validateGitHubToken(token: string): Promise<{ login?: string; error?: string }>;
   ghLogin(token: string): Promise<void>;
   validateVercelToken(token: string): Promise<{ success: boolean; error?: string }>;
+  /**
+   * Sign codex in (OpenBoard's isolated codex home) when not already logged in:
+   * an access token or API key is fully headless; otherwise device-auth streams
+   * a URL/code via onProgress.
+   */
+  codexLogin(input: CodexLoginInput): Promise<{ valid: boolean; error?: string }>;
 }
 
 const defaultDeps: SetupDeps = {
@@ -82,6 +102,11 @@ const defaultDeps: SetupDeps = {
     await GitHubService.loginWithToken(token).catch(() => undefined);
   },
   validateVercelToken: (token) => VercelService.validateTokenForProjectAccess(token),
+  codexLogin: (input) => {
+    if (input.accessToken) return OpenAICodexProvider.loginWithAccessToken(input.accessToken, input.onProgress);
+    if (input.apiKey) return OpenAICodexProvider.loginWithApiKey(input.apiKey, input.onProgress);
+    return OpenAICodexProvider.loginWithDeviceAuth(input.onProgress);
+  },
 };
 
 export class SetupService {
@@ -113,12 +138,31 @@ export class SetupService {
       ollamaHost: ollamaHost || undefined,
     };
 
+    // Codex: if not already signed in, sign in headlessly (access token / API
+    // key) or via device-auth (URL+code streamed through onProgress). The codex
+    // CLI holds the auth in OpenBoard's isolated codex home — no key is stored.
+    if (provider === 'openai-codex') {
+      let validation = await this.deps.validateLLM(llmConfig);
+      if (!validation.valid) {
+        input.onProgress?.('OpenAI Codex is not signed in — starting login…');
+        const login = await this.deps.codexLogin({
+          accessToken: input.codexAccessToken,
+          apiKey,
+          onProgress: input.onProgress,
+        });
+        if (!login.valid) {
+          return { configured: false, error: login.error ?? 'Codex login failed.', errorCode: 'E_LLM_FAILED' };
+        }
+        validation = { valid: true };
+      }
+      this.config.set('llm.provider', provider);
+      this.config.set('llm.model', model);
+      return { configured: true, detail: `LLM set to openai-codex (${model}).` };
+    }
+
     const validation = await this.deps.validateLLM(llmConfig);
     if (!validation.valid) {
-      const hint = provider === 'openai-codex'
-        ? ' Sign in first via `openboard` → Settings → LLM → OpenAI Codex (OpenBoard uses its own codex home).'
-        : '';
-      return { configured: false, error: (validation.error ?? 'LLM validation failed.') + hint, errorCode: 'E_LLM_FAILED' };
+      return { configured: false, error: validation.error ?? 'LLM validation failed.', errorCode: 'E_LLM_FAILED' };
     }
 
     this.config.set('llm.provider', provider);

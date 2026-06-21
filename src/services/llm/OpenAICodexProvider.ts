@@ -163,18 +163,25 @@ function runWithStdin(
 const LOGIN_SUCCESS = /successfully logged in|already logged in|logged in to/i;
 
 /**
- * Run `codex login` (browser flow) and resolve as soon as sign-in succeeds.
+ * Run a `codex login [...]` variant and resolve as soon as sign-in succeeds.
  *
  * codex's browser login starts a local callback server that can linger after
  * printing "Successfully logged in", so waiting for the process to exit (as a
- * plain crossSpawn does) wedges the setup wizard on a spinner. Instead, watch
- * the output: on the success marker, give codex a short grace period to exit on
- * its own, then confirm with `codex login status` and move on — killing the
+ * plain crossSpawn does) wedges the caller on a spinner. Instead, watch the
+ * output: on the success marker, give codex a short grace period to exit on its
+ * own, then confirm with `codex login status` and move on — killing the
  * lingering process. Also resolves on natural exit and a hard timeout.
+ *
+ * `stdin` feeds token/key flows (`--with-access-token`, `--with-api-key`).
  */
-function runCodexLogin(onProgress?: ProgressCallback, timeoutMs = 5 * 60_000): Promise<LLMValidationResult> {
+function runCodexLoginCommand(
+  args: string[],
+  onProgress?: ProgressCallback,
+  stdin?: string,
+  timeoutMs = 5 * 60_000,
+): Promise<LLMValidationResult> {
   return new Promise((resolve) => {
-    const invocation = resolveSpawnInvocation('codex', ['login']);
+    const invocation = resolveSpawnInvocation('codex', args);
     const proc = spawn(invocation.command, invocation.args, {
       cwd: process.cwd(),
       shell: invocation.useShell,
@@ -230,6 +237,11 @@ function runCodexLogin(onProgress?: ProgressCallback, timeoutMs = 5 * 60_000): P
         : { valid: false, error: sanitizeErrorMessage(out || 'Codex login failed') });
     });
     proc.on('error', (err) => finish({ valid: false, error: sanitizeErrorMessage(err.message) }));
+
+    if (stdin !== undefined) {
+      proc.stdin?.write(stdin.endsWith('\n') ? stdin : `${stdin}\n`);
+      proc.stdin?.end();
+    }
   });
 }
 
@@ -246,7 +258,45 @@ export class OpenAICodexProvider implements LLMProvider {
       onProgress?.(`Signing in to OpenBoard's own codex home: ${codexHome()}`);
       onProgress?.('A browser window will open for OpenAI Codex sign-in. Complete it, then return here.');
       onProgress?.('Headless/remote? Run: codex login --device-auth (with CODEX_HOME set to the path above).');
-      return await runCodexLogin(onProgress);
+      return await runCodexLoginCommand(['login'], onProgress);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { valid: false, error: sanitizeErrorMessage(msg) };
+    }
+  }
+
+  /**
+   * Device-auth sign-in for headless/agent flows: codex prints a URL + code
+   * (streamed via onProgress so an agent can relay them) and polls until the
+   * user authenticates. No browser or TUI required on this machine.
+   */
+  static async loginWithDeviceAuth(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
+    try {
+      onProgress?.(`Signing in to OpenBoard's own codex home: ${codexHome()}`);
+      onProgress?.('Open the URL below and enter the code to authorize OpenAI Codex:');
+      return await runCodexLoginCommand(['login', '--device-auth'], onProgress, undefined, 10 * 60_000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { valid: false, error: sanitizeErrorMessage(msg) };
+    }
+  }
+
+  /** Fully headless sign-in from a ChatGPT/Codex access token (read via stdin). */
+  static async loginWithAccessToken(token: string, onProgress?: ProgressCallback): Promise<LLMValidationResult> {
+    try {
+      onProgress?.(`Signing in to OpenBoard's own codex home with an access token: ${codexHome()}`);
+      return await runCodexLoginCommand(['login', '--with-access-token'], onProgress, token, 60_000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { valid: false, error: sanitizeErrorMessage(msg) };
+    }
+  }
+
+  /** Fully headless sign-in from an OpenAI API key (read via stdin). */
+  static async loginWithApiKey(apiKey: string, onProgress?: ProgressCallback): Promise<LLMValidationResult> {
+    try {
+      onProgress?.(`Signing in to OpenBoard's own codex home with an API key: ${codexHome()}`);
+      return await runCodexLoginCommand(['login', '--with-api-key'], onProgress, apiKey, 60_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { valid: false, error: sanitizeErrorMessage(msg) };
