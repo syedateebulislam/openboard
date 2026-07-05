@@ -44,7 +44,10 @@
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-card-hover: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
   --header-blur-bg: rgba(11, 11, 13, 0.82);
-  --glass-bg: rgba(19, 19, 22, 0.52);
+  /* Opaque enough that the graph-paper mesh and dashboard data never bleed
+     through the tab bar; the backdrop blur keeps the frosted look. */
+  --glass-bg: rgba(19, 19, 22, 0.88);
+  --menu-bg: #18181c;
   --transition: 150ms ease;
 }
 
@@ -79,7 +82,8 @@
   --shadow-card: 0 1px 2px rgba(40, 32, 20, 0.06);
   --shadow-card-hover: 0 10px 30px -18px rgba(40, 32, 20, 0.35);
   --header-blur-bg: rgba(247, 245, 241, 0.82);
-  --glass-bg: rgba(255, 253, 250, 0.58);
+  --glass-bg: rgba(255, 253, 250, 0.9);
+  --menu-bg: #fffdfa;
 }
 
 /* ----- App shell (graph-paper background, like the website) ----- */
@@ -308,10 +312,10 @@
   padding: 0.375rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background: var(--glass-bg);
+  /* Solid — an open menu floats over charts/tables, so any translucency
+     lets the data bleed through and hurts readability. */
+  background: var(--menu-bg);
   box-shadow: var(--shadow-card-hover), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  backdrop-filter: blur(18px) saturate(180%);
 }
 .tab-group-menu .tab-btn {
   width: 100%;
