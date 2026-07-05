@@ -36,6 +36,10 @@ describe('Accessibility safeguards', () => {
     // Shell styles for group dropdowns and the segmented period toggle ship in App.css.
     expect(css).toContain('.tab-group-menu');
     expect(css).toContain('.tabs-list.group-open');
+    // The nav must stack above panel content (backdrop-filter on .tabs-list
+    // creates a z-index:auto stacking context) or open dropdowns get painted
+    // over by the cards below.
+    expect(css).toMatch(/\.app-tabs\s*\{[^}]*z-index:/);
     expect(css).toContain('.segmented-btn');
     expect(css).toContain('.card-header-row');
   });

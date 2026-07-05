@@ -151,6 +151,12 @@
    .tabs-toggler and drops down. Glass = translucent --glass-bg + backdrop blur. */
 .app-tabs {
   position: relative;
+  /* Above the tab panel content (which contains positioned elements like
+     .kpi-card) but below the sticky .app-header (z-index 50), so category
+     dropdown menus and the mobile collapse are never painted over. The
+     backdrop-filter on .tabs-list makes it a stacking context with z-index
+     auto, so without this the panel would cover the open dropdown. */
+  z-index: 40;
   /* No horizontal margin: .app-tabs sits inside .app-content's gutter, so the
      navbar's left/right edges align with the dashboard title, cards, and badge. */
   margin: 1.25rem 0 0.75rem;
