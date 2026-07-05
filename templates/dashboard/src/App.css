@@ -193,6 +193,9 @@
   scrollbar-width: none;
 }
 .tabs-list::-webkit-scrollbar { display: none; }
+/* While a category dropdown is open the bar must not clip it (overflow-x: auto
+   would also cut off vertical overflow). DashboardTabs toggles this class. */
+.tabs-list.group-open { overflow: visible; }
 
 /* Navbar toggler — hidden on desktop, shown on mobile. */
 .tabs-toggler { display: none; }
@@ -246,6 +249,68 @@
   background: var(--accent-tint);
   border-color: var(--border-subtle);
   box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ----- Grouped tabs: category dropdowns inside the pill bar -----
+   DashboardTabs renders one .tab-group per category (Finance, Transport, …)
+   when tabs carry a `group`; ungrouped tabs stay as plain .tab-btn pills. */
+.tab-group { position: relative; flex-shrink: 0; }
+
+.tab-group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.125rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.tab-group-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+/* Active = this group contains the selected dashboard. */
+.tab-group-btn.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.tab-group-caret {
+  display: inline-block;
+  font-size: 0.625rem;
+  line-height: 1;
+  transition: transform var(--transition);
+}
+.tab-group.open .tab-group-caret { transform: rotate(180deg); }
+
+/* Glass dropdown listing the group's dashboards. */
+.tab-group-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  min-width: max(100%, 200px);
+  padding: 0.375rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg);
+  box-shadow: var(--shadow-card-hover), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+}
+.tab-group-menu .tab-btn {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-md);
 }
 
 .tab-btn:focus-visible, button:focus-visible, a:focus-visible, input:focus-visible {
@@ -437,7 +502,7 @@
 .insight-detail { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.125rem; }
 
 /* ----- Grids (mobile-first responsive) ----- */
-.grid-2, .grid-3, .grid-4 { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.grid-2, .grid-3, .grid-4 { display: grid; gap: 1.25rem; grid-template-columns: 1fr; }
 @media (min-width: 640px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
@@ -446,7 +511,50 @@
   .grid-4 { grid-template-columns: repeat(4, 1fr); }
 }
 
-.chart-container { width: 100%; height: 300px; }
+.chart-container { width: 100%; height: 300px; margin-top: 0.875rem; }
+
+/* ----- Chart-card header row: .card-title on the left, controls (e.g. a
+   .segmented period toggle) on the right. ----- */
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.card-header-row .card-title { margin-bottom: 0; }
+
+/* ----- Segmented control (Weekly / Monthly / Quarterly period toggles) ----- */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.1875rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+.segmented-btn {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.segmented-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+.segmented-btn.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--border-subtle);
+}
 
 /* ----- Controls ----- */
 .icon-btn {
@@ -579,6 +687,28 @@
     width: 100%;
     text-align: left;
     border-radius: var(--radius-md);
+  }
+
+  /* Category dropdowns become inline accordions inside the collapse. */
+  .tab-group { width: 100%; }
+  .tab-group-btn {
+    width: 100%;
+    justify-content: space-between;
+    text-align: left;
+    border-radius: var(--radius-md);
+  }
+  .tab-group-menu {
+    position: static;
+    min-width: 100%;
+    margin-top: 0.25rem;
+    padding: 0.25rem 0 0.25rem 0.875rem;
+    border: none;
+    border-left: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 

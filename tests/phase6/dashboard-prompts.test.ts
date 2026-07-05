@@ -34,6 +34,18 @@ describe('Dashboard init prompts', () => {
       expect(FINAL_FALLBACK_PROMPT.length).toBeGreaterThan(0);
     });
 
+    it('should require the period-toggle trend chart and chart hygiene in every prompt', () => {
+      const prompts = [...Object.values(DASHBOARD_PROMPTS), AGENT_DEFAULT_PROMPT, FINAL_FALLBACK_PROMPT];
+      for (const prompt of prompts) {
+        // Weekly/Monthly/Quarterly trend view via the shared segmented control.
+        expect(prompt).toContain('Quarterly');
+        expect(prompt).toContain('.segmented');
+        // Chart hygiene: explicit margins and no degenerate single-slice pies.
+        expect(prompt.toLowerCase()).toContain('margin');
+        expect(prompt).toContain('YAxis width');
+      }
+    });
+
     it('should match finance file contents to the loaded finance prompt', () => {
       const fromFile = readFileSync(join(PROMPTS_DIR, 'finance.md'), 'utf-8').trim();
       expect(DASHBOARD_PROMPTS.finance).toBe(fromFile);

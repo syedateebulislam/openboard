@@ -22,6 +22,24 @@ describe('Accessibility safeguards', () => {
     expect(app).toContain('aria-labelledby={`tab-${activeTab}`}');
   });
 
+  it('should support grouped category navigation in the shared tab shell', () => {
+    const tabs = readFileSync(join(process.cwd(), 'templates/dashboard/src/components/DashboardTabs.tsx'), 'utf-8');
+    const css = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.css'), 'utf-8');
+
+    // Tabs may carry an optional category so many dashboards fit on screen.
+    expect(tabs).toContain('group?: string');
+    // Group dropdown triggers expose disclosure semantics.
+    expect(tabs).toContain('aria-haspopup="menu"');
+    expect(tabs).toContain('aria-expanded={expanded}');
+    // The active dashboard stays announced inside a dropdown/menu context.
+    expect(tabs).toContain("aria-current={selected ? 'page' : undefined}");
+    // Shell styles for group dropdowns and the segmented period toggle ship in App.css.
+    expect(css).toContain('.tab-group-menu');
+    expect(css).toContain('.tabs-list.group-open');
+    expect(css).toContain('.segmented-btn');
+    expect(css).toContain('.card-header-row');
+  });
+
   it('should keep template focus and contrast hooks visible', () => {
     const css = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.css'), 'utf-8');
 
@@ -50,6 +68,22 @@ describe('Accessibility safeguards', () => {
     const componentPrompt = buildComponentGenerationPrompt('Chart', 'test', 'type Row = {}', 'rows', '<div />');
     expect(componentPrompt).toContain('visible title or aria-label');
     expect(componentPrompt).toContain('do not rely on color alone');
+  });
+
+  it('should instruct the LLM on grouped tabs, the period toggle, and chart hygiene', () => {
+    // Grouped navigation: tabs carry a category from a fixed vocabulary.
+    expect(SYSTEM_PROMPT).toContain('{ id, label, group }');
+    expect(SYSTEM_PROMPT).toContain('"Food & Dining"');
+    expect(SYSTEM_PROMPT).toContain('PRESERVE the group of every existing tab');
+    // Required Weekly/Monthly/Quarterly trend card via the shared segmented control.
+    expect(SYSTEM_PROMPT).toContain('Weekly / Monthly / Quarterly');
+    expect(SYSTEM_PROMPT).toContain('.segmented');
+    expect(SYSTEM_PROMPT).toContain('card-header-row');
+    // Chart hygiene: margins, label truncation, tick density, degenerate pies.
+    expect(SYSTEM_PROMPT).toContain('explicit margin');
+    expect(SYSTEM_PROMPT).toContain('YAxis width');
+    expect(SYSTEM_PROMPT).toContain('minTickGap');
+    expect(SYSTEM_PROMPT).toContain('NEVER render a pie/donut');
   });
 
   it('should keep generated auth and dashboard data server protected', () => {
