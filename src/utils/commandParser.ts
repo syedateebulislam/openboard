@@ -32,6 +32,7 @@ export type Command =
   | { type: 'history' }
   | { type: 'logs' }
   | { type: 'data' }
+  | { type: 'model'; args: string[] }
   | { type: 'help' }
   | { type: 'unknown'; text: string; suggestions: string[] }
   | { type: 'message'; text: string };
@@ -56,6 +57,7 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
   { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoard readiness' },
   { command: '/status', category: 'info', color: 'green', description: 'Show dashboard/project status' },
+  { command: '/model', category: 'info', color: 'green', description: 'Show or switch the LLM model and effort' },
   { command: '/config', category: 'info', color: 'green', description: 'Open settings' },
   { command: '/commands', category: 'info', color: 'green', description: 'Show command palette' },
   { command: '/help', category: 'info', color: 'green', description: 'Show command help' },
@@ -83,6 +85,9 @@ export function parseCommand(input: string): Command {
   if (/^\/config$/i.test(trimmed)) return { type: 'config' };
   if (/^\/status$/i.test(trimmed)) return { type: 'status' };
   if (/^\/help$/i.test(trimmed)) return { type: 'help' };
+  if (/^\/model(\s|$)/i.test(trimmed)) {
+    return { type: 'model', args: input.trim().split(/\s+/).slice(1) };
+  }
 
   if (trimmed.startsWith('/')) {
     return {
@@ -144,6 +149,7 @@ export const HELP_TEXT = `Available commands:
   /history      - Show this dashboard's prompt history
   /logs         - Show latest operation log
   /doctor       - Check LLM/GitHub/Vercel/project readiness
+  /model        - Show current LLM model/effort; /model <model> [effort] to switch
   /config       - Open settings screen
   /status       - Show board info + deploy URL
   /commands     - Show command palette

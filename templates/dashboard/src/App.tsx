@@ -6,6 +6,7 @@ import { LoginPage } from './components/LoginPage'
 import { ThemeToggle } from './components/ThemeToggle'
 import { DashboardTabs } from './components/DashboardTabs'
 import type { DashboardTabItem } from './components/DashboardTabs'
+import { HeaderLinks } from './components/HeaderLinks'
 
 function DashboardContent() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -20,11 +21,18 @@ function DashboardContent() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <div className="app-header-side" />
-        <div className="app-brand">
+        <div className="app-header-side">
+          <HeaderLinks />
+        </div>
+        <button
+          type="button"
+          className="app-brand"
+          onClick={() => setActiveTab(tabs[0].id)}
+          aria-label="Go to home tab"
+        >
           <BrandLogo />
           <h1 className="app-title">OpenBoard</h1>
-        </div>
+        </button>
         <div className="app-header-side app-header-actions">
           <span className="app-greeting">
             Hi, <strong>{user?.username}</strong>

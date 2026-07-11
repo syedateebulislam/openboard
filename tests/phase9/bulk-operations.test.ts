@@ -58,6 +58,7 @@ function makeBoard(overrides: Partial<BoardConfig> = {}): BoardConfig {
 
 function fakeRegistry(initial: BoardConfig[], sharedDir?: string) {
   let list = [...initial];
+  let masterState: { hash: string; generatedAt: string } | undefined;
   return {
     listBoards: () => list,
     getSharedProjectDir: () => sharedDir,
@@ -70,6 +71,10 @@ function fakeRegistry(initial: BoardConfig[], sharedDir?: string) {
       if (i >= 0) list[i] = b;
       else list.push(b);
       return list;
+    }),
+    getMasterState: () => masterState,
+    setMasterState: vi.fn((state?: { hash: string; generatedAt: string }) => {
+      masterState = state;
     }),
     current: () => list,
   };
@@ -180,8 +185,8 @@ describe('Bulk dashboard operations', () => {
       const result = await service.updateAllWithPrompt('add a refresh footer');
 
       expect(result.success).toBe(true);
-      // One LLM generation per board...
-      expect(completeMock).toHaveBeenCalledTimes(2);
+      // One LLM generation per board, plus one for the master Overview tab...
+      expect(completeMock).toHaveBeenCalledTimes(3);
       // ...but build/push/deploy happen exactly once for the shared app.
       expect(projectManager.build).toHaveBeenCalledTimes(1);
       expect(projectManager.commitAndPush).toHaveBeenCalledTimes(1);
@@ -205,7 +210,7 @@ describe('Bulk dashboard operations', () => {
       const result = await service.updateAllWithPrompt('add a footer');
 
       expect(result.success).toBe(true);          // second board succeeded
-      expect(completeMock).toHaveBeenCalledTimes(2); // both attempted
+      expect(completeMock).toHaveBeenCalledTimes(3); // both attempted + master tab
       expect(projectManager.deploy).toHaveBeenCalledTimes(1); // still one deploy
     });
 
@@ -236,8 +241,43 @@ describe('Bulk dashboard operations', () => {
       const result = await service.updateAllWithPrompt('add a footer');
 
       expect(result.success).toBe(true);
-      expect(completeMock).toHaveBeenCalledTimes(1); // only the board with data
+      expect(completeMock).toHaveBeenCalledTimes(2); // only the board with data + master tab
       expect(projectManager.deploy).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips generated path rejections but does not hide real write failures', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      completeMock.mockResolvedValue([
+        '//CODE_START',
+        '--- FILE: App.css ---',
+        'body {}',
+        '--- END FILE ---',
+        '--- FILE: components/Generated.tsx ---',
+        'export default function Generated() { return null }',
+        '--- END FILE ---',
+        '//CODE_END',
+      ].join('\n'));
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv] })];
+      const registry = fakeRegistry(boards, workspace);
+      const template = fakeTemplate();
+      template.writeGeneratedFile.mockImplementation(async (_projectDir, filePath) => {
+        if (filePath === 'App.css') {
+          throw new Error('Generated file path is not allowed: App.css');
+        }
+      });
+      const { service, projectManager } = makeService({ registry, template, runsDir });
+
+      const result = await service.updateAllWithPrompt('add a footer');
+
+      expect(result.success).toBe(true);
+      expect(projectManager.deploy).toHaveBeenCalledTimes(1);
+
+      template.writeGeneratedFile.mockRejectedValueOnce(new Error('EIO: disk full'));
+      const failing = await service.updateAllWithPrompt('add another footer');
+
+      expect(failing.success).toBe(false);
+      expect(failing.error).toContain('EIO: disk full');
     });
   });
 
@@ -276,9 +316,11 @@ describe('Bulk dashboard operations', () => {
 
       expect(result.success).toBe(true);
       expect(template.restoreAppShell).toHaveBeenCalledTimes(1);
+      expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/MasterDashboard.tsx');
       expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/A.tsx');
       expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/B.tsx');
       expect(template.deleteProtectedDashboardData).toHaveBeenCalledTimes(2);
+      expect(registry.setMasterState).toHaveBeenCalledWith(undefined);
       expect(registry.current()).toHaveLength(0);
       expect(projectManager.build).toHaveBeenCalledTimes(1);
       expect(projectManager.deploy).toHaveBeenCalledTimes(1);

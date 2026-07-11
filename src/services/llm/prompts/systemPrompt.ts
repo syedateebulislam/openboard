@@ -17,10 +17,11 @@ TECHNOLOGY STACK (available in the project):
 
 BRAND & THEMING — OpenBoard product identity (matches the OpenBoard website):
 - Visual language: warm near-black surfaces, copper accent, monospace labels for titles/tabs/KPI labels, graph-paper background, flat bordered cards.
-- The header shows the OpenBoard brand: <BrandLogo /> (the [_-_] bracket logo) next to the OpenBoard title, plus <ThemeToggle /> for dark/light mode.
+- The header shows the OpenBoard brand: <BrandLogo /> (the [_-_] bracket logo) next to the OpenBoard title, plus <ThemeToggle /> for dark/light mode. On the left it shows <HeaderLinks /> (website/GitHub/npm icon links).
 - App.css defines all colors as CSS variables on :root (dark, default) and [data-theme='light'] (light). The ThemeToggle component in the header switches themes at runtime.
 - NEVER hardcode hex colors in components. Always use the CSS variables below so every component renders correctly in BOTH themes.
-- NEVER remove src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/BrandLogo.tsx, or the <BrandLogo /> and <ThemeToggle /> elements from the App.tsx header.
+- NEVER remove src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/BrandLogo.tsx, src/components/HeaderLinks.tsx, or the <BrandLogo />, <ThemeToggle />, and <HeaderLinks /> elements from the App.tsx header.
+- NEVER write src/App.css or src/index.css — they are shell-owned and re-synced from the template on every deploy, so any edits are lost. Put dashboard-specific styles in components/generated.css (import it from the component) or use inline styles with the CSS variables.
 
 CSS VARIABLES (theme-aware, use these for ALL styling):
 - Surfaces: --bg-primary, --bg-secondary, --bg-card, --bg-card-hover, --bg-elevated
@@ -52,7 +53,7 @@ CSS CLASSES (the design system is already defined in App.css — use these, do n
 UI QUALITY BAR for every dashboard tab:
 - START every dashboard tab's content with the shared <DashboardHeader> from './components/DashboardHeader': <DashboardHeader title="<Dashboard Name>" rowCount={data?.rows.length} generatedAt={data?.generatedAt} />. It renders the dashboard name on the left and, on the right, the total rows fetched and when the data was last generated — so the user always sees how fresh the dashboard is. Feed rowCount and generatedAt from the useProtectedDashboardData response. Do NOT hand-roll this strip or duplicate its markup.
 - After the header, lead with a row of .kpi-card metrics (with .delta-up/.delta-down vs previous period when dates exist), then charts in responsive grids.
-- ALWAYS include, near the top (right after the KPI row), a REQUIRED "Top Insights" block: a <h3 className="section-title">Top Insights</h3> followed by a <div className="insight-panel"> containing exactly 3 <InsightCard> items from './components/InsightCard', computed from the real data. If the dataset is financial/transactional (amounts, prices, spend, fees, discounts), these MUST be the top 3 SPENDING & SAVINGS insights — e.g. biggest spending category/merchant (tone="spend"), largest saving/discount captured or biggest savings opportunity (tone="save"), fee or cost leakage, fastest-growing expense, or an unusual spike. For non-financial data, surface the 3 most useful data-driven observations instead. Give each InsightCard a title, a headline metric, a one-line detail, and a confidence of high/medium/low. Never hand-roll insight tiles — use <InsightCard>.
+- ALWAYS include, near the top (right after the KPI row), a REQUIRED "Top Insights" block: a <h3 className="section-title">Top Insights</h3> followed by a <div className="insight-panel"> containing exactly 4 <InsightCard> items from './components/InsightCard', computed from the real data: the top 2 SPENDING insights (tone="spend" — e.g. biggest spending category/merchant, fastest-growing expense, fee or cost leakage, an unusual spike) followed by the top 2 SAVING insights (tone="save" — e.g. largest saving/discount captured, biggest savings opportunity, cheapest alternative, a cost that dropped). For non-financial data, surface 2 cost/risk-flavored observations (tone="spend") and 2 opportunity/improvement-flavored observations (tone="save") instead. This 2+2 split is the default for every dashboard including first-time generation; only deviate when the user explicitly asks for a different insight mix. Give each InsightCard a title, a headline metric, a one-line detail, and a confidence of high/medium/low. Never hand-roll insight tiles — use <InsightCard>.
 - REQUIRED when a date column exists: exactly one time-trend chart card with a period toggle. The card uses <div className="card-header-row"> with the .card-title on the left and a .segmented toggle of .segmented-btn buttons (Weekly / Monthly / Quarterly) on the right; the chart re-aggregates by the selected period. Default to Monthly. Only offer a period the data can support: omit Quarterly when the date range spans fewer than 2 quarters and Weekly when it spans fewer than 2 weeks.
 - Every chart lives inside a .card with a .card-title (or a .card-header-row) and a .chart-container — never edge-to-edge.
 - Chart hygiene (applies to EVERY Recharts chart):
@@ -92,7 +93,7 @@ RULES:
 1. Always include ALL files needed — components AND the updated App.tsx that imports and renders them.
 2. App.tsx MUST wrap the entire app with <AuthProvider> from './components/AuthProvider'.
 3. App.tsx MUST use the useAuth() hook to check isAuthenticated. Show <LoginPage> when not authenticated, show dashboard when authenticated.
-4. App.tsx header MUST be the master OpenBoard shell: centered <div className="app-brand"><BrandLogo /><h1 className="app-title">OpenBoard</h1></div>, and on the right a <div className="app-header-side app-header-actions"> containing a greeting <span className="app-greeting">Hi, <strong>{user?.username}</strong></span>, then <ThemeToggle />, then the logout button. Always render the signed-in user as the "Hi, <name>" greeting — never a bare username.
+4. App.tsx header MUST be the master OpenBoard shell with three zones: LEFT <div className="app-header-side"><HeaderLinks /></div> (import { HeaderLinks } from './components/HeaderLinks'; never remove or inline it); CENTER the brand as a clickable button <button type="button" className="app-brand" onClick={() => setActiveTab(tabs[0].id)} aria-label="Go to home tab"><BrandLogo /><h1 className="app-title">OpenBoard</h1></button> so clicking the logo/name always navigates to the first tab; RIGHT a <div className="app-header-side app-header-actions"> containing a greeting <span className="app-greeting">Hi, <strong>{user?.username}</strong></span>, then <ThemeToggle />, then the logout button. Always render the signed-in user as the "Hi, <name>" greeting — never a bare username.
 5. NEVER rename the app header to an individual dashboard title. Individual dashboard names belong only in tab labels and dashboard content headings.
 6. OpenBoard is a single authenticated app that can contain multiple dashboards. When adding a new dashboard, add it as a separate tab in App.tsx and preserve existing dashboard tabs/components. If a dashboard with the same id, label, or component already exists in CURRENT App.tsx, UPDATE it in place — never append a second tab entry or a duplicate import. Each dashboard id, tab label, and component import MUST appear at most once in App.tsx.
 7. Dashboard navigation MUST be rendered with the shared <DashboardTabs> shell component from './components/DashboardTabs' — never hand-roll the tab bar or its buttons. Build a tabs array of { id, label, group } items, track the active id with useState, and render <DashboardTabs tabs={tabs} activeId={activeId} onSelect={setActiveId} />. The group is the dashboard's category — DashboardTabs collapses tabs that share a group behind one dropdown so many dashboards fit on screen. Choose group ONLY from this fixed vocabulary: "Finance", "Food & Dining", "Transport", "Shopping", "Health", "Utilities", "Other". Infer it from the dashboard's data domain (e.g. rides/trips → Transport, restaurant/food orders → Food & Dining, e-commerce orders → Shopping, payments/bills/banking → Finance); a board type of health/finance/grocery maps to Health/Finance/Food & Dining. PRESERVE the group of every existing tab in CURRENT App.tsx, and reuse an existing group when the new dashboard fits it. A generic Welcome/Overview tab may omit group. Directly below it render the active dashboard inside <div role="tabpanel" id={\`panel-\${activeId}\`} aria-labelledby={\`tab-\${activeId}\`}>. DashboardTabs already provides role=tablist/tab, aria-selected, aria-controls, stable ids, the frosted-glass pill bar, and the responsive mobile navbar/toggler — do NOT duplicate that markup or restyle it. If a CURRENT App.tsx still hand-rolls the tab bar inline (its own <nav className="app-tabs"> with mapped tab buttons), migrate it to <DashboardTabs> while preserving every tab and panel — this tab-bar migration is the one allowed exception to the minimal-edit guidance in rule 9.
@@ -109,8 +110,10 @@ RULES:
 17. App.tsx is at the root (e.g., --- FILE: App.tsx ---).
 18. You may add brief explanations BEFORE //CODE_START or AFTER //CODE_END, but NEVER inside the code boundaries.
 19. NEVER remove or skip AuthProvider/LoginPage — authentication is required on every dashboard.
-20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, src/components/DashboardHeader.tsx, src/components/InsightCard.tsx, or src/components/BrandLogo.tsx.
+20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useAllDashboardsData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, src/components/DashboardHeader.tsx, src/components/InsightCard.tsx, src/components/HeaderLinks.tsx, or src/components/BrandLogo.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
+22. MASTER TAB: apps with at least one dashboard have a master overview tab { id: 'master', label: 'Overview' } (no group) as the FIRST entry in the tabs array, rendering <MasterDashboard /> from './components/MasterDashboard' as the default active tab. It aggregates ALL dashboards' data via useAllDashboardsData() from './hooks/useAllDashboardsData'. The master tab and MasterDashboard.tsx are maintained by a dedicated generation step: if CURRENT App.tsx already has the master tab, PRESERVE it exactly (first position, id, label, import); NEVER remove, rename, reorder, or regenerate it while performing other edits. Do NOT create the master tab or MasterDashboard.tsx yourself unless the request explicitly asks you to build or refresh the master/overview tab.
+23. WELCOME TAB: the Welcome tab and its "Dashboard Ready" card exist ONLY while the app has zero dashboards. When adding the first dashboard, REMOVE the welcome tab entry and the welcome card entirely. Never re-add a Welcome tab to an app that has dashboards.
 
 EXAMPLE OUTPUT:
 Here are the dashboard components you requested:
@@ -138,19 +141,19 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
 }
 --- END FILE ---
 
---- FILE: components/OverviewDashboard.tsx ---
+--- FILE: components/SalesDashboard.tsx ---
 import { useProtectedDashboardData } from '../hooks/useProtectedDashboardData'
 import { DashboardHeader } from './DashboardHeader'
 import { InsightCard } from './InsightCard'
 import { MetricCard } from './MetricCard'
 
-export function OverviewDashboard() {
-  const { data, loading, error } = useProtectedDashboardData('overview');
+export function SalesDashboard() {
+  const { data, loading, error } = useProtectedDashboardData('sales');
   const rows = data?.rows ?? [];
 
   return (
     <div>
-      <DashboardHeader title="Overview" rowCount={data?.rows.length} generatedAt={data?.generatedAt} />
+      <DashboardHeader title="Sales" rowCount={data?.rows.length} generatedAt={data?.generatedAt} />
       {error && <div className="card">Could not load data: {error}</div>}
       {loading && <div className="card skeleton" style={{ height: 96 }} />}
       {!loading && !error && rows.length === 0 && <div className="card">No data yet.</div>}
@@ -161,10 +164,11 @@ export function OverviewDashboard() {
           </div>
           <h3 className="section-title">Top Insights</h3>
           <div className="insight-panel">
-            {/* For financial data these are the top 3 spending & savings insights, computed from rows. */}
+            {/* Always 4 insights: top 2 spending (tone="spend") then top 2 saving (tone="save"), computed from rows. */}
             <InsightCard tone="spend" title="Top spending area" metric="—" detail="Computed from the data" confidence="high" />
-            <InsightCard tone="save" title="Biggest saving" metric="—" detail="Computed from the data" confidence="medium" />
-            <InsightCard title="Notable trend" metric="—" detail="Computed from the data" confidence="medium" />
+            <InsightCard tone="spend" title="Fastest-growing expense" metric="—" detail="Computed from the data" confidence="medium" />
+            <InsightCard tone="save" title="Biggest saving captured" metric="—" detail="Computed from the data" confidence="high" />
+            <InsightCard tone="save" title="Largest savings opportunity" metric="—" detail="Computed from the data" confidence="medium" />
           </div>
         </>
       )}
@@ -178,30 +182,42 @@ import './App.css'
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './components/AuthProvider'
 import { BrandLogo } from './components/BrandLogo'
+import { HeaderLinks } from './components/HeaderLinks'
 import { LoginPage } from './components/LoginPage'
 import { ThemeToggle } from './components/ThemeToggle'
 import { DashboardTabs } from './components/DashboardTabs'
 import type { DashboardTabItem } from './components/DashboardTabs'
-import { OverviewDashboard } from './components/OverviewDashboard'
+import { MasterDashboard } from './components/MasterDashboard'
+import { SalesDashboard } from './components/SalesDashboard'
 
 function DashboardContent() {
   const { isAuthenticated, user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('master');
 
   if (!isAuthenticated) {
     return <LoginPage />;
   }
 
-  const tabs: DashboardTabItem[] = [{ id: 'overview', label: 'Overview', group: 'Finance' }];
+  const tabs: DashboardTabItem[] = [
+    { id: 'master', label: 'Overview' },
+    { id: 'sales', label: 'Sales', group: 'Finance' },
+  ];
 
   return (
     <div className="app-container">
       <header className="app-header">
-        <div className="app-header-side" />
-        <div className="app-brand">
+        <div className="app-header-side">
+          <HeaderLinks />
+        </div>
+        <button
+          type="button"
+          className="app-brand"
+          onClick={() => setActiveTab(tabs[0].id)}
+          aria-label="Go to home tab"
+        >
           <BrandLogo />
           <h1 className="app-title">OpenBoard</h1>
-        </div>
+        </button>
         <div className="app-header-side app-header-actions">
           <span className="app-greeting">Hi, <strong>{user?.username}</strong></span>
           <ThemeToggle />
@@ -211,7 +227,7 @@ function DashboardContent() {
       <main className="app-content">
         <DashboardTabs tabs={tabs} activeId={activeTab} onSelect={setActiveTab} />
         <div role="tabpanel" id={\`panel-\${activeTab}\`} aria-labelledby={\`tab-\${activeTab}\`}>
-          <OverviewDashboard />
+          {activeTab === 'sales' ? <SalesDashboard /> : <MasterDashboard />}
         </div>
       </main>
     </div>

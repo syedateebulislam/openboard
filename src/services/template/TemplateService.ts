@@ -28,15 +28,47 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
+// App.css and index.css are deliberately NOT allowlisted: they are shell-owned
+// and re-synced from the template on every deploy (see SHELL_SYNC_FILES).
+// LLM-generated styles belong in components/*.css (e.g. components/generated.css).
 const GENERATED_FILE_ALLOWLIST = [
   /^App\.tsx$/,
-  /^App\.css$/,
-  /^index\.css$/,
   /^components\/[\w.-]+(?:\/[\w.-]+)*\.(?:tsx|ts|css)$/,
   /^types\/[\w.-]+(?:\/[\w.-]+)*\.ts$/,
   /^hooks\/[\w.-]+(?:\/[\w.-]+)*\.(?:ts|tsx)$/,
   /^utils\/[\w.-]+(?:\/[\w.-]+)*\.(?:ts|tsx)$/,
   /^lib\/[\w.-]+(?:\/[\w.-]+)*\.(?:ts|tsx)$/,
+];
+
+// Shell-owned files re-copied from the template into every project before each
+// deploy, so template fixes reach existing projects. LLM-owned files are
+// deliberately absent: src/App.tsx, generated components/hooks, api/_data/**,
+// package.json (dependency drift must be an explicit migration), index.html.
+const SHELL_SYNC_FILES = [
+  'src/App.css',
+  'src/index.css',
+  'src/main.tsx',
+  'src/components/AuthProvider.tsx',
+  'src/components/BrandLogo.tsx',
+  'src/components/DashboardHeader.tsx',
+  'src/components/DashboardTabs.tsx',
+  'src/components/HeaderLinks.tsx',
+  'src/components/InsightCard.tsx',
+  'src/components/LoginPage.tsx',
+  'src/components/ThemeToggle.tsx',
+  'src/hooks/useAllDashboardsData.ts',
+  'src/hooks/useProtectedDashboardData.ts',
+  'src/hooks/useTheme.ts',
+  'api/_auth.ts',
+  'api/auth.ts',
+  'api/dashboard-data.ts',
+  'vercel.json',
+  'eslint.config.js',
+  'tailwind.config.js',
+  'vite.config.ts',
+  'tsconfig.json',
+  'tsconfig.app.json',
+  'tsconfig.node.json',
 ];
 
 export interface ScaffoldVars {
@@ -77,6 +109,30 @@ export class TemplateService {
     const targetPath = this.resolveGeneratedFilePath(outputDir, relativePath);
     await mkdir(dirname(targetPath), { recursive: true });
     await writeFile(targetPath, content, 'utf-8');
+  }
+
+  /**
+   * Re-copy shell-owned files from the template into an existing project so
+   * template improvements (header, CSS, api handlers, shell components) reach
+   * already-generated projects. Never touches LLM-owned files (src/App.tsx,
+   * generated components, api/_data). Missing template files are skipped.
+   *
+   * @returns the project-relative paths that were synced
+   */
+  async syncShellFiles(outputDir: string, vars?: ScaffoldVars): Promise<string[]> {
+    const effectiveVars = vars ?? { boardName: 'openboard-workspace', boardTitle: 'OpenBoard' };
+    const synced: string[] = [];
+    for (const relPath of SHELL_SYNC_FILES) {
+      const srcPath = resolve(this.templatesDir, relPath);
+      try {
+        await stat(srcPath);
+      } catch {
+        continue; // template file absent — skip
+      }
+      await this.copyFile(srcPath, resolve(outputDir, relPath), effectiveVars);
+      synced.push(relPath);
+    }
+    return synced;
   }
 
   /**

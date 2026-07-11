@@ -7,6 +7,7 @@ import { App } from './App.js';
 import { DashboardUpdateService } from './services/project/DashboardUpdateService.js';
 import type { DashboardUpdateResult } from './services/project/DashboardUpdateService.js';
 import type { PipelineEvent, PipelineEventSink } from './services/project/pipelinePhases.js';
+import { TOTAL_STEPS, phaseStep, phaseStepLabel } from './services/project/pipelinePhases.js';
 import { classifyAgentError } from './utils/errorCodes.js';
 import type { BoardConfig } from './types/board.js';
 import type { SetupPartResult } from './services/config/SetupService.js';
@@ -39,6 +40,7 @@ const cli = meow(`
     --name              Dashboard display name for creation
     --type              Dashboard type: health, finance, grocery, custom
     --prompt            User prompt for initial generation or dashboard update
+    --effort            LLM execution effort: low, medium, high, max (agent setup)
     --json              Emit machine-readable JSON (NDJSON progress on stderr)
     --dry-run           Parse + analyze and return the plan; no LLM call, no deploy
     --idempotency-key   Reuse the result of a prior succeeded create with this key
@@ -103,6 +105,9 @@ const cli = meow(`
     model: {
       type: 'string',
     },
+    effort: {
+      type: 'string',
+    },
     apiKey: {
       type: 'string',
     },
@@ -156,17 +161,34 @@ const jsonMode = Boolean(cli.flags.json);
 
 /**
  * Progress plumbing:
- *  - JSON mode: structured NDJSON events on stderr ({"event":"phase"|"log"|"result",...})
- *    so orchestrators can track phase + percent and detect wedged phases.
- *  - Plain mode: human-readable lines on stdout.
+ *  - JSON mode: structured NDJSON events on stderr ({"event":"phase"|"log"|"result",
+ *    "step":N,"totalSteps":8,...}) so orchestrators can track phase + percent
+ *    and detect wedged phases.
+ *  - Plain mode: human-readable "[step/total]" labelled lines on stdout, also
+ *    derived from the structured events so an agent watching stdout always
+ *    sees which step is running and how far along the pipeline is.
  */
-const ndjsonSink: PipelineEventSink | undefined = jsonMode
+const pipelineSink: PipelineEventSink = jsonMode
   ? (event: PipelineEvent) => console.error(JSON.stringify(event))
-  : undefined;
-const lineProgress = jsonMode ? undefined : (line: string) => console.log(line);
+  : (event: PipelineEvent) => {
+      if (event.event === 'phase' && event.phase) {
+        const pct = typeof event.pct === 'number' ? ` (${event.pct}%)` : '';
+        console.log(`\n${phaseStepLabel(event.phase)}${pct}`);
+      } else if (event.event === 'log' && event.message !== undefined) {
+        const prefix = event.phase ? `[${phaseStep(event.phase)}/${TOTAL_STEPS}] ` : '';
+        console.log(`${prefix}${event.message}`);
+      } else if (event.event === 'result') {
+        console.log(event.success
+          ? '\n✓ Pipeline completed.'
+          : `\n✗ Pipeline failed${event.message ? `: ${event.message}` : ''}`);
+      }
+    };
+// Pipeline progress flows through the structured sink in BOTH modes now; the
+// legacy line callback stays undefined so lines are never printed twice.
+const lineProgress = undefined;
 
 function makeService(): DashboardUpdateService {
-  return new DashboardUpdateService(undefined, undefined, undefined, undefined, ndjsonSink);
+  return new DashboardUpdateService(undefined, undefined, undefined, undefined, pipelineSink);
 }
 
 function failurePayload(action: string, result: DashboardUpdateResult, dashboardSelector?: string) {
@@ -247,7 +269,7 @@ if (!command || command === 'start') {
   render(React.createElement(App));
 } else if (command === 'update') {
   const service = makeService();
-  const onProgress = lineProgress ?? ((line: string) => console.error(line));
+  const onProgress = lineProgress; // progress flows through the pipeline sink
 
   if (cli.flags.all && cli.flags.prompt) {
     // Apply one prompt to every dashboard, deploy the shared workspace once.
@@ -346,7 +368,7 @@ if (!command || command === 'start') {
 } else if (command === 'agent') {
   const action = cli.input[1];
   const service = makeService();
-  const onProgress = jsonMode ? undefined : (line: string) => console.log(line);
+  const onProgress = lineProgress; // progress flows through the pipeline sink
 
   if (action === 'setup') {
     const { SetupService } = await import('./services/config/SetupService.js');
@@ -367,6 +389,7 @@ if (!command || command === 'start') {
     const llmInput = {
       provider: cli.flags.provider,
       model: cli.flags.model,
+      effort: cli.flags.effort,
       apiKey,
       ollamaHost: cli.flags.ollamaHost,
       codexAccessToken,
@@ -390,7 +413,7 @@ if (!command || command === 'start') {
       const status = setup.status();
       if (jsonMode) printJson({ success: true, action: 'setup', target: 'status', status });
       else {
-        console.log(`LLM: ${status.llm ? `${status.llm.provider} (${status.llm.model ?? 'default'})` : 'not configured'}`);
+        console.log(`LLM: ${status.llm ? `${status.llm.provider} (${status.llm.model ?? 'default'}, effort: ${status.llm.effort ?? 'medium'})` : 'not configured'}`);
         console.log(`GitHub: ${status.github ? status.github.username ?? 'configured' : 'not configured'}`);
         console.log(`Vercel: ${status.vercel ? 'configured' : 'not configured'}`);
         console.log(`Dashboard login: ${status.dashboardAuth ? 'configured' : 'not configured'}`);

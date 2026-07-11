@@ -15,6 +15,7 @@ import type {
   LLMStreamChunk,
   LLMValidationResult,
 } from '../../types/llm.js';
+import { startHeartbeat } from './heartbeat.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class MoonshotProvider implements LLMProvider {
@@ -82,6 +83,7 @@ export class MoonshotProvider implements LLMProvider {
    * Returns the full assistant message as a string.
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
+    const stopHeartbeat = startHeartbeat(options.onProgress, `moonshot (${this.model})`);
     try {
       const client = await this.getClient();
       const response = await client.chat.completions.create({
@@ -110,6 +112,8 @@ export class MoonshotProvider implements LLMProvider {
         throw new Error(`Context window exceeded: ${msg}`);
       }
       throw new Error(msg);
+    } finally {
+      stopHeartbeat();
     }
   }
 

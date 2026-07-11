@@ -15,9 +15,12 @@ import type OpenAI from 'openai';
 import type {
   LLMProvider,
   LLMCompletionOptions,
+  LLMEffort,
   LLMStreamChunk,
   LLMValidationResult,
 } from '../../types/llm.js';
+import { openaiReasoningEffort } from '../../config/llmCatalog.js';
+import { startHeartbeat } from './heartbeat.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class OpenAIProvider implements LLMProvider {
@@ -25,10 +28,12 @@ export class OpenAIProvider implements LLMProvider {
   private clientPromise?: Promise<OpenAI>;
   private apiKey: string;
   private model: string;
+  private effort?: LLMEffort;
 
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, effort?: LLMEffort) {
     this.apiKey = apiKey;
     this.model = model;
+    this.effort = effort;
   }
 
   /** Lazily import and instantiate the OpenAI SDK on first use to keep TUI startup fast. */
@@ -77,13 +82,24 @@ export class OpenAIProvider implements LLMProvider {
    * Returns the full assistant message as a string.
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
+    const stopHeartbeat = startHeartbeat(options.onProgress, `openai (${this.model})`);
     try {
       const client = await this.getClient();
+      // Reasoning-capable models take reasoning_effort and reject both
+      // temperature and max_tokens (they require max_completion_tokens).
+      const reasoningEffort = openaiReasoningEffort(this.model, this.effort);
       const response = await client.chat.completions.create({
         model: this.model,
         messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
-        temperature: options.temperature ?? 0.7,
-        max_tokens: options.maxTokens ?? 4096,
+        ...(reasoningEffort
+          ? {
+              reasoning_effort: reasoningEffort,
+              max_completion_tokens: options.maxTokens ?? 4096,
+            }
+          : {
+              temperature: options.temperature ?? 0.7,
+              max_tokens: options.maxTokens ?? 4096,
+            }),
       });
       if (options.onUsage && response.usage) {
         options.onUsage({
@@ -105,6 +121,8 @@ export class OpenAIProvider implements LLMProvider {
         throw new Error(`Context window exceeded: ${msg}`);
       }
       throw new Error(msg);
+    } finally {
+      stopHeartbeat();
     }
   }
 

@@ -24,6 +24,16 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing dashboard query parameter' });
   }
 
+  // '__all__' returns every dashboard's data (for the master/overview tab).
+  // It can never collide with a real slug: slugs must match DASHBOARD_NAME.
+  if (dashboard === '__all__') {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.status(200).json({
+      dashboards: PROTECTED_DASHBOARD_DATA,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+
   try {
     const safeDashboard = validateDashboardName(dashboard);
     const data = (PROTECTED_DASHBOARD_DATA as Record<string, unknown>)[safeDashboard];

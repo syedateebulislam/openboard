@@ -23,7 +23,8 @@ import { OpenAICodexProvider } from '../services/llm/OpenAICodexProvider.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { GitHubService } from '../services/deploy/GitHubService.js';
 import { VercelService } from '../services/deploy/VercelService.js';
-import type { LLMConfig } from '../types/llm.js';
+import type { LLMConfig, LLMEffort } from '../types/llm.js';
+import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, MODEL_CHOICES } from '../config/llmCatalog.js';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
 
@@ -77,62 +78,9 @@ const LLM_PROVIDERS = [
   { label: '← Go Back', value: 'back' },
 ];
 
-const DEFAULT_MODELS: Record<LLMProviderName, string> = {
-  openai: 'gpt-4o',
-  'openai-codex': 'gpt-5.5',
-  anthropic: 'claude-sonnet-4-5',
-  moonshot: 'moonshot-v1-128k',
-  gemini: 'gemini-2.5-pro',
-  ollama: 'qwen2.5-coder:7b',
-};
-
-const MODEL_CHOICES: Record<LLMProviderName, Array<{ label: string; value: string }>> = {
-  openai: [
-    { label: 'GPT-4o (Latest, 128K context)', value: 'gpt-4o' },
-    { label: 'GPT-4 Turbo (Fast, 128K context)', value: 'gpt-4-turbo' },
-    { label: 'GPT-3.5 Turbo (Cheap, 16K context)', value: 'gpt-3.5-turbo' },
-  ],
-  'openai-codex': [
-    { label: 'GPT-5.5 (Codex recommended)', value: 'gpt-5.5' },
-    { label: 'GPT-5.4 (Codex)', value: 'gpt-5.4' },
-    { label: 'GPT-5.4 Mini (Codex, fast)', value: 'gpt-5.4-mini' },
-    { label: 'GPT-5.3 Codex', value: 'gpt-5.3-codex' },
-  ],
-  anthropic: [
-    { label: 'Claude Opus 4.5 (Most capable, 200K)', value: 'claude-opus-4-5' },
-    { label: 'Claude Sonnet 4.5 (Balanced, 200K)', value: 'claude-sonnet-4-5' },
-    { label: 'Claude Haiku 3.5 (Fast, 200K)', value: 'claude-haiku-3-5' },
-  ],
-  moonshot: [
-    { label: 'Kimi v1-128k (128K context)', value: 'moonshot-v1-128k' },
-    { label: 'Kimi v1-32k (32K context)', value: 'moonshot-v1-32k' },
-    { label: 'Kimi v1-8k (8K context)', value: 'moonshot-v1-8k' },
-  ],
-  gemini: [
-    { label: 'Gemini 2.5 Pro (Most capable, 1M context — AI Pro plan)', value: 'gemini-2.5-pro' },
-    { label: 'Gemini 2.5 Flash (Fast, 1M context)', value: 'gemini-2.5-flash' },
-    { label: 'Gemini 2.0 Flash (Fast, 1M context)', value: 'gemini-2.0-flash' },
-  ],
-  ollama: [
-    // 🏆 Best for Code Generation
-    { label: '🥇 Qwen2.5-Coder 7B (4.5GB) - Best code quality', value: 'qwen2.5-coder:7b' },
-    { label: '🔥 DeepSeek-Coder-V2 16B (8.9GB) - Advanced coding', value: 'deepseek-coder-v2:16b' },
-    { label: '💻 CodeLlama 13B (7.4GB) - Python/JS specialist', value: 'codellama:13b' },
-    { label: '⚡ CodeLlama 7B (3.8GB) - Fast coding', value: 'codellama:7b' },
-    { label: '🌏 Yi-Coder 9B (5.4GB) - Multilingual code', value: 'yi-coder:9b' },
-    
-    // 🎯 Best General Purpose
-    { label: '🦙 Llama 3.1 8B (4.7GB) - Latest Meta model', value: 'llama3.1:8b' },
-    { label: '🦙 Llama 3.2 3B (2GB) - Ultra compact', value: 'llama3.2:3b' },
-    { label: '💎 Gemma2 9B (5.4GB) - Google\'s best', value: 'gemma2:9b' },
-    { label: '🧠 Phi-3 Medium 14B (7.9GB) - Microsoft efficient', value: 'phi3:14b' },
-    
-    // ⚡ Best for Speed
-    { label: '🚀 Mistral 7B (4.1GB) - Blazing fast', value: 'mistral:7b' },
-    { label: '🏃 Phi-3 Mini (2.3GB) - Tiny powerhouse', value: 'phi3:mini' },
-    { label: '⚡ Qwen2.5 7B (4.5GB) - Fast multilingual', value: 'qwen2.5:7b' },
-  ],
-};
+// Model lists, default models, and effort levels live in the shared catalog
+// (src/config/llmCatalog.ts) so the wizard, the in-chat /model command, and
+// `openboard agent setup` validation stay in sync.
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -209,6 +157,7 @@ interface Step1Props {
   onProviderSelect: (p: LLMProviderName) => void;
   onApiKeyChange: (k: string) => void;
   onModelChange: (m: string) => void;
+  onEffortChange: (e: LLMEffort) => void;
   onOllamaHostChange: (h: string) => void;
   onSubmit: () => void;
   onNavigate?: (screen: Screen) => void;
@@ -223,11 +172,12 @@ function Step1LLMConfig({
   onProviderSelect,
   onApiKeyChange,
   onModelChange,
+  onEffortChange,
   onOllamaHostChange,
   onSubmit,
   onNavigate,
 }: Step1Props) {
-  const [phase, setPhase] = useState<'provider' | 'key' | 'model' | 'host'>('provider');
+  const [phase, setPhase] = useState<'provider' | 'key' | 'model' | 'effort' | 'host'>('provider');
 
   // Handle provider selection
   const handleProviderSelect = useCallback(
@@ -266,14 +216,16 @@ function Step1LLMConfig({
     setPhase('model');
   }, []);
 
-  // Handle model submission → validate
-  const handleModelSubmit = useCallback(
-    (value: string) => {
-      if (value.trim().length > 0) {
+  // Handle effort selection → validate
+  const handleEffortSelect = useCallback(
+    (item: { value: string }) => {
+      onEffortChange(item.value as LLMEffort);
+      // Auto-submit after selection
+      setTimeout(() => {
         onSubmit();
-      }
+      }, 150);
     },
-    [onSubmit],
+    [onEffortChange, onSubmit],
   );
 
   return (
@@ -335,16 +287,28 @@ function Step1LLMConfig({
           <Box marginTop={1} flexDirection="column">
             <Text color={UI_COLORS.logo}>Select model:</Text>
             <Box marginTop={1}>
-              <SelectInput 
-                items={MODEL_CHOICES[provider]} 
+              <SelectInput
+                items={MODEL_CHOICES[provider]}
                 onSelect={(item) => {
                   onModelChange(item.value);
-                  // Auto-submit after selection
-                  setTimeout(() => {
-                    onSubmit();
-                  }, 150);
+                  setPhase('effort');
                 }}
               />
+            </Box>
+          </Box>
+          <Text color={UI_COLORS.subtitle}>
+            Use ↑↓ arrows to select, Enter to continue
+          </Text>
+        </Box>
+      )}
+
+      {phase === 'effort' && (
+        <Box flexDirection="column">
+          <Text color={UI_COLORS.logo}>Provider: {provider} · Model: {model}</Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text color={UI_COLORS.logo}>Select execution effort:</Text>
+            <Box marginTop={1}>
+              <SelectInput items={EFFORT_CHOICES} onSelect={handleEffortSelect} />
             </Box>
           </Box>
           <Text color={UI_COLORS.subtitle}>
@@ -629,6 +593,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const [llmProvider, setLLMProvider] = useState<LLMProviderName>('openai');
   const [llmApiKey, setLLMApiKey] = useState('');
   const [llmModel, setLLMModel] = useState('gpt-4o');
+  const [llmEffort, setLLMEffort] = useState<LLMEffort>(DEFAULT_EFFORT);
   const [ollamaHost, setOllamaHost] = useState('http://127.0.0.1:11434');
   const [githubToken, setGithubToken] = useState('');
   const [githubSkipped, setGithubSkipped] = useState(false);
@@ -681,6 +646,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         if (result.valid) {
           config.set('llm.provider', llmProvider);
           config.set('llm.model', modelToUse);
+          config.set('llm.effort', llmEffort);
           setStep1Validation({ status: 'success', message: 'Codex login validated!' });
           setTimeout(() => setStep(2), 800);
         } else {
@@ -705,6 +671,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         // Save to config
         config.set('llm.provider', llmProvider);
         config.set('llm.model', modelToUse);
+        config.set('llm.effort', llmEffort);
         if (llmApiKey.trim()) {
           config.setEncrypted('llm.apiKey', llmApiKey.trim());
         }
@@ -737,7 +704,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       const msg = err instanceof Error ? err.message : String(err);
       setStep1Validation({ status: 'error', message: msg });
     }
-  }, [llmProvider, llmApiKey, llmModel, ollamaHost, config]);
+  }, [llmProvider, llmApiKey, llmModel, llmEffort, ollamaHost, config]);
 
   // -------------------------------------------------------------------------
   // Step 2: Validate GitHub (optional)
@@ -907,6 +874,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
             }}
             onApiKeyChange={setLLMApiKey}
             onModelChange={setLLMModel}
+            onEffortChange={setLLMEffort}
             onOllamaHostChange={setOllamaHost}
             onSubmit={handleStep1Submit}
             onNavigate={onNavigate}

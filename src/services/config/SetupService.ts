@@ -16,7 +16,8 @@ import { OpenAICodexProvider } from '../llm/OpenAICodexProvider.js';
 import { GitHubService } from '../deploy/GitHubService.js';
 import { VercelService } from '../deploy/VercelService.js';
 import { AuthService } from '../auth/AuthService.js';
-import type { LLMConfig } from '../../types/llm.js';
+import type { LLMConfig, LLMEffort } from '../../types/llm.js';
+import { LLM_EFFORTS, isValidEffort } from '../../config/llmCatalog.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
 
 export type ProgressFn = (line: string) => void;
@@ -41,7 +42,7 @@ export interface SetupPartResult {
 }
 
 export interface SetupStatus {
-  llm: { provider: string; model?: string } | null;
+  llm: { provider: string; model?: string; effort?: string } | null;
   github: { username?: string } | null;
   vercel: boolean;
   dashboardAuth: boolean;
@@ -50,6 +51,8 @@ export interface SetupStatus {
 export interface ConfigureLLMInput {
   provider?: string;
   model?: string;
+  /** Execution effort: low | medium | high | max (default medium). */
+  effort?: string;
   apiKey?: string;
   ollamaHost?: string;
   /** ChatGPT/Codex access token for a fully-headless `openai-codex` sign-in. */
@@ -124,6 +127,11 @@ export class SetupService {
       return { configured: false, error: `Invalid or missing --provider. Use one of: ${PROVIDERS.join(', ')}.`, errorCode: 'E_VALIDATION' };
     }
     const model = input.model?.trim() || DEFAULT_MODELS[provider];
+    const effortInput = input.effort?.trim().toLowerCase();
+    if (effortInput && !isValidEffort(effortInput)) {
+      return { configured: false, error: `Invalid --effort "${effortInput}". Use one of: ${LLM_EFFORTS.join(', ')}.`, errorCode: 'E_VALIDATION' };
+    }
+    const effort = effortInput as LLMEffort | undefined;
     const apiKey = input.apiKey?.trim();
     const ollamaHost = input.ollamaHost?.trim();
 
@@ -157,7 +165,8 @@ export class SetupService {
       }
       this.config.set('llm.provider', provider);
       this.config.set('llm.model', model);
-      return { configured: true, detail: `LLM set to openai-codex (${model}).` };
+      if (effort) this.config.set('llm.effort', effort);
+      return { configured: true, detail: `LLM set to openai-codex (${model}${effort ? `, effort: ${effort}` : ''}).` };
     }
 
     const validation = await this.deps.validateLLM(llmConfig);
@@ -167,12 +176,13 @@ export class SetupService {
 
     this.config.set('llm.provider', provider);
     this.config.set('llm.model', model);
+    if (effort) this.config.set('llm.effort', effort);
     if (provider === 'ollama' && ollamaHost) {
       this.config.set('llm.ollamaHost', ollamaHost);
     } else if (apiKey) {
       this.config.setEncrypted('llm.apiKey', apiKey);
     }
-    return { configured: true, detail: `LLM set to ${provider} (${model}).` };
+    return { configured: true, detail: `LLM set to ${provider} (${model}${effort ? `, effort: ${effort}` : ''}).` };
   }
 
   async configureGitHub(token?: string): Promise<SetupPartResult> {
@@ -223,7 +233,13 @@ export class SetupService {
     const githubUser = this.config.get('github.username') as string | undefined;
     const hasGithub = githubUser !== undefined || this.config.has('github.token');
     return {
-      llm: provider ? { provider, model: this.config.get('llm.model') as string | undefined } : null,
+      llm: provider
+        ? {
+            provider,
+            model: this.config.get('llm.model') as string | undefined,
+            effort: this.config.get('llm.effort') as string | undefined,
+          }
+        : null,
       github: hasGithub ? { username: githubUser } : null,
       vercel: this.config.has('vercel.token'),
       dashboardAuth: Boolean(this.config.get('credentials.username')) && this.config.has('credentials.passwordHash'),

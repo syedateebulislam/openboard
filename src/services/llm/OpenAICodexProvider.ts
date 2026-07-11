@@ -15,10 +15,12 @@ import { homedir, tmpdir } from 'node:os';
 import type {
   LLMProvider,
   LLMCompletionOptions,
+  LLMEffort,
   LLMStreamChunk,
   LLMValidationResult,
   LLMMessage,
 } from '../../types/llm.js';
+import { codexReasoningEffort } from '../../config/llmCatalog.js';
 import { crossSpawn, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
@@ -248,9 +250,11 @@ function runCodexLoginCommand(
 export class OpenAICodexProvider implements LLMProvider {
   readonly name = 'openai-codex';
   private model: string;
+  private effort?: LLMEffort;
 
-  constructor(model: string) {
+  constructor(model: string, effort?: LLMEffort) {
     this.model = model;
+    this.effort = effort;
   }
 
   static async loginWithBrowser(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
@@ -341,7 +345,8 @@ export class OpenAICodexProvider implements LLMProvider {
     const outputFile = join(tmpdir(), `openboard-codex-${randomUUID()}.txt`);
     const prompt = messagesToPrompt(options.messages);
 
-    options.onProgress?.(`Running codex (${this.model})…`);
+    const reasoningEffort = codexReasoningEffort(this.effort);
+    options.onProgress?.(`Running codex (${this.model}${reasoningEffort ? `, effort: ${reasoningEffort}` : ''})…`);
     const result = await runWithStdin(
       'codex',
       [
@@ -352,6 +357,7 @@ export class OpenAICodexProvider implements LLMProvider {
         'read-only',
         '--model',
         this.model,
+        ...(reasoningEffort ? ['-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`] : []),
         '--output-last-message',
         outputFile,
         '-',

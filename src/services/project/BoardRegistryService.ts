@@ -47,6 +47,27 @@ export class BoardRegistryService {
     return updated;
   }
 
+  /**
+   * Master-tab generation state: a hash of the dashboard set the master
+   * Overview tab was last generated against, so unchanged sets skip the
+   * regeneration LLM call.
+   */
+  getMasterState(): { hash: string; generatedAt: string } | undefined {
+    const raw = this.config.get('workspace.masterState');
+    if (!raw || typeof raw !== 'object') return undefined;
+    const state = raw as { hash?: unknown; generatedAt?: unknown };
+    if (typeof state.hash !== 'string' || typeof state.generatedAt !== 'string') return undefined;
+    return { hash: state.hash, generatedAt: state.generatedAt };
+  }
+
+  setMasterState(state: { hash: string; generatedAt: string } | undefined): void {
+    if (!state) {
+      this.config.delete('workspace.masterState');
+      return;
+    }
+    this.config.set('workspace.masterState', state);
+  }
+
   getSharedProjectDir(): string | undefined {
     const projectDir = this.config.get('workspace.projectDir');
     if (typeof projectDir !== 'string') return undefined;

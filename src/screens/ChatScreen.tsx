@@ -35,7 +35,8 @@ import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
 import { UI_COLORS } from '../theme.js';
-import { DASHBOARD_LOADING_REMARKS } from '../constants/loadingRemarks.js';
+import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
+import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 
 const projectManager = new ProjectManager();
 
@@ -148,11 +149,6 @@ function fileModifiedAt(path: string): string {
   }
 }
 
-function pickStaticRemark(): string {
-  const index = Math.floor(Math.random() * DASHBOARD_LOADING_REMARKS.length);
-  return DASHBOARD_LOADING_REMARKS[index];
-}
-
 export function ChatScreen({
   board,
   onNavigate,
@@ -174,17 +170,19 @@ export function ChatScreen({
   const [pipeline, setPipeline] = useState<{ phase: PipelinePhase; pct: number; phaseStartedAt: number } | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<'deploy' | 'push' | null>(null);
   const [llmProvider, setLlmProvider] = useState<LLMProvider | null>(null);
+  const [llmMeta, setLlmMeta] = useState<{ model: string; effort: LLMEffort } | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
   const streamingMsgRef = useRef<string | null>(null);
   const logMsgRef = useRef<string | null>(null);
   const lastOperationLogRef = useRef<string>('');
   const autoGenTriggered = useRef(false);
   const headerTitle = allBoards ? 'All Dashboards' : autoGenerateInitial ? 'New Dashboard' : board.title;
-  const headerProvider = llmProvider?.name ?? 'LLM not configured';
-  const headerRemark = useMemo(() => pickStaticRemark(), []);
+  const headerLLMInfo = llmProvider && llmMeta
+    ? `LLM - ${llmProvider.name} · ${llmMeta.model} · effort: ${llmMeta.effort}`
+    : 'LLM - not configured';
 
-  // ── Initialize LLM provider from config ──────────────────────────────────
-  useEffect(() => {
+  // ── Initialize LLM provider from config (re-run by /model) ───────────────
+  const initLLMFromConfig = useCallback(() => {
     try {
       const config = new ConfigService();
       const provider = config.get('llm.provider') as string | undefined;
@@ -207,19 +205,26 @@ export function ChatScreen({
       const baseUrl = config.get('llm.baseUrl') as string | undefined;
 
       const llmConfig = {
-        provider: provider as 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini',
+        provider: provider as LLMProviderName,
         model: model || getDefaultModel(provider),
         apiKey,
         baseUrl,
         ollamaHost,
+        effort: normalizeEffort(config.get('llm.effort')),
       };
 
       const createdProvider = LLMService.createProvider(llmConfig);
       setLlmProvider(createdProvider);
+      setLlmMeta({ model: llmConfig.model, effort: llmConfig.effort });
+      setLlmError(null);
     } catch (err: any) {
       setLlmError(`Failed to initialize LLM: ${err.message}`);
     }
   }, []);
+
+  useEffect(() => {
+    initLLMFromConfig();
+  }, [initLLMFromConfig]);
 
   const addMsg = useCallback((msg: ChatMessage) => {
     setMessages((prev) => {
@@ -510,6 +515,13 @@ export function ChatScreen({
           }
         }
 
+        try {
+          const synced = await new TemplateService().syncShellFiles(projectDir);
+          onProgress(`Synced ${synced.length} shell file(s) from template.`);
+        } catch (error: any) {
+          onProgress(`Warning: shell sync skipped: ${error.message}`);
+        }
+
         onProgress('Building project...');
         const buildResult = await projectManager.build(projectDir, onProgress);
         if (!buildResult.success) {
@@ -579,8 +591,9 @@ ${boards.map((b) => `- ${b.title} (${b.name}, ${b.type})`).join('\n')}
 
 For the current board "${board.title}":
 - Add or update it as its own dashboard tab in App.tsx.
-- Preserve the centered OpenBoard master header exactly: <h1 className="app-title">OpenBoard</h1>.
+- Preserve the OpenBoard header shell exactly: <HeaderLinks /> on the left, the clickable app-brand button with <h1 className="app-title">OpenBoard</h1>, and the greeting/ThemeToggle/Logout on the right.
 - Preserve existing dashboard tabs, imports, auth wrapper, LoginPage, AuthProvider, user display, and logout behavior.
+- Preserve the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx unless the user explicitly asks about the master/overview tab. Do not re-add a Welcome tab while dashboards exist.
 - Do not rename the app/header to "${board.title}". Use "${board.title}" only as a tab label and content heading.
 - Prefer dashboard-specific component names and files so additions do not overwrite other dashboards.`;
         }
@@ -830,6 +843,13 @@ For the current board "${board.title}":
                 return;
               }
 
+              try {
+                const synced = await new TemplateService().syncShellFiles(projectDir);
+                onProgress(`Synced ${synced.length} shell file(s) from template.`);
+              } catch (error: any) {
+                onProgress(`Warning: shell sync skipped: ${error.message}`);
+              }
+
               // Step 1: Build the project
               onProgress('Building project...');
               const buildResult = await projectManager.build(projectDir, onProgress);
@@ -921,6 +941,67 @@ For the current board "${board.title}":
       // ── /help ──────────────────────────────────────────────────────────────
       if (cmd.type === 'help') {
         addMsg(newMsg('system', HELP_TEXT));
+        return;
+      }
+
+      // ── /model — show or switch the LLM model + execution effort ──────────
+      if (cmd.type === 'model') {
+        const config = new ConfigService();
+        const provider = config.get('llm.provider') as LLMProviderName | undefined;
+        if (!provider) {
+          addMsg(newMsg('error', 'No LLM provider configured. Run setup first (/config).'));
+          return;
+        }
+
+        if (cmd.args.length === 0) {
+          const currentModel = llmMeta?.model ?? getDefaultModel(provider);
+          const currentEffort = llmMeta?.effort ?? DEFAULT_EFFORT;
+          const models = (MODEL_CHOICES[provider] ?? [])
+            .map((c) => `  - ${c.value}${c.value === currentModel ? '  (current)' : ''}`)
+            .join('\n') || '  (enter any model name for this provider)';
+          addMsg(newMsg(
+            'system',
+            `Provider: ${provider}\nModel: ${currentModel}\nEffort: ${currentEffort}\n\nAvailable models:\n${models}\n\nEffort levels: ${LLM_EFFORTS.join(', ')}\n\nUsage:\n  /model <model>            switch model\n  /model <model> <effort>   switch model + effort\n  /model effort <effort>    switch effort only`,
+          ));
+          return;
+        }
+
+        const [first, second] = cmd.args;
+        let newModel: string | undefined;
+        let newEffort: LLMEffort | undefined;
+        if (first.toLowerCase() === 'effort') {
+          const level = second?.toLowerCase();
+          if (!isValidEffort(level)) {
+            addMsg(newMsg('error', `Invalid effort "${second ?? ''}". Use one of: ${LLM_EFFORTS.join(', ')}.`));
+            return;
+          }
+          newEffort = level;
+        } else {
+          newModel = first;
+          if (second) {
+            const level = second.toLowerCase();
+            if (!isValidEffort(level)) {
+              addMsg(newMsg('error', `Invalid effort "${second}". Use one of: ${LLM_EFFORTS.join(', ')}.`));
+              return;
+            }
+            newEffort = level;
+          }
+        }
+
+        try {
+          if (newModel) config.set('llm.model', newModel);
+          if (newEffort) config.set('llm.effort', newEffort);
+          initLLMFromConfig();
+          const finalModel = newModel ?? llmMeta?.model ?? getDefaultModel(provider);
+          const finalEffort = newEffort ?? llmMeta?.effort ?? DEFAULT_EFFORT;
+          const knownModels = MODEL_CHOICES[provider] ?? [];
+          const unknownNote = newModel && knownModels.length > 0 && !knownModels.some((c) => c.value === newModel)
+            ? `\nNote: "${newModel}" is not in the known ${provider} model list — make sure it exists.`
+            : '';
+          addMsg(newMsg('system', `LLM updated: ${provider} · ${finalModel} · effort: ${finalEffort}. Takes effect on the next LLM call.${unknownNote}`));
+        } catch (error: any) {
+          addMsg(newMsg('error', `Failed to update model: ${error.message}`));
+        }
         return;
       }
 
@@ -1253,7 +1334,7 @@ Requirements:
         await sendToLLM(text);
       }
     },
-    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmError, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll],
+    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll],
   );
 
   // ESC: go back to welcome screen
@@ -1308,9 +1389,9 @@ Requirements:
         flexDirection="column"
         alignItems="center"
       >
-        <Text bold color={UI_COLORS.logo}>{headerTitle} <Text color={UI_COLORS.subtitle}>({headerProvider})</Text></Text>
-        <Text color={UI_COLORS.subtitle}>Internal LLM chat for dashboard creation</Text>
-        <Text color={UI_COLORS.subtitle}>{headerRemark}</Text>
+        <Text bold color={UI_COLORS.logo}>{headerTitle}</Text>
+        <Text color={UI_COLORS.subtitle}>{headerLLMInfo}</Text>
+        <Text color={UI_COLORS.subtitle}>Internal LLM chat for dashboard creation/modification</Text>
       </Box>
 
       {/* LLM config warning */}

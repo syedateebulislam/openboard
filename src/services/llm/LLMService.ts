@@ -35,16 +35,16 @@ export class LLMService {
         if (!config.apiKey) {
           throw new Error('OpenAI provider requires an apiKey');
         }
-        return new OpenAIProvider(config.apiKey, config.model ?? 'gpt-4o');
+        return new OpenAIProvider(config.apiKey, config.model ?? 'gpt-4o', config.effort);
 
       case 'openai-codex':
-        return new OpenAICodexProvider(config.model ?? 'gpt-5.5');
+        return new OpenAICodexProvider(config.model ?? 'gpt-5.5', config.effort);
 
       case 'anthropic':
         if (!config.apiKey) {
           throw new Error('Anthropic provider requires an apiKey');
         }
-        return new AnthropicProvider(config.apiKey, config.model ?? 'claude-sonnet-4-5');
+        return new AnthropicProvider(config.apiKey, config.model ?? 'claude-sonnet-4-5', config.effort);
 
       case 'ollama':
         return new OllamaProvider(

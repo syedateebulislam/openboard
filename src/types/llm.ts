@@ -4,6 +4,13 @@
 
 export type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
 
+/**
+ * Execution-effort level for generation. Maps to provider reasoning knobs
+ * (OpenAI reasoning_effort, Anthropic extended thinking, Codex
+ * model_reasoning_effort) — see src/config/llmCatalog.ts for the mapping table.
+ */
+export type LLMEffort = 'low' | 'medium' | 'high' | 'max';
+
 /** @deprecated Use LLMProviderName instead */
 export type LLMProvider_Type = LLMProviderName;
 
@@ -46,6 +53,8 @@ export interface LLMConfig {
   apiKey?: string;
   baseUrl?: string;
   ollamaHost?: string;
+  /** Execution-effort level (default medium); see LLMEffort. */
+  effort?: LLMEffort;
 }
 
 /**

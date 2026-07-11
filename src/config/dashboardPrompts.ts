@@ -6,6 +6,7 @@
  * Files (prompts/dashboard/*.md):
  *   health.md, finance.md, grocery.md, custom.md  — one per board type
  *   agent-default.md  — agent `create` run with no --type and no --prompt
+ *   master.md         — the master "Overview" tab aggregating every dashboard
  *   fallback.md       — last-resort safety net when nothing else resolves
  *
  * Reads happen once at module load. A missing file degrades to the builtin
@@ -57,6 +58,13 @@ export const DASHBOARD_PROMPTS: Record<DashboardType, string> = {
 
 /** Used when an agent `create` run supplies neither --prompt nor --type. */
 export const AGENT_DEFAULT_PROMPT = readPrompt('agent-default.md', FINAL_FALLBACK_PROMPT);
+
+/** Ultimate safety net if master.md is missing. */
+const BUILTIN_MASTER_FALLBACK =
+  'Build the master "Overview" tab aggregating ALL dashboards via useAllDashboardsData(): cross-app spend KPI cards (total, past 7 days, this month), exactly 4 insights (2 spend + 2 save InsightCards), a cross-app spend trend with a Weekly/Monthly/Quarterly toggle, and a per-app breakdown. Detect date/amount columns per dashboard; count-only fallback for dashboards without amounts; never embed raw rows.';
+
+/** Prompt for generating/refreshing the master Overview tab. */
+export const MASTER_DASHBOARD_PROMPT = readPrompt('master.md', BUILTIN_MASTER_FALLBACK);
 
 export interface ResolveInitialIntentArgs {
   /** Explicit user/agent prompt, if any. */

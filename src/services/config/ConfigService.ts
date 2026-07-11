@@ -25,11 +25,14 @@ import { homedir } from 'node:os';
 
 const LLMProviderSchema = z.enum(['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama']);
 
+const LLMEffortSchema = z.enum(['low', 'medium', 'high', 'max']);
+
 const LLMConfigSchema = z.object({
   provider: LLMProviderSchema.optional(),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
+  effort: LLMEffortSchema.optional(),
 }).optional();
 
 const GitHubConfigSchema = z.object({
@@ -195,6 +198,12 @@ function validateSet(key: string, value: unknown): void {
     const result = LLMProviderSchema.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid provider value: ${String(value)}. Must be one of: openai, openai-codex, anthropic, moonshot, gemini, ollama`);
+    }
+  }
+  if (key === 'llm.effort') {
+    const result = LLMEffortSchema.safeParse(value);
+    if (!result.success) {
+      throw new Error(`Invalid effort value: ${String(value)}. Must be one of: low, medium, high, max`);
     }
   }
 }

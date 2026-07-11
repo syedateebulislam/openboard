@@ -69,6 +69,19 @@ export function phaseIndex(phase: PipelinePhase): number {
   return PHASE_ORDER.indexOf(phase);
 }
 
+/** Working steps shown as "[X/8]" — every phase except the terminal 'done'. */
+export const TOTAL_STEPS = PHASE_ORDER.length - 1;
+
+/** 1-based step number for "[X/8]" labels; 'done' maps to the last step. */
+export function phaseStep(phase: PipelinePhase): number {
+  return Math.min(phaseIndex(phase) + 1, TOTAL_STEPS);
+}
+
+/** Human step label for a phase, e.g. "[3/8] Generating dashboard code". */
+export function phaseStepLabel(phase: PipelinePhase): string {
+  return `[${phaseStep(phase)}/${TOTAL_STEPS}] ${PHASE_LABELS[phase]}`;
+}
+
 // ── Events ───────────────────────────────────────────────────────────────────
 
 export interface PipelineEvent {
@@ -79,6 +92,10 @@ export interface PipelineEvent {
   message?: string;
   /** Set on 'result' events. */
   success?: boolean;
+  /** 1-based step number of the current phase (set on 'phase' events). */
+  step?: number;
+  /** Total number of working steps (set on 'phase' events). */
+  totalSteps?: number;
 }
 
 export type PipelineEventSink = (event: PipelineEvent) => void;
@@ -111,6 +128,8 @@ export class PipelineReporter {
       phase,
       pct: phase === 'done' ? 100 : phaseStartPct(phase),
       message: message ?? PHASE_LABELS[phase],
+      step: phaseStep(phase),
+      totalSteps: TOTAL_STEPS,
     });
   }
 

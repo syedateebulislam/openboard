@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
-import { resolveInitialIntent } from '../../config/dashboardPrompts.js';
+import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
+import { normalizeEffort } from '../../config/llmCatalog.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
@@ -115,7 +116,16 @@ function createLLMConfig(config: ConfigService): LLMConfig {
     apiKey,
     baseUrl: config.get('llm.baseUrl') as string | undefined,
     ollamaHost: config.get('llm.ollamaHost') as string | undefined,
+    effort: normalizeEffort(config.get('llm.effort')),
   };
+}
+
+function isGeneratedPathRejection(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.startsWith('Generated file path is not allowed:') ||
+    error.message.startsWith('Unsafe generated file path:')
+  );
 }
 
 function matchesBoard(board: BoardConfig, selector: string): boolean {
@@ -184,6 +194,7 @@ export async function removeDashboardFromGeneratedApp(
     apiKey,
     baseUrl: config.get('llm.baseUrl') as string | undefined,
     ollamaHost: config.get('llm.ollamaHost') as string | undefined,
+    effort: normalizeEffort(config.get('llm.effort')),
   };
 
   const llm = LLMService.createProvider(llmConfig);
@@ -209,9 +220,9 @@ Requirements:
 1. Return ONLY an updated App.tsx file block using the required //CODE_START format.
 2. Remove the tab, route/branch, imports, labels, and visible content for "${removedBoard.title}".
 3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-4. Preserve every remaining dashboard and its imports.
-5. Preserve the centered OpenBoard master header exactly: <h1 className="app-title">OpenBoard</h1>.
-6. Do not modify unrelated styling or auth behavior.`;
+4. Preserve every remaining dashboard and its imports, and preserve the master 'Overview' tab (id 'master') as the first tab if present.
+5. Preserve the OpenBoard header shell exactly: <HeaderLinks /> on the left, the clickable app-brand button with <h1 className="app-title">OpenBoard</h1>, and the greeting/ThemeToggle/Logout on the right.
+6. Do not modify unrelated styling or auth behavior, and do not re-add a Welcome tab while dashboards remain.`;
 
   const response = await llm.complete({
     messages: [{ role: 'user', content: prompt }],
@@ -390,9 +401,11 @@ export class DashboardUpdateService {
         dataSummary,
       });
 
+      const masterFiles = await this.syncMasterTab(scaffold.projectDir, reporter, run);
+
       return await this.buildPushDeploy(
         updatedBoard,
-        writtenFiles,
+        [...new Set([...writtenFiles, ...masterFiles])],
         `Create ${updatedBoard.name}: ${new Date().toISOString()}`,
         reporter,
         run,
@@ -524,9 +537,9 @@ ${currentApp}
 Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
-3. Preserve other dashboard tabs in the shared OpenBoard app.
+3. Preserve other dashboard tabs in the shared OpenBoard app, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx.
 4. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-5. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
+5. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
 6. Return all changed files using the required //CODE_START format.`;
 
       const writtenFiles = await this.generateAndWriteFiles(board, prompt, reporter, run);
@@ -556,9 +569,11 @@ Requirements:
         dataSummary: latestSummary,
       });
 
+      const masterFiles = await this.syncMasterTab(projectDir, reporter, run);
+
       return await this.buildPushDeploy(
         updatedBoard,
-        writtenFiles,
+        [...new Set([...writtenFiles, ...masterFiles])],
         `Update ${board.name}: ${new Date().toISOString()}`,
         reporter,
         run,
@@ -614,11 +629,19 @@ Requirements:
 
       const remainingBoards = this.registry.listBoards().filter((b) => b.id !== board.id);
 
-      // 1. Clean App.tsx (tab/import/content) via the configured LLM.
+      // 1. Clean App.tsx. Removing the LAST dashboard is deterministic (no LLM):
+      //    restore the blank Welcome shell and drop the master tab component.
       reporter.phase('generate');
-      reporter.log(`Cleaning generated UI for "${board.title}"...`);
-      const cleanupMessage = await removeDashboardFromGeneratedApp(board, remainingBoards, projectDir);
-      reporter.log(cleanupMessage);
+      if (remainingBoards.length === 0) {
+        reporter.log('Removing the last dashboard — restoring the empty OpenBoard shell...');
+        await this.templateService.restoreAppShell(projectDir);
+        await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
+        this.registry.setMasterState(undefined);
+      } else {
+        reporter.log(`Cleaning generated UI for "${board.title}"...`);
+        const cleanupMessage = await removeDashboardFromGeneratedApp(board, remainingBoards, projectDir);
+        reporter.log(cleanupMessage);
+      }
 
       // 2. Delete orphaned component files that no remaining dashboard uses.
       reporter.phase('write');
@@ -631,10 +654,15 @@ Requirements:
       // 4. Code cleanup succeeded — now drop from registry + prompt history.
       this.registry.removeBoard(board.id);
 
-      // 5. Rebuild + push + deploy so the live app no longer shows the dashboard.
+      // 5. Refresh the master Overview tab against the remaining dashboards.
+      const masterFiles = remainingBoards.length > 0
+        ? await this.syncMasterTab(projectDir, reporter, run)
+        : [];
+
+      // 6. Rebuild + push + deploy so the live app no longer shows the dashboard.
       return await this.buildPushDeploy(
         { ...board, outputDir: projectDir },
-        ['App.tsx', ...removedFiles],
+        [...new Set(['App.tsx', ...removedFiles, ...masterFiles])],
         `Remove ${board.name}: ${new Date().toISOString()}`,
         reporter,
         run,
@@ -722,9 +750,11 @@ Requirements:
         this.runs.save(run);
       }
 
+      const masterFiles = await this.syncMasterTab(projectDir, reporter, run);
+
       return await this.buildPushDeploy(
         updatedBoard,
-        writtenFiles,
+        [...new Set([...writtenFiles, ...masterFiles])],
         `Update ${updatedBoard.name}: ${new Date().toISOString()}`,
         reporter,
         run,
@@ -866,6 +896,8 @@ Requirements:
         reporter.log(`\nAll ${modified} dashboard(s) updated. Building and deploying once...`);
       }
 
+      allWritten.push(...await this.syncMasterTab(projectDir, reporter, undefined));
+
       return await this.buildPushDeploy(
         { ...(lastBoard ?? boards[0]), outputDir: projectDir },
         [...new Set(allWritten)],
@@ -912,6 +944,8 @@ Requirements:
       reporter.phase('generate');
       reporter.log('Resetting the generated app to the empty OpenBoard shell...');
       await this.templateService.restoreAppShell(projectDir);
+      await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
+      this.registry.setMasterState(undefined);
 
       reporter.phase('write');
       const removedFiles: string[] = [];
@@ -1076,6 +1110,88 @@ Requirements:
     }
   }
 
+  /** Hash of the dashboard set the master tab depends on. Data refreshes do
+   *  not change it — MasterDashboard computes everything at runtime from the
+   *  protected API, so only adding/removing/renaming dashboards matters. */
+  private masterStateHash(boards: BoardConfig[]): string {
+    const signature = boards
+      .map((board) => `${board.name}|${board.title}`)
+      .sort()
+      .join('\n');
+    return createHash('sha256').update(signature).digest('hex');
+  }
+
+  /**
+   * Generate or refresh the master "Overview" tab (components/MasterDashboard.tsx
+   * + App.tsx) so it always reflects the current set of dashboards. Skips the
+   * LLM call when the dashboard set is unchanged and the component exists.
+   * Failures are non-fatal: the pipeline continues with the per-dashboard
+   * changes, and the stored state is left untouched so the next dashboard
+   * operation retries. Returns the written file paths (for the repair loop).
+   */
+  private async syncMasterTab(
+    projectDir: string,
+    reporter: PipelineReporter,
+    run?: RunRecord,
+  ): Promise<string[]> {
+    try {
+      const boards = this.registry.listBoards();
+      const masterPath = join(projectDir, 'src', 'components', 'MasterDashboard.tsx');
+
+      if (boards.length === 0) {
+        await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
+        this.registry.setMasterState(undefined);
+        return [];
+      }
+
+      const hash = this.masterStateHash(boards);
+      if (this.registry.getMasterState()?.hash === hash && existsSync(masterPath)) {
+        reporter.log('Master Overview tab is up to date.');
+        return [];
+      }
+
+      reporter.log(`Generating the master Overview tab across ${boards.length} dashboard(s)...`);
+      const currentApp = this.readCurrentApp(projectDir);
+      const prompt = `${MASTER_DASHBOARD_PROMPT}
+
+Registered dashboards (ALL must be represented in the master overview; their slugs key data.dashboards):
+${boards.map((b) => `- ${b.title} (slug: ${b.name}, type: ${b.type})${b.dataSummary ? `\n  Data analysis: ${b.dataSummary.slice(0, 1500)}` : ''}`).join('\n')}
+
+Current src/App.tsx:
+${currentApp}
+
+Requirements:
+1. Return ONLY App.tsx and components/MasterDashboard.tsx (plus optional utils/ helpers for the cross-app aggregation) using the required //CODE_START format.
+2. The FIRST entry in the tabs array MUST be { id: 'master', label: 'Overview' } (no group) rendering <MasterDashboard />, and 'master' MUST be the default active tab.
+3. Remove the Welcome tab and its "Dashboard Ready" card if present.
+4. Preserve every existing dashboard tab, import, and panel branch in App.tsx exactly.
+5. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right) and all auth behavior.
+6. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).`;
+
+      const placeholderBoard: BoardConfig = {
+        id: 'master',
+        name: 'master-overview',
+        title: 'Overview',
+        type: 'custom',
+        outputDir: projectDir,
+        dataFiles: [],
+        components: [],
+        createdAt: new Date().toISOString(),
+      };
+      const writtenFiles = await this.generateAndWriteFiles(placeholderBoard, prompt, reporter, run);
+      if (writtenFiles.length === 0) {
+        reporter.log('Warning: master tab generation returned no files; will retry on the next dashboard operation.');
+        return [];
+      }
+      this.registry.setMasterState({ hash, generatedAt: new Date().toISOString() });
+      reporter.log('Master Overview tab updated.');
+      return writtenFiles;
+    } catch (error: any) {
+      reporter.log(`Warning: master tab generation failed — will retry on the next dashboard operation: ${error.message}`);
+      return [];
+    }
+  }
+
   private buildInitialPrompt(
     board: BoardConfig,
     dataSummary: string,
@@ -1110,9 +1226,9 @@ ${currentApp}
 
 Requirements:
 1. Add "${board.title}" as its own dashboard tab in the shared OpenBoard UI.
-2. Preserve all existing tabs/components in App.tsx.
+2. Preserve all existing tabs/components in App.tsx, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx (a dedicated follow-up step maintains it).
 3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
+4. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
 7. Use the actual fields and patterns from the data analysis to create useful metrics/charts.
@@ -1148,9 +1264,9 @@ ${currentApp}
 
 Requirements:
 1. Apply the requested change only to the "${board.title}" dashboard tab unless the prompt explicitly asks otherwise.
-2. Preserve other dashboard tabs/components in the shared OpenBoard app.
+2. Preserve other dashboard tabs/components in the shared OpenBoard app, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx unless the prompt explicitly targets the master/overview tab.
 3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
+4. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
 7. Keep the dashboard aligned with the latest data analysis.
@@ -1238,8 +1354,15 @@ Requirements:
     reporter.phase('write');
     const writtenFiles: string[] = [];
     for (const file of files) {
-      await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
-      writtenFiles.push(file.path);
+      try {
+        await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
+        writtenFiles.push(file.path);
+      } catch (error) {
+        if (!isGeneratedPathRejection(error)) throw error;
+        // Disallowed path (e.g. a stray App.css block — shell-owned since the
+        // allowlist change) — skip it rather than abort the whole pipeline.
+        reporter.log(`Skipped disallowed generated file: ${file.path}`);
+      }
     }
     reporter.log(`Wrote ${writtenFiles.length} file(s): ${writtenFiles.join(', ')}`);
     return writtenFiles;
@@ -1377,6 +1500,15 @@ Requirements:
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir) {
       return this.failure(run, { board, writtenFiles }, 'No generated app workspace found.');
+    }
+
+    // Re-sync shell-owned files from the template so header/CSS/api fixes
+    // reach existing projects on every deploy. Non-fatal on failure.
+    try {
+      const synced = await this.templateService.syncShellFiles(projectDir);
+      reporter.log(`Synced ${synced.length} shell file(s) from template.`);
+    } catch (err: any) {
+      reporter.log(`Warning: shell sync skipped: ${err.message}`);
     }
 
     reporter.phase('build');

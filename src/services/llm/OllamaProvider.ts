@@ -17,6 +17,7 @@ import type {
   LLMStreamChunk,
   LLMValidationResult,
 } from '../../types/llm.js';
+import { startHeartbeat } from './heartbeat.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class OllamaProvider implements LLMProvider {
@@ -75,21 +76,26 @@ export class OllamaProvider implements LLMProvider {
    * Returns the full assistant message content as a string.
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
-    const client = await this.getClient();
-    const response = await client.chat({
-      model: this.model,
-      messages: options.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-    });
-    if (options.onUsage && (response.prompt_eval_count || response.eval_count)) {
-      options.onUsage({
-        promptTokens: response.prompt_eval_count ?? 0,
-        completionTokens: response.eval_count ?? 0,
+    const stopHeartbeat = startHeartbeat(options.onProgress, `ollama (${this.model})`);
+    try {
+      const client = await this.getClient();
+      const response = await client.chat({
+        model: this.model,
+        messages: options.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
       });
+      if (options.onUsage && (response.prompt_eval_count || response.eval_count)) {
+        options.onUsage({
+          promptTokens: response.prompt_eval_count ?? 0,
+          completionTokens: response.eval_count ?? 0,
+        });
+      }
+      return response.message.content;
+    } finally {
+      stopHeartbeat();
     }
-    return response.message.content;
   }
 
   /**
