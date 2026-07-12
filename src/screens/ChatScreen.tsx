@@ -85,6 +85,8 @@ interface SendToLLMOptions {
 
 // Maximum messages to keep in history to prevent memory issues
 const MAX_MESSAGES = 100;
+// Messages scrolled per PgUp/PgDn press in the chat history.
+const SCROLL_STEP = 3;
 // Maximum chat history messages to include in LLM context
 const MAX_CONTEXT_MESSAGES = 20;
 
@@ -149,6 +151,10 @@ export function ChatScreen({
   const [isLoading, setIsLoading] = useState(false);
   const [pipeline, setPipeline] = useState<{ phase: PipelinePhase; pct: number; phaseStartedAt: number } | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<'deploy' | 'push' | null>(null);
+  // Chat history scrolling: scrollOffset = how many messages are hidden BELOW
+  // the visible window (0 = pinned to the newest). Scrolling up anchors the
+  // view, so new log lines never yank the reader back down mid-read.
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [llmProvider, setLlmProvider] = useState<LLMProvider | null>(null);
   const [llmMeta, setLlmMeta] = useState<{ model: string; effort: LLMEffort } | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -793,6 +799,7 @@ For the current board "${board.title}":
     async (text: string) => {
       if (!text.trim() || isLoading) return;
       setInput('');
+      setScrollOffset(0); // sending snaps the chat back to the latest message
 
       const userMsg = newMsg('user', text);
       addMsg(userMsg);
@@ -1325,9 +1332,15 @@ Requirements:
     [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll],
   );
 
-  // ESC: go back to welcome screen
+  // ESC: go back to welcome screen · PgUp/PgDn: scroll chat history
   useInput((_input, key) => {
     if (key.escape) onNavigate?.('welcome');
+    if (key.pageUp) {
+      setScrollOffset((offset) => Math.min(offset + SCROLL_STEP, Math.max(0, messages.length - 1)));
+    }
+    if (key.pageDown) {
+      setScrollOffset((offset) => Math.max(0, offset - SCROLL_STEP));
+    }
   });
 
   // Get terminal height for fixed message area
@@ -1345,8 +1358,14 @@ Requirements:
       .slice(0, 5);
   }, [input]);
 
+  // Clamp the offset when history gets trimmed (MAX_MESSAGES).
+  const effectiveOffset = Math.min(scrollOffset, Math.max(0, messages.length - 1));
+  const hiddenNewer = effectiveOffset;
+  const hiddenOlder = Math.max(0, messages.length - effectiveOffset - 4);
+
   const visibleMessages = useMemo(() => {
-    const recent = messages.slice(-4);
+    const upToOffset = effectiveOffset > 0 ? messages.slice(0, messages.length - effectiveOffset) : messages;
+    const recent = upToOffset.slice(-4);
     const selected: Array<{ message: ChatMessage; maxLines: number }> = recent.map((message) => ({
       message,
       maxLines: 1,
@@ -1363,7 +1382,7 @@ Requirements:
     }
 
     return selected;
-  }, [messages, messageAreaHeight]);
+  }, [messages, messageAreaHeight, effectiveOffset]);
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -1395,6 +1414,15 @@ Requirements:
           <ChatMessageComponent key={message.id} message={message} maxLines={maxLines} />
         ))}
       </Box>
+
+      {/* Scroll position indicator */}
+      {(hiddenNewer > 0 || hiddenOlder > 0) && (
+        <Text color={hiddenNewer > 0 ? 'yellow' : UI_COLORS.subtitle}>
+          {hiddenOlder > 0 ? `↑ ${hiddenOlder} older (PgUp)` : ''}
+          {hiddenOlder > 0 && hiddenNewer > 0 ? ' · ' : ''}
+          {hiddenNewer > 0 ? `↓ ${hiddenNewer} newer (PgDn for latest)` : ''}
+        </Text>
+      )}
 
       {/* Loading indicator — phase-weighted progress bar when a pipeline is active */}
       {isLoading && (pipeline ? (
@@ -1433,7 +1461,7 @@ Requirements:
       </Box>
 
       {/* Footer hint */}
-      <Text color={UI_COLORS.subtitle}>ESC to go back | /help for commands</Text>
+      <Text color={UI_COLORS.subtitle}>ESC to go back | PgUp/PgDn to scroll chat | /help for commands</Text>
     </Box>
   );
 }

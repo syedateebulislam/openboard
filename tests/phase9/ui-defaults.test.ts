@@ -27,7 +27,10 @@ describe('Recent Records table default', () => {
   });
 
   it('is required in every category prompt including the master tab', () => {
-    for (const file of ['finance.md', 'grocery.md', 'custom.md', 'health.md', 'agent-default.md', 'fallback.md', 'master.md']) {
+    for (const file of [
+      'finance.md', 'grocery.md', 'custom.md', 'health.md', 'agent-default.md', 'fallback.md', 'master.md',
+      'travel.md', 'food.md', 'shopping.md', 'subscriptions.md', 'utilities.md', 'invoices.md',
+    ]) {
       const md = readFileSync(join(REPO, 'prompts', 'dashboard', file), 'utf-8');
       expect(md, file).toContain('Recent Records');
       expect(md, file).toMatch(/10 most recent|newest-first/i);

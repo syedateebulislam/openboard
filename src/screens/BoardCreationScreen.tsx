@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
+import type { BoardConfig } from '../types/board.js';
 import { BOARD_PRESETS, createBoardConfig, type BoardPreset } from '../config/boardPresets.js';
 import { DataParserService, type ParsedData } from '../services/data/DataParserService.js';
 import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.js';
@@ -160,7 +161,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         id: `board-${Date.now()}`,
         name: boardName.toLowerCase().replace(/\s+/g, '-'),
         title: boardName,
-        type: selectedPreset.id as 'health' | 'finance' | 'grocery' | 'custom',
+        type: selectedPreset.id as BoardConfig['type'],
         outputDir: '',
         dataFiles: [filePath],
         components: [],

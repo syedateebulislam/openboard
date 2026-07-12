@@ -75,6 +75,7 @@ OpenAI Codex can be signed in headlessly too — `--codex-access-token`, `--api-
 OpenBoard uses one master generated React app.
 
 - Add a dashboard: Dashboards -> Add new dashboard to UI. Data sources: `.csv`, `.xlsx`, `.xls`, or `.json`.
+- Category presets (`--type` for agents): `health`, `finance`, `grocery`, `travel`, `food`, `shopping`, `subscriptions`, `utilities`, `invoices`, `custom` — each ships a tuned default prompt (rides/bookings, food delivery, e-commerce orders, recurring SaaS/OTT bills, telecom/society bills, mixed invoice ledgers, ...).
 - Modify a dashboard: Dashboards -> Modify: `<dashboard title>`.
 - Remove a dashboard: Dashboards -> Remove: `<dashboard title>`.
 

@@ -38,7 +38,8 @@ const cli = meow(`
     --all               Target all dashboards (regen; with --prompt: modify all; with agent remove: remove all)
     --data              Data source file: .csv, .xlsx, .xls, or .json
     --name              Dashboard display name for creation
-    --type              Dashboard type: health, finance, grocery, custom
+    --type              Dashboard type: health, finance, grocery, travel, food,
+                        shopping, subscriptions, utilities, invoices, custom
     --prompt            User prompt for initial generation or dashboard update
     --effort            LLM execution effort: low, medium, high, max (agent setup)
     --json              Emit machine-readable JSON (NDJSON progress on stderr)
@@ -462,9 +463,10 @@ if (!command || command === 'start') {
 
     // Leave type undefined when --type is omitted so the create flow can pick
     // the distinct "agent default" prompt instead of silently using 'custom'.
-    const type = cli.flags.type as 'health' | 'finance' | 'grocery' | 'custom' | undefined;
-    if (type !== undefined && !['health', 'finance', 'grocery', 'custom'].includes(type)) {
-      const error = 'Invalid --type. Use one of: health, finance, grocery, custom.';
+    const validTypes = ['health', 'finance', 'grocery', 'travel', 'food', 'shopping', 'subscriptions', 'utilities', 'invoices', 'custom'];
+    const type = cli.flags.type as BoardConfig['type'] | undefined;
+    if (type !== undefined && !validTypes.includes(type)) {
+      const error = `Invalid --type. Use one of: ${validTypes.join(', ')}.`;
       if (jsonMode) printJson({ success: false, action: 'create', error, errorCode: 'E_VALIDATION' });
       else console.error(error);
       process.exit(1);

@@ -9,7 +9,17 @@ export interface BoardConfig {
   id: string;
   name: string;
   title: string;
-  type: 'health' | 'finance' | 'grocery' | 'custom';
+  type:
+    | 'health'
+    | 'finance'
+    | 'grocery'
+    | 'travel'
+    | 'food'
+    | 'shopping'
+    | 'subscriptions'
+    | 'utilities'
+    | 'invoices'
+    | 'custom';
   outputDir: string;
   dataFiles: string[];
   githubRepo?: string;

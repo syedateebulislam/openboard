@@ -16,14 +16,13 @@ import {
 
 describe('Board Presets', () => {
   describe('Preset Configuration', () => {
-    it('should define Health, Finance, Grocery, and Custom presets', () => {
+    it('should define all category presets', () => {
       const presets = getAvailablePresets();
       const ids = presets.map(p => p.id);
-      expect(ids).toContain('health');
-      expect(ids).toContain('finance');
-      expect(ids).toContain('grocery');
-      expect(ids).toContain('custom');
-      expect(presets).toHaveLength(4);
+      for (const id of ['health', 'finance', 'grocery', 'travel', 'food', 'shopping', 'subscriptions', 'utilities', 'invoices', 'custom']) {
+        expect(ids).toContain(id);
+      }
+      expect(presets).toHaveLength(10);
     });
 
     it('should have name, icon, description, defaultPrompt, and dataHints for each preset', () => {

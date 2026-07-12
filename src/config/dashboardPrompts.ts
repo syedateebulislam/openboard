@@ -4,7 +4,8 @@
  * plus a single resolution helper.
  *
  * Files (prompts/dashboard/*.md):
- *   health.md, finance.md, grocery.md, custom.md  — one per board type
+ *   health.md, finance.md, grocery.md, travel.md, food.md, shopping.md,
+ *   subscriptions.md, utilities.md, invoices.md, custom.md — one per board type
  *   agent-default.md  — agent `create` run with no --type and no --prompt
  *   master.md         — the master "Overview" tab aggregating every dashboard
  *   fallback.md       — last-resort safety net when nothing else resolves
@@ -53,6 +54,12 @@ export const DASHBOARD_PROMPTS: Record<DashboardType, string> = {
   health: readPrompt('health.md', FINAL_FALLBACK_PROMPT),
   finance: readPrompt('finance.md', FINAL_FALLBACK_PROMPT),
   grocery: readPrompt('grocery.md', FINAL_FALLBACK_PROMPT),
+  travel: readPrompt('travel.md', FINAL_FALLBACK_PROMPT),
+  food: readPrompt('food.md', FINAL_FALLBACK_PROMPT),
+  shopping: readPrompt('shopping.md', FINAL_FALLBACK_PROMPT),
+  subscriptions: readPrompt('subscriptions.md', FINAL_FALLBACK_PROMPT),
+  utilities: readPrompt('utilities.md', FINAL_FALLBACK_PROMPT),
+  invoices: readPrompt('invoices.md', FINAL_FALLBACK_PROMPT),
   custom: readPrompt('custom.md', FINAL_FALLBACK_PROMPT),
 };
 
