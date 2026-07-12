@@ -5,15 +5,19 @@ import { extname } from 'node:path';
 export interface ParsedData {
   rows: Record<string, unknown>[];
   headers: string[];
-  format: 'csv' | 'json';
+  format: 'csv' | 'json' | 'xlsx';
 }
 
 export class DataParserService {
   static async parse(filePath: string): Promise<ParsedData> {
     const ext = extname(filePath).toLowerCase();
 
-    if (ext !== '.csv' && ext !== '.json') {
-      throw new Error(`Unsupported format "${ext}". Supported: .csv, .json`);
+    if (!['.csv', '.json', '.xlsx', '.xls'].includes(ext)) {
+      throw new Error(`Unsupported format "${ext}". Supported: .csv, .xlsx, .xls, .json`);
+    }
+
+    if (ext === '.xlsx' || ext === '.xls') {
+      return DataParserService.parseExcel(filePath);
     }
 
     let content: string;
@@ -28,6 +32,41 @@ export class DataParserService {
     } else {
       return DataParserService.parseJSON(content);
     }
+  }
+
+  /** Parse the first sheet of an .xlsx/.xls workbook into rows. */
+  private static async parseExcel(filePath: string): Promise<ParsedData> {
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(filePath);
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Lazy import — SheetJS is only loaded when an Excel file is parsed.
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      throw new Error('Excel file contains no sheets.');
+    }
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+      workbook.Sheets[sheetName],
+      { defval: '' },
+    );
+    // Date cells become Date objects (cellDates) — convert to ISO strings so
+    // rows stay JSON-serializable for api/_data and the LLM data summary.
+    for (const row of rows) {
+      for (const key of Object.keys(row)) {
+        if (row[key] instanceof Date) {
+          row[key] = (row[key] as Date).toISOString();
+        }
+      }
+    }
+
+    const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+    return { rows, headers, format: 'xlsx' };
   }
 
   private static parseCSV(content: string): ParsedData {

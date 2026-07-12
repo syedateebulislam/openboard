@@ -3,7 +3,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
 import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
-import { normalizeEffort } from '../../config/llmCatalog.js';
+import { defaultModelFor as getDefaultModel, normalizeEffort } from '../../config/llmCatalog.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
@@ -75,24 +75,7 @@ export interface PromptUpdateOptions {
   dryRun?: boolean;
 }
 
-function getDefaultModel(provider: string): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4o';
-    case 'openai-codex':
-      return 'gpt-5.5';
-    case 'anthropic':
-      return 'claude-sonnet-4-5';
-    case 'ollama':
-      return 'qwen2.5-coder:7b';
-    case 'moonshot':
-      return 'moonshot-v1-8k';
-    case 'gemini':
-      return 'gemini-2.5-pro';
-    default:
-      return 'gpt-4o';
-  }
-}
+// Default models come from the shared catalog (src/config/llmCatalog.ts).
 
 function createLLMConfig(config: ConfigService): LLMConfig {
   const provider = config.get('llm.provider') as LLMConfig['provider'] | undefined;
@@ -447,7 +430,7 @@ export class DashboardUpdateService {
   async updateAll(onProgress?: UpdateProgress): Promise<DashboardUpdateResult[]> {
     const results: DashboardUpdateResult[] = [];
     for (const board of this.listBoards()) {
-      onProgress?.(`\n=== Updating ${board.title} ===`);
+      this.note(onProgress, `\n=== Updating ${board.title} ===`);
       results.push(await this.updateBoard(board, onProgress));
     }
     return results;
@@ -514,7 +497,7 @@ export class DashboardUpdateService {
 
       const prompt = `Regenerate/update the "${board.title}" dashboard tab using the latest data source.
 
-This is a non-interactive OpenBoard update run. The CSV/JSON file may have changed, but the dashboard intent must remain the same as the saved prompt history.
+This is a non-interactive OpenBoard update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent must remain the same as the saved prompt history.
 
 Dashboard:
 - Title: ${board.title}
@@ -1128,8 +1111,9 @@ Requirements:
    * Failures are non-fatal: the pipeline continues with the per-dashboard
    * changes, and the stored state is left untouched so the next dashboard
    * operation retries. Returns the written file paths (for the repair loop).
+   * Public so the TUI chat's build/deploy flows can refresh the master tab too.
    */
-  private async syncMasterTab(
+  async syncMasterTab(
     projectDir: string,
     reporter: PipelineReporter,
     run?: RunRecord,

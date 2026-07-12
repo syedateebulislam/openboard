@@ -270,12 +270,12 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             value={filePath}
             onChange={setFilePath}
             onSubmit={handleFileSubmit}
-            placeholder="/path/to/data.csv or data.json"
+            placeholder="/path/to/data.csv, data.xlsx, or data.json"
           />
         </Box>
         <Box marginTop={1}>
           <Text color={UI_COLORS.subtitle}>
-            Supports .csv and .json files · ESC to go back
+            Supports .csv, .xlsx, .xls, and .json files · ESC to go back
           </Text>
         </Box>
       </Box>

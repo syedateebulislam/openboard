@@ -121,18 +121,18 @@ export class TemplateService {
    */
   async syncShellFiles(outputDir: string, vars?: ScaffoldVars): Promise<string[]> {
     const effectiveVars = vars ?? { boardName: 'openboard-workspace', boardTitle: 'OpenBoard' };
-    const synced: string[] = [];
-    for (const relPath of SHELL_SYNC_FILES) {
+    // Files are independent — copy them concurrently.
+    const results = await Promise.all(SHELL_SYNC_FILES.map(async (relPath) => {
       const srcPath = resolve(this.templatesDir, relPath);
       try {
         await stat(srcPath);
       } catch {
-        continue; // template file absent — skip
+        return undefined; // template file absent — skip
       }
       await this.copyFile(srcPath, resolve(outputDir, relPath), effectiveVars);
-      synced.push(relPath);
-    }
-    return synced;
+      return relPath;
+    }));
+    return results.filter((path): path is string => path !== undefined);
   }
 
   /**

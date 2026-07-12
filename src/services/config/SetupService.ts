@@ -17,22 +17,14 @@ import { GitHubService } from '../deploy/GitHubService.js';
 import { VercelService } from '../deploy/VercelService.js';
 import { AuthService } from '../auth/AuthService.js';
 import type { LLMConfig, LLMEffort } from '../../types/llm.js';
-import { LLM_EFFORTS, isValidEffort } from '../../config/llmCatalog.js';
+import { LLM_EFFORTS, defaultModelFor, isValidEffort } from '../../config/llmCatalog.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
 
 export type ProgressFn = (line: string) => void;
 
 /** Providers OpenBoard's setup supports (subset of the LLMConfig union). */
-const PROVIDERS = ['openai', 'openai-codex', 'anthropic', 'moonshot', 'ollama'] as const;
+const PROVIDERS = ['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama'] as const;
 type SetupProvider = (typeof PROVIDERS)[number];
-
-const DEFAULT_MODELS: Record<SetupProvider, string> = {
-  openai: 'gpt-4o',
-  'openai-codex': 'gpt-5.5',
-  anthropic: 'claude-sonnet-4-5',
-  moonshot: 'moonshot-v1-8k',
-  ollama: 'qwen2.5-coder:7b',
-};
 
 export interface SetupPartResult {
   configured: boolean;
@@ -126,7 +118,7 @@ export class SetupService {
     if (!provider || !PROVIDERS.includes(provider)) {
       return { configured: false, error: `Invalid or missing --provider. Use one of: ${PROVIDERS.join(', ')}.`, errorCode: 'E_VALIDATION' };
     }
-    const model = input.model?.trim() || DEFAULT_MODELS[provider];
+    const model = input.model?.trim() || defaultModelFor(provider);
     const effortInput = input.effort?.trim().toLowerCase();
     if (effortInput && !isValidEffort(effortInput)) {
       return { configured: false, error: `Invalid --effort "${effortInput}". Use one of: ${LLM_EFFORTS.join(', ')}.`, errorCode: 'E_VALIDATION' };

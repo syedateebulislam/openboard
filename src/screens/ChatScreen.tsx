@@ -35,7 +35,7 @@ import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
 import { UI_COLORS } from '../theme.js';
-import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
+import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 
 const projectManager = new ProjectManager();
@@ -62,27 +62,7 @@ function newMsg(
   };
 }
 
-/**
- * Get a default model name for a provider when none is configured.
- */
-function getDefaultModel(provider: string): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4o';
-    case 'openai-codex':
-      return 'gpt-5.5';
-    case 'anthropic':
-      return 'claude-sonnet-4-5';
-    case 'ollama':
-      return 'qwen2.5-coder:7b';
-    case 'moonshot':
-      return 'moonshot-v1-8k';
-    case 'gemini':
-      return 'gemini-2.5-pro';
-    default:
-      return 'gpt-4o';
-  }
-}
+// Default models come from the shared catalog (src/config/llmCatalog.ts).
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -522,6 +502,10 @@ export function ChatScreen({
           onProgress(`Warning: shell sync skipped: ${error.message}`);
         }
 
+        // Keep the master Overview tab in sync with the registered dashboards
+        // (no-op when unchanged; failures are non-fatal inside syncMasterTab).
+        await new DashboardUpdateService().syncMasterTab(projectDir, reporter);
+
         onProgress('Building project...');
         const buildResult = await projectManager.build(projectDir, onProgress);
         if (!buildResult.success) {
@@ -849,6 +833,10 @@ For the current board "${board.title}":
               } catch (error: any) {
                 onProgress(`Warning: shell sync skipped: ${error.message}`);
               }
+
+              // Keep the master Overview tab in sync with the registered
+              // dashboards (no-op when unchanged; failures are non-fatal).
+              await new DashboardUpdateService().syncMasterTab(projectDir, reporter);
 
               // Step 1: Build the project
               onProgress('Building project...');
@@ -1187,7 +1175,7 @@ For the current board "${board.title}":
 
           const updatePrompt = `Regenerate/update the "${board.title}" dashboard tab using the latest data source.
 
-This is an OpenBoard update run. The CSV/JSON file may have changed, but the dashboard intent should remain the same as the saved prompt history.
+This is an OpenBoard update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent should remain the same as the saved prompt history.
 
 Dashboard:
 - Title: ${board.title}

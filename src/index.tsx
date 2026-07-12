@@ -36,7 +36,7 @@ const cli = meow(`
   Options
     --dashboard         Dashboard id, name, or title
     --all               Target all dashboards (regen; with --prompt: modify all; with agent remove: remove all)
-    --data              CSV/JSON data source file
+    --data              Data source file: .csv, .xlsx, .xls, or .json
     --name              Dashboard display name for creation
     --type              Dashboard type: health, finance, grocery, custom
     --prompt            User prompt for initial generation or dashboard update
@@ -454,7 +454,7 @@ if (!command || command === 'start') {
   if (action === 'create' || action === 'onboard') {
     const dataFile = cli.flags.data;
     if (!dataFile) {
-      const error = 'Missing required --data <csv|json> for agent create.';
+      const error = 'Missing required --data <csv|xlsx|json> for agent create.';
       if (jsonMode) printJson({ success: false, action: 'create', error, errorCode: 'E_VALIDATION' });
       else console.error(error);
       process.exit(1);

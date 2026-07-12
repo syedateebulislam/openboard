@@ -550,6 +550,11 @@
 .card + .card,
 .grid-2 + .card, .grid-3 + .card, .grid-4 + .card,
 .card + .grid-2, .card + .grid-3, .card + .grid-4 { margin-top: 1.5rem; }
+/* KPI cards in a grid row are always equal-sized — never let one span wider. */
+.grid-2 > .kpi-card, .grid-3 > .kpi-card, .grid-4 > .kpi-card {
+  grid-column: span 1 !important;
+  min-width: 0;
+}
 @media (min-width: 640px) {
   .grid-2, .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
 }
@@ -689,7 +694,18 @@
 
 /* ----- Mobile shell adjustments ----- */
 @media (max-width: 640px) {
-  .app-header { padding: 0.875rem 1rem; grid-template-columns: auto 1fr auto; }
+  /* Two rows: centered brand on top; project links left + user actions right
+     below — so the icon links never overlap the greeting. */
+  .app-header {
+    padding: 0.75rem 1rem;
+    grid-template-columns: 1fr auto;
+    row-gap: 0.5rem;
+  }
+  .app-brand { grid-column: 1 / -1; grid-row: 1; }
+  .app-header-side { grid-row: 2; grid-column: 1; justify-self: start; }
+  .app-header-side.app-header-actions { grid-column: 2; justify-self: end; }
+  .header-links { gap: 0.375rem; }
+  .header-link { padding: 0.25rem; }
   .app-greeting { font-size: 0.8125rem; }
   .app-content { padding: 0.25rem 1rem 1rem; }
   .metric-value { font-size: 1.5rem; }
