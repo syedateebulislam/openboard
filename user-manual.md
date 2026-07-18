@@ -1,4 +1,4 @@
-# OpenBoard User Manual
+﻿# OpenBoard User Manual
 
 This manual is for humans using the OpenBoard terminal UI.
 
@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║        [_-_] O p e n B o a r d        ║
 ║     Analytics Dashboard Generator     ║
-║                v1.4.0                 ║
+║                v1.5.0                 ║
 ╚═══════════════════════════════════════╝
 ```
 
