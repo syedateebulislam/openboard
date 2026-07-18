@@ -18,6 +18,15 @@ import { VercelService } from '../deploy/VercelService.js';
 import { AuthService } from '../auth/AuthService.js';
 import type { LLMConfig, LLMEffort } from '../../types/llm.js';
 import { LLM_EFFORTS, defaultModelFor, isValidEffort } from '../../config/llmCatalog.js';
+import {
+  APP_MODE_IDS,
+  describeAppMode,
+  getAppMode,
+  isValidAppMode,
+  modeAllowsDeploy,
+  providerAllowedInMode,
+  type AppMode,
+} from '../../config/appModes.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
 
 export type ProgressFn = (line: string) => void;
@@ -34,6 +43,9 @@ export interface SetupPartResult {
 }
 
 export interface SetupStatus {
+  /** Privacy mode: local (Ollama + preview), hybrid (cloud LLM + preview), remote (full pipeline). */
+  mode: AppMode;
+  modeDescription: string;
   llm: { provider: string; model?: string; effort?: string } | null;
   github: { username?: string } | null;
   vercel: boolean;
@@ -113,10 +125,44 @@ export class SetupService {
     this.deps = { ...defaultDeps, ...deps };
   }
 
+  /**
+   * Set the app mode — the privacy contract picked before everything else:
+   * local (Ollama + local preview), hybrid (cloud LLM + local preview),
+   * remote (cloud LLM + GitHub + live Vercel app).
+   */
+  configureMode(mode?: string): SetupPartResult {
+    const trimmed = mode?.trim().toLowerCase();
+    if (!isValidAppMode(trimmed)) {
+      return {
+        configured: false,
+        error: `Invalid or missing --mode. Use one of: ${APP_MODE_IDS.join(', ')}.`,
+        errorCode: 'E_VALIDATION',
+      };
+    }
+
+    this.config.set('app.mode', trimmed);
+    const notes: string[] = [describeAppMode(trimmed)];
+
+    const provider = this.config.get('llm.provider') as string | undefined;
+    if (provider && !providerAllowedInMode(provider, trimmed)) {
+      notes.push(`Warning: configured LLM provider "${provider}" is not allowed in this mode — reconfigure with \`openboard agent setup llm --provider ollama\`.`);
+    }
+    return { configured: true, detail: `Mode set to ${trimmed} (${notes.join(' ')})` };
+  }
+
   async configureLLM(input: ConfigureLLMInput): Promise<SetupPartResult> {
     const provider = input.provider?.trim() as SetupProvider | undefined;
     if (!provider || !PROVIDERS.includes(provider)) {
       return { configured: false, error: `Invalid or missing --provider. Use one of: ${PROVIDERS.join(', ')}.`, errorCode: 'E_VALIDATION' };
+    }
+
+    const mode = getAppMode(this.config);
+    if (!providerAllowedInMode(provider, mode)) {
+      return {
+        configured: false,
+        error: `Provider "${provider}" is not allowed in ${mode} mode — Local only mode uses Ollama. Change mode first: openboard agent setup mode --mode hybrid|remote.`,
+        errorCode: 'E_VALIDATION',
+      };
     }
     const model = input.model?.trim() || defaultModelFor(provider);
     const effortInput = input.effort?.trim().toLowerCase();
@@ -178,6 +224,14 @@ export class SetupService {
   }
 
   async configureGitHub(token?: string): Promise<SetupPartResult> {
+    const mode = getAppMode(this.config);
+    if (!modeAllowsDeploy(mode)) {
+      return {
+        configured: false,
+        error: `GitHub is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode remote.`,
+        errorCode: 'E_VALIDATION',
+      };
+    }
     const trimmed = token?.trim();
     if (!trimmed) {
       return { configured: false, error: 'Missing GitHub token (--github-token or OPENBOARD_GITHUB_TOKEN).', errorCode: 'E_VALIDATION' };
@@ -193,6 +247,14 @@ export class SetupService {
   }
 
   async configureVercel(token?: string): Promise<SetupPartResult> {
+    const mode = getAppMode(this.config);
+    if (!modeAllowsDeploy(mode)) {
+      return {
+        configured: false,
+        error: `Vercel is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode remote.`,
+        errorCode: 'E_VALIDATION',
+      };
+    }
     const trimmed = token?.trim();
     if (!trimmed) {
       return { configured: false, error: 'Missing Vercel token (--vercel-token or OPENBOARD_VERCEL_TOKEN).', errorCode: 'E_VALIDATION' };
@@ -224,7 +286,10 @@ export class SetupService {
     const provider = this.config.get('llm.provider') as string | undefined;
     const githubUser = this.config.get('github.username') as string | undefined;
     const hasGithub = githubUser !== undefined || this.config.has('github.token');
+    const mode = getAppMode(this.config);
     return {
+      mode,
+      modeDescription: describeAppMode(mode),
       llm: provider
         ? {
             provider,

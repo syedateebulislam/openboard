@@ -19,7 +19,8 @@ import { PipelineReporter, PHASE_ORDER } from '../services/project/pipelinePhase
 import type { PipelinePhase, PipelineEventSink } from '../services/project/pipelinePhases.js';
 import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
 import { RunStateService } from '../services/project/RunStateService.js';
-import { parseCommand, HELP_TEXT, COMMANDS_TEXT, CHAT_COMMANDS, formatUnknownCommandMessage } from '../utils/commandParser.js';
+import { parseCommand, chatCommandsForMode, commandsTextForMode, helpTextForMode, formatUnknownCommandMessage } from '../utils/commandParser.js';
+import { blockedDeployMessage, describeAppMode, getAppMode, modeAllowsDeploy } from '../config/appModes.js';
 import type { ChatMessage, BoardConfig } from '../types/board.js';
 import type { LLMProvider, LLMMessage } from '../types/llm.js';
 import { LLMService } from '../services/llm/LLMService.js';
@@ -398,10 +399,17 @@ export function ChatScreen({
       config.getSecret('credentials.passwordHash') &&
       config.getSecret('credentials.jwtSecret'),
     );
+    // GitHub/Vercel readiness only applies when the mode deploys remotely.
+    const doctorMode = getAppMode(config);
+    const remoteChecks: Array<[string, boolean]> = modeAllowsDeploy(doctorMode)
+      ? [
+          ['GitHub config', config.has('github.token') || config.has('github.username')],
+          ['Vercel config/login path', config.has('vercel.token') || Boolean(info?.hasVercel)],
+        ]
+      : [];
     const checks = [
       ['LLM provider', Boolean(config.get('llm.provider'))],
-      ['GitHub config', config.has('github.token') || config.has('github.username')],
-      ['Vercel config/login path', config.has('vercel.token') || Boolean(info?.hasVercel)],
+      ...remoteChecks,
       ['Dashboard credentials', hasDashboardCredentials],
       ['Generated project', Boolean(projectDir && info?.hasPackageJson)],
       ['Dependencies installed', Boolean(info?.hasNodeModules)],
@@ -449,6 +457,7 @@ export function ChatScreen({
 
     return [
       'OpenBoard Doctor',
+      `Mode: ${describeAppMode(doctorMode)}`,
       ...checks.map(([label, ok]) => `${ok ? 'OK' : 'WARN'} ${label}: ${yesNo(Boolean(ok))}`),
       '',
       ...registryLines,
@@ -519,6 +528,14 @@ export function ChatScreen({
           return;
         }
         onProgress('Build successful');
+
+        const mode = getAppMode();
+        if (!modeAllowsDeploy(mode)) {
+          onProgress(`Mode is ${mode} — GitHub push and Vercel deploy are skipped by design.`);
+          onProgress('Run /preview to view the updated dashboard locally.');
+          reporter.phase('done');
+          return;
+        }
 
         reporter.phase('push');
         onProgress('Pushing to GitHub...');
@@ -929,13 +946,13 @@ For the current board "${board.title}":
       const cmd = parseCommand(text);
 
       if (cmd.type === 'commands') {
-        addMsg(newMsg('system', `Command palette\n${COMMANDS_TEXT}`));
+        addMsg(newMsg('system', `Command palette\n${commandsTextForMode(modeAllowsDeploy(getAppMode()))}`));
         return;
       }
 
       // ── /help ──────────────────────────────────────────────────────────────
       if (cmd.type === 'help') {
-        addMsg(newMsg('system', HELP_TEXT));
+        addMsg(newMsg('system', helpTextForMode(modeAllowsDeploy(getAppMode()))));
         return;
       }
 
@@ -1232,6 +1249,11 @@ Requirements:
 
       // ── deploy ─────────────────────────────────────────────────────────────
       if (cmd.type === 'deploy') {
+        const mode = getAppMode();
+        if (!modeAllowsDeploy(mode)) {
+          addMsg(newMsg('system', blockedDeployMessage(mode, 'deploy')));
+          return;
+        }
         const projectDir = getActiveProjectDir();
         if (!projectDir) {
           addMsg(newMsg('error', 'No project directory. Create a board first.'));
@@ -1244,6 +1266,11 @@ Requirements:
 
       // ── push ───────────────────────────────────────────────────────────────
       if (cmd.type === 'push') {
+        const mode = getAppMode();
+        if (!modeAllowsDeploy(mode)) {
+          addMsg(newMsg('system', blockedDeployMessage(mode, 'push')));
+          return;
+        }
         const projectDir = getActiveProjectDir();
         if (!projectDir) {
           addMsg(newMsg('error', 'No project directory. Create a board first.'));
@@ -1353,7 +1380,7 @@ Requirements:
   const commandSuggestions = useMemo(() => {
     const trimmed = input.trim().toLowerCase();
     if (!trimmed.startsWith('/')) return [];
-    return CHAT_COMMANDS
+    return chatCommandsForMode(modeAllowsDeploy(getAppMode()))
       .filter((item) => item.command.startsWith(trimmed))
       .slice(0, 5);
   }, [input]);

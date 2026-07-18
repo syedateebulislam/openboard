@@ -4,6 +4,7 @@ import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
 import { bannerVersionLine } from '../version.js';
+import { describeAppMode, getAppMode } from '../config/appModes.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
@@ -19,6 +20,13 @@ const menuItems = [
 ];
 
 export function WelcomeScreen({ onNavigate }: Props) {
+  let modeLine: string | undefined;
+  try {
+    modeLine = describeAppMode(getAppMode());
+  } catch {
+    modeLine = undefined;
+  }
+
   const handleSelect = (item: typeof menuItems[0]) => {
     if (item.value === 'exit') {
       process.exit(0);
@@ -48,6 +56,12 @@ export function WelcomeScreen({ onNavigate }: Props) {
         <Text bold color={UI_COLORS.border}>╚═══════════════════════════════════════╝</Text>
       </Box>
       
+      {modeLine && (
+        <Box marginTop={1}>
+          <Text color={UI_COLORS.subtitle}>Mode: {modeLine}</Text>
+        </Box>
+      )}
+
       <Box marginTop={1} flexDirection="column">
         <SelectInput items={menuItems} onSelect={handleSelect} />
       </Box>

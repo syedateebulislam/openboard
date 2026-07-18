@@ -25,6 +25,14 @@ import { homedir } from 'node:os';
 
 const LLMProviderSchema = z.enum(['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama']);
 
+// Privacy modes: local (Ollama + local preview), hybrid (cloud LLM + local
+// preview), remote (cloud LLM + GitHub + Vercel). See src/config/appModes.ts.
+const AppModeSchema = z.enum(['local', 'hybrid', 'remote']);
+
+const AppModeConfigSchema = z.object({
+  mode: AppModeSchema.optional(),
+}).optional();
+
 const LLMEffortSchema = z.enum(['low', 'medium', 'high', 'max']);
 
 const LLMConfigSchema = z.object({
@@ -61,6 +69,7 @@ const BoardSchema = z.object({
 }).optional();
 
 const AppConfigSchema = z.object({
+  app: AppModeConfigSchema,
   llm: LLMConfigSchema,
   github: GitHubConfigSchema,
   vercel: VercelConfigSchema,
@@ -197,6 +206,12 @@ function validateSet(key: string, value: unknown): void {
     const result = LLMProviderSchema.safeParse(value);
     if (!result.success) {
       throw new Error(`Invalid provider value: ${String(value)}. Must be one of: openai, openai-codex, anthropic, moonshot, gemini, ollama`);
+    }
+  }
+  if (key === 'app.mode') {
+    const result = AppModeSchema.safeParse(value);
+    if (!result.success) {
+      throw new Error(`Invalid app mode: ${String(value)}. Must be one of: local, hybrid, remote`);
     }
   }
   if (key === 'llm.effort') {

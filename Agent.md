@@ -15,6 +15,8 @@ openboard agent update --dashboard "uber-rides" --prompt "Add a monthly trend ch
 
 Parse stdout JSON for `success`, `dashboardSelector`, `deployUrl`, and `errorCode` on failure. Progress streams to stderr.
 
+Mode note: in `local` and `hybrid` app modes the pipeline intentionally ends after the local build — `deployUrl` is absent and the GitHub/Vercel phases are skipped. Only `remote` mode produces a live URL.
+
 ---
 
 This file is for automation agents, scheduled jobs, and cron-style tools that need to create or update OpenBoard dashboards without opening the interactive TUI.
@@ -35,11 +37,20 @@ flowchart TD
 
 ## Prerequisites
 
-OpenBoard needs four things configured. An agent can set all of them up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
+OpenBoard is configured around an **app mode** — set it first, because it decides which other parts are needed (and allowed):
 
-- LLM provider: OpenAI API key, OpenAI Codex login, Anthropic, Moonshot, or Ollama.
-- GitHub token or authenticated GitHub CLI.
-- Vercel token or Vercel Git integration.
+| Mode | LLM | Output | GitHub/Vercel |
+|---|---|---|---|
+| `local` | Ollama only (on-machine) | Local preview only | Not used — refused by setup |
+| `hybrid` | Any cloud provider | Local preview only | Not used — refused by setup |
+| `remote` | Any provider | Live Vercel web app | Required |
+
+An agent can set everything up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
+
+- App mode: `openboard agent setup mode --mode local|hybrid|remote` (unset behaves as `remote`).
+- LLM provider: OpenAI API key, OpenAI Codex login, Anthropic, Moonshot, or Ollama (`local` mode: Ollama only).
+- GitHub token or authenticated GitHub CLI (`remote` mode only).
+- Vercel token or Vercel Git integration (`remote` mode only).
 - Dashboard login credentials.
 
 Install from npm (the package is `openboard-cli`; the installed command is `openboard`):
@@ -69,17 +80,23 @@ node dist/index.js --help
 Configure OpenBoard without the interactive TUI — give an agent the tokens and it wires everything up. Each credential is validated before it is saved (encrypted at rest). `openboard agent setup status` shows what is configured.
 
 ```bash
-# Everything in one call (configures whatever inputs you pass):
+# All remote (full pipeline) in one call — mode is applied first:
 openboard agent setup all \
+  --mode remote \
   --provider openai --api-key "sk-..." \
   --github-token "ghp_..." \
   --vercel-token "..." \
   --username admin --password "at-least-8-chars" --json
 
+# Privacy-first local-only setup (Ollama + local preview, no tokens needed):
+openboard agent setup all --mode local --provider ollama \
+  --username admin --password "at-least-8-chars" --json
+
 # Or one piece at a time:
+openboard agent setup mode --mode hybrid
 openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
-openboard agent setup github --github-token "ghp_..."
-openboard agent setup vercel --vercel-token "..."
+openboard agent setup github --github-token "ghp_..."     # remote mode only
+openboard agent setup vercel --vercel-token "..."          # remote mode only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
 openboard agent setup status --json
 ```
@@ -88,6 +105,7 @@ Flags:
 
 | Flag | For | Meaning |
 |---|---|---|
+| `--mode` | mode | `local` (Ollama + local preview), `hybrid` (cloud LLM + local preview), `remote` (cloud LLM + GitHub + live Vercel app) |
 | `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `moonshot`, or `ollama` |
 | `--model` | llm | Optional; a sensible default is used per provider |
 | `--api-key` | llm | API key (not needed for `ollama`; for `openai-codex` it triggers a headless `codex login --with-api-key`) |

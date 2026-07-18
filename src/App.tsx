@@ -17,6 +17,14 @@ import { AuthService } from './services/auth/AuthService.js';
 import type { LLMConfig } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
 import { UI_COLORS } from './theme.js';
+import {
+  APP_MODES,
+  describeAppMode,
+  getAppMode,
+  modeAllowsDeploy,
+  providerAllowedInMode,
+  type AppMode,
+} from './config/appModes.js';
 
 const projectManager = new ProjectManager();
 
@@ -28,6 +36,7 @@ export type Screen =
   | 'chat'
   | 'deploy'
   | 'settings'
+  | 'settings-mode'
   | 'settings-vercel'
   | 'settings-github'
   | 'settings-llm'
@@ -39,10 +48,20 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
     if (key.escape) onNavigate('welcome');
   });
 
+  const mode = getAppMode();
+  const remote = modeAllowsDeploy(mode);
+
+  // GitHub/Vercel tokens only matter in All remote mode — hiding them keeps
+  // the privacy contract visible: local/hybrid never talk to GitHub/Vercel.
   const items = [
+    { label: `App mode (current: ${describeAppMode(mode)})`, value: 'mode' },
     { label: 'Update LLM provider', value: 'llm' },
-    { label: 'Re-enter GitHub token', value: 'github' },
-    { label: 'Re-enter Vercel token', value: 'vercel' },
+    ...(remote
+      ? [
+          { label: 'Re-enter GitHub token', value: 'github' },
+          { label: 'Re-enter Vercel token', value: 'vercel' },
+        ]
+      : []),
     { label: 'Reset dashboard login', value: 'dashboard-auth' },
     { label: 'Run full setup wizard', value: 'setup' },
     { label: '← Go Back', value: 'back' },
@@ -51,12 +70,13 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
   return (
     <Box flexDirection="column" padding={2}>
       <Text bold color={UI_COLORS.logo}>⚙️ Settings</Text>
-      <Text color={UI_COLORS.subtitle}>Update credentials used by OpenBoard.</Text>
+      <Text color={UI_COLORS.subtitle}>Update the mode and credentials used by OpenBoard.</Text>
       <Box marginTop={1}>
         <SelectInput
           items={items}
           onSelect={(item) => {
-            if (item.value === 'llm') onNavigate('settings-llm');
+            if (item.value === 'mode') onNavigate('settings-mode');
+            else if (item.value === 'llm') onNavigate('settings-llm');
             else if (item.value === 'github') onNavigate('settings-github');
             else if (item.value === 'vercel') onNavigate('settings-vercel');
             else if (item.value === 'dashboard-auth') onNavigate('settings-dashboard-auth');
@@ -65,6 +85,68 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
           }}
         />
       </Box>
+      <Text color={UI_COLORS.subtitle}>Press ESC or select Go Back</Text>
+    </Box>
+  );
+}
+
+function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+  const [status, setStatus] = useState('');
+
+  useInput((_input, key) => {
+    if (key.escape) onNavigate('settings');
+  });
+
+  const currentMode = getAppMode();
+
+  const items = [
+    ...APP_MODES.map((m, index) => ({
+      label: `${index + 1}. ${m.label} — ${m.summary}${m.id === currentMode ? '  (current)' : ''}`,
+      value: m.id as string,
+    })),
+    { label: '← Go Back', value: 'back' },
+  ];
+
+  const selectMode = (selected: AppMode) => {
+    const config = new ConfigService();
+    config.set('app.mode', selected);
+
+    const notes: string[] = [`Mode set to: ${describeAppMode(selected)}`];
+    const provider = config.get('llm.provider') as string | undefined;
+    if (provider && !providerAllowedInMode(provider, selected)) {
+      notes.push(`Your LLM provider "${provider}" is not available in this mode — update it under Settings > Update LLM provider (Ollama runs locally).`);
+    }
+    if (modeAllowsDeploy(selected) && !config.has('vercel.token')) {
+      notes.push('All remote mode needs GitHub/Vercel tokens — add them in Settings.');
+    }
+    setStatus(notes.join('\n'));
+  };
+
+  return (
+    <Box flexDirection="column" padding={2}>
+      <Text bold color={UI_COLORS.logo}>App Mode</Text>
+      <Text color={UI_COLORS.subtitle}>What OpenBoard produces — and what leaves your machine.</Text>
+      <Box marginTop={1} flexDirection="column">
+        {APP_MODES.map((m, index) => (
+          <Text key={m.id} color={UI_COLORS.subtitle}>
+            {index + 1}. {m.label}: {m.detail}
+          </Text>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <SelectInput
+          items={items}
+          onSelect={(item) => {
+            if (item.value === 'back') onNavigate('settings');
+            else selectMode(item.value as AppMode);
+          }}
+        />
+      </Box>
+      {status && (
+        <Box marginTop={1}>
+          <Text color="green">{status}</Text>
+        </Box>
+      )}
       <Text color={UI_COLORS.subtitle}>Press ESC or select Go Back</Text>
     </Box>
   );
@@ -318,10 +400,18 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   };
 
   if (step === 'provider') {
+    const mode = getAppMode();
+    const providerItems = LLM_PROVIDER_ITEMS.filter(
+      (item) => item.value === 'back' || providerAllowedInMode(item.value, mode),
+    );
     return (
       <Box flexDirection="column" padding={2}>
         <Text bold color={UI_COLORS.logo}>LLM Provider</Text>
-        <Text color={UI_COLORS.subtitle}>Choose the provider to configure.</Text>
+        <Text color={UI_COLORS.subtitle}>
+          {mode === 'local'
+            ? 'Local only mode: generation runs on your machine via Ollama.'
+            : 'Choose the provider to configure.'}
+        </Text>
         {status && (
           <Box marginTop={1}>
             <Text color={status.includes('saved') ? 'green' : 'yellow'}>{status}</Text>
@@ -329,7 +419,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
         )}
         <Box marginTop={1}>
           <SelectInput
-            items={LLM_PROVIDER_ITEMS}
+            items={providerItems}
             onSelect={(item) => {
               if (item.value === 'back') {
                 onNavigate('settings');
@@ -563,6 +653,9 @@ export function App() {
     
     case 'settings':
       return <SettingsPlaceholder onNavigate={navigate} />;
+
+    case 'settings-mode':
+      return <AppModeSettings onNavigate={navigate} />;
 
     case 'settings-vercel':
       return <VercelTokenSettings onNavigate={navigate} />;

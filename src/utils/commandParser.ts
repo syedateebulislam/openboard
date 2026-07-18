@@ -46,6 +46,9 @@ export interface ChatCommandSuggestion {
   color: 'cyan' | 'yellow' | 'green' | 'magenta';
 }
 
+/** Commands that publish outside the machine — hidden outside All remote mode. */
+const REMOTE_ONLY_COMMANDS = new Set(['/deploy', '/push']);
+
 export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/deploy', category: 'risky', color: 'yellow', description: 'Build, push to GitHub, and deploy to Vercel' },
   { command: '/push', category: 'risky', color: 'yellow', description: 'Commit and push to GitHub only' },
@@ -62,6 +65,32 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/commands', category: 'info', color: 'green', description: 'Show command palette' },
   { command: '/help', category: 'info', color: 'green', description: 'Show command help' },
 ];
+
+/**
+ * Chat commands available under a mode contract. When deploy is not allowed
+ * (local / hybrid modes), /deploy and /push are not suggested — the pipeline
+ * ends at the local preview by design.
+ */
+export function chatCommandsForMode(allowsDeploy: boolean): ChatCommandSuggestion[] {
+  return allowsDeploy
+    ? CHAT_COMMANDS
+    : CHAT_COMMANDS.filter((item) => !REMOTE_ONLY_COMMANDS.has(item.command));
+}
+
+export function commandsTextForMode(allowsDeploy: boolean): string {
+  return chatCommandsForMode(allowsDeploy)
+    .map((item) => `${item.command.padEnd(10)} [${item.category}] - ${item.description}`)
+    .join('\n');
+}
+
+export function helpTextForMode(allowsDeploy: boolean): string {
+  if (allowsDeploy) return HELP_TEXT;
+  return HELP_TEXT
+    .split('\n')
+    .filter((line) => !/^\s*\/(deploy|push)\s/.test(line))
+    .join('\n')
+    .replace(', then build + push + deploy', ', then rebuild for local preview');
+}
 
 /**
  * Parse a user chat input string into a typed Command.

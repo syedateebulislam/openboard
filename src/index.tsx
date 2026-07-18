@@ -22,7 +22,7 @@ const cli = meow(`
     update         Update dashboards non-interactively
     rollback       Roll a dashboard back to the previous deploy
     agent          Agent automation commands:
-                     setup              Headless config (llm|github|vercel|dashboard|status|all)
+                     setup              Headless config (mode|llm|github|vercel|dashboard|status|all)
                      create | onboard   Create dashboard from a data file
                      update             Update a dashboard with a prompt
                      update --all       Modify every dashboard with one prompt
@@ -41,6 +41,9 @@ const cli = meow(`
     --type              Dashboard type: health, finance, grocery, travel, food,
                         shopping, subscriptions, utilities, invoices, custom
     --prompt            User prompt for initial generation or dashboard update
+    --mode              App mode (agent setup): local (Ollama + local preview),
+                        hybrid (cloud LLM + local preview), remote (cloud LLM +
+                        GitHub + live Vercel web app)
     --effort            LLM execution effort: low, medium, high, max (agent setup)
     --json              Emit machine-readable JSON (NDJSON progress on stderr)
     --dry-run           Parse + analyze and return the plan; no LLM call, no deploy
@@ -52,7 +55,9 @@ const cli = meow(`
     $ openboard
     $ openboard update --dashboard uber-data
     $ openboard update --all
-    $ openboard agent setup all --provider openai --api-key sk-... --github-token ghp_... --vercel-token ... --username admin --password secret123
+    $ openboard agent setup mode --mode local
+    $ openboard agent setup all --mode remote --provider openai --api-key sk-... --github-token ghp_... --vercel-token ... --username admin --password secret123
+    $ openboard agent setup all --mode local --provider ollama --username admin --password secret123
     $ openboard agent setup status --json
     $ openboard agent create --data ./data/uber.csv --name "Uber Data" --json
     $ openboard agent update --dashboard uber-data --prompt "Add a monthly trend chart"
@@ -101,6 +106,9 @@ const cli = meow(`
       type: 'string',
     },
     provider: {
+      type: 'string',
+    },
+    mode: {
       type: 'string',
     },
     model: {
@@ -414,15 +422,22 @@ if (!command || command === 'start') {
       const status = setup.status();
       if (jsonMode) printJson({ success: true, action: 'setup', target: 'status', status });
       else {
+        console.log(`Mode: ${status.modeDescription}`);
         console.log(`LLM: ${status.llm ? `${status.llm.provider} (${status.llm.model ?? 'default'}, effort: ${status.llm.effort ?? 'medium'})` : 'not configured'}`);
-        console.log(`GitHub: ${status.github ? status.github.username ?? 'configured' : 'not configured'}`);
-        console.log(`Vercel: ${status.vercel ? 'configured' : 'not configured'}`);
+        if (status.mode === 'remote') {
+          console.log(`GitHub: ${status.github ? status.github.username ?? 'configured' : 'not configured'}`);
+          console.log(`Vercel: ${status.vercel ? 'configured' : 'not configured'}`);
+        } else {
+          console.log('GitHub/Vercel: not used in this mode (local preview only)');
+        }
         console.log(`Dashboard login: ${status.dashboardAuth ? 'configured' : 'not configured'}`);
       }
       process.exit(0);
     }
 
-    if (target === 'llm') {
+    if (target === 'mode') {
+      report({ mode: setup.configureMode(cli.flags.mode) });
+    } else if (target === 'llm') {
       report({ llm: await setup.configureLLM(llmInput) });
     } else if (target === 'github') {
       report({ github: await setup.configureGitHub(githubToken) });
@@ -432,20 +447,22 @@ if (!command || command === 'start') {
       report({ dashboard: await setup.configureDashboardAuth(cli.flags.username, password) });
     } else if (target === 'all') {
       // Configure whatever inputs were supplied; skip parts with no input.
+      // Mode is applied first so provider/GitHub/Vercel validation matches it.
       const results: Record<string, SetupPartResult> = {};
+      if (cli.flags.mode) results.mode = setup.configureMode(cli.flags.mode);
       if (cli.flags.provider) results.llm = await setup.configureLLM(llmInput);
       if (githubToken) results.github = await setup.configureGitHub(githubToken);
       if (vercelToken) results.vercel = await setup.configureVercel(vercelToken);
       if (cli.flags.username || password) results.dashboard = await setup.configureDashboardAuth(cli.flags.username, password);
       if (Object.keys(results).length === 0) {
-        const error = 'Nothing to configure. Pass --provider, --github-token, --vercel-token, and/or --username/--password (or the matching OPENBOARD_* env vars).';
+        const error = 'Nothing to configure. Pass --mode, --provider, --github-token, --vercel-token, and/or --username/--password (or the matching OPENBOARD_* env vars).';
         if (jsonMode) printJson({ success: false, action: 'setup', target: 'all', error, errorCode: 'E_VALIDATION' });
         else console.error(error);
         process.exit(1);
       }
       report(results);
     } else {
-      const error = `Unknown setup target "${target}". Use: llm | github | vercel | dashboard | status | all.`;
+      const error = `Unknown setup target "${target}". Use: mode | llm | github | vercel | dashboard | status | all.`;
       if (jsonMode) printJson({ success: false, action: 'setup', target, error, errorCode: 'E_VALIDATION' });
       else console.error(error);
       process.exit(1);

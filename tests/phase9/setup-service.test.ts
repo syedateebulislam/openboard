@@ -169,7 +169,14 @@ describe('SetupService (headless setup)', () => {
 
   it('status reflects what has been configured', async () => {
     const { setup } = newService(makeDeps());
-    expect(setup.status()).toEqual({ llm: null, github: null, vercel: false, dashboardAuth: false });
+    expect(setup.status()).toEqual({
+      mode: 'remote',
+      modeDescription: expect.stringContaining('All remote'),
+      llm: null,
+      github: null,
+      vercel: false,
+      dashboardAuth: false,
+    });
     await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' });
     await setup.configureDashboardAuth('admin', 'supersecret');
     const status = setup.status();

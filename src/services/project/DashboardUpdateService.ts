@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
 import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
 import { defaultModelFor as getDefaultModel, normalizeEffort } from '../../config/llmCatalog.js';
+import { getAppMode, modeAllowsDeploy, providerAllowedInMode } from '../../config/appModes.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
@@ -81,6 +82,15 @@ function createLLMConfig(config: ConfigService): LLMConfig {
   const provider = config.get('llm.provider') as LLMConfig['provider'] | undefined;
   if (!provider) {
     throw new Error('No LLM provider configured. Configure LLM settings first.');
+  }
+
+  // Mode contract: Local only mode never sends prompts/data to a cloud LLM.
+  const mode = getAppMode(config);
+  if (!providerAllowedInMode(provider, mode)) {
+    throw new Error(
+      `LLM provider "${provider}" is not allowed in ${mode} mode — Local only mode generates with Ollama on your machine. ` +
+      'Switch the provider (Settings > Update LLM provider) or change the mode (Settings > App mode).',
+    );
   }
 
   let apiKey: string | undefined;
@@ -1514,6 +1524,23 @@ Requirements:
       return this.failure(run, { board, writtenFiles }, `Build failed: ${buildResult.error}`);
     }
     reporter.log('Build successful');
+
+    // Mode contract: only All remote publishes. Local/hybrid pipelines end at
+    // the local build — the user previews the dashboard on their machine.
+    const mode = getAppMode();
+    if (!modeAllowsDeploy(mode)) {
+      reporter.log(`Mode is ${mode} — GitHub push and Vercel deploy are skipped by design.`);
+      reporter.log(`Preview locally: /preview in the TUI, or \`npm run dev\` in ${projectDir}`);
+      reporter.phase('done');
+      reporter.result(true);
+      if (run) {
+        this.runs.complete(run, {
+          boardId: board.id, boardName: board.name, boardTitle: board.title,
+          projectDir, writtenFiles,
+        });
+      }
+      return { success: true, board, writtenFiles, runId: run?.runId, tokenUsage: run?.tokenUsage };
+    }
 
     reporter.phase('push');
     reporter.log('Pushing to GitHub...');

@@ -53,11 +53,24 @@ Menu options:
 
 ## First-Time Setup
 
-Run LLM Setup and configure:
+The setup wizard asks for your **mode first**, so you know from the beginning
+what you will get at the end — and what leaves your machine:
 
-1. LLM provider
-2. GitHub token
-3. Vercel token
+1. **Local only** — local LLM (Ollama) + local preview only. Nothing leaves
+   your machine: no cloud LLM, no GitHub, no Vercel.
+2. **Hybrid** — cloud LLM (Codex/Claude/GPT/…) + local preview only. Prompts
+   and data summaries go to your LLM provider; no GitHub push, no live
+   deployment.
+3. **All remote** — cloud LLM + GitHub + a live Vercel web app.
+
+Privacy-conscious users should pick Local only or Hybrid; the deploy/push
+features simply do not exist in those modes.
+
+After the mode, the wizard walks through the steps that apply:
+
+1. LLM provider (Local only mode offers just Ollama)
+2. GitHub token *(All remote mode only)*
+3. Vercel token *(All remote mode only)*
 4. Dashboard login credentials
 
 Supported LLM providers:
@@ -66,9 +79,11 @@ Supported LLM providers:
 - OpenAI Codex / ChatGPT subscription through browser/device login
 - Anthropic
 - Moonshot
-- Ollama
+- Ollama (the only provider in Local only mode)
 
-Settings can be changed later from Settings.
+The mode and every setting can be changed later from Settings (Settings > App
+mode). Switching to All remote later asks for GitHub/Vercel tokens; switching
+to Local only requires the Ollama provider.
 
 ## Create A Dashboard
 

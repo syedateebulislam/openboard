@@ -1,11 +1,14 @@
 /**
- * SetupWizard — 4-panel TUI setup wizard for OpenBoard initial configuration.
+ * SetupWizard — mode-first TUI setup wizard for OpenBoard initial configuration.
  *
  * Guides the user through:
- *  Step 1: LLM provider selection (OpenAI / Anthropic / Ollama) + API key + model
- *  Step 2: GitHub Personal Access Token (optional)
- *  Step 3: Vercel API token (optional)
- *  Step 4: Dashboard username + password → bcrypt hash + JWT secret
+ *  Step 1: App mode — Local only / Hybrid / All remote. Picked FIRST so the
+ *          user knows from the beginning what the end result is and what
+ *          leaves their machine.
+ *  Step 2: LLM provider (filtered by mode: Local only ⇒ Ollama) + key + model
+ *  Step 3: GitHub Personal Access Token   (All remote mode only)
+ *  Step 4: Vercel API token               (All remote mode only)
+ *  Step 5: Dashboard username + password → bcrypt hash + JWT secret
  *
  * Uses Ink for TUI rendering, ink-text-input for text fields.
  * Calls AuthService.prepareCredentials and saves to ConfigService on completion.
@@ -25,6 +28,7 @@ import { GitHubService } from '../services/deploy/GitHubService.js';
 import { VercelService } from '../services/deploy/VercelService.js';
 import type { LLMConfig, LLMEffort } from '../types/llm.js';
 import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, MODEL_CHOICES } from '../config/llmCatalog.js';
+import { APP_MODES, allowedProvidersForMode, getAppMode, modeAllowsDeploy, type AppMode } from '../config/appModes.js';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
 
@@ -32,7 +36,7 @@ import { UI_COLORS } from '../theme.js';
 // Types
 // ---------------------------------------------------------------------------
 
-type WizardStep = 1 | 2 | 3 | 4;
+type WizardStep = 'mode' | 'llm' | 'github' | 'vercel' | 'credentials';
 type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
 
 interface ValidationState {
@@ -41,6 +45,8 @@ interface ValidationState {
 }
 
 interface WizardConfig {
+  // Step 0
+  mode: AppMode;
   // Step 1
   llmProvider: LLMProviderName;
   llmApiKey: string;
@@ -77,6 +83,12 @@ const LLM_PROVIDERS = [
   { label: 'Ollama (Local, free)', value: 'ollama' },
   { label: '← Go Back', value: 'back' },
 ];
+
+/** Providers selectable in the chosen mode (Local only ⇒ Ollama), plus Back. */
+function providersForMode(mode: AppMode): Array<{ label: string; value: string }> {
+  const allowed = new Set<string>(allowedProvidersForMode(mode));
+  return LLM_PROVIDERS.filter((item) => item.value === 'back' || allowed.has(item.value));
+}
 
 // Model lists, default models, and effort levels live in the shared catalog
 // (src/config/llmCatalog.ts) so the wizard, the in-chat /model command, and
@@ -145,10 +157,59 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
 }
 
 // ---------------------------------------------------------------------------
+// Step 0: App mode — picked first so the end result is clear from the start
+// ---------------------------------------------------------------------------
+
+interface StepModeProps {
+  onModeSelect: (mode: AppMode) => void;
+  onNavigate?: (screen: Screen) => void;
+}
+
+function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
+  const items = [
+    ...APP_MODES.map((mode, index) => ({
+      label: `${index + 1}. ${mode.label} — ${mode.summary}`,
+      value: mode.id as string,
+    })),
+    { label: '← Go Back', value: 'back' },
+  ];
+
+  return (
+    <Box flexDirection="column">
+      <SectionHeader
+        title="Step 1: Choose your mode"
+        subtitle="This decides what you get at the end — and what leaves your machine"
+      />
+
+      <Box flexDirection="column" marginBottom={1}>
+        {APP_MODES.map((mode, index) => (
+          <Text key={mode.id} color={UI_COLORS.subtitle}>
+            {index + 1}. {mode.label}: {mode.detail}
+          </Text>
+        ))}
+      </Box>
+
+      <SelectInput
+        items={items}
+        onSelect={(item) => {
+          if (item.value === 'back') {
+            if (onNavigate) onNavigate('welcome');
+            return;
+          }
+          onModeSelect(item.value as AppMode);
+        }}
+      />
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step 1: LLM Configuration
 // ---------------------------------------------------------------------------
 
 interface Step1Props {
+  mode: AppMode;
+  stepLabel: string;
   provider: LLMProviderName;
   apiKey: string;
   model: string;
@@ -164,6 +225,8 @@ interface Step1Props {
 }
 
 function Step1LLMConfig({
+  mode,
+  stepLabel,
   provider,
   apiKey,
   model,
@@ -231,15 +294,19 @@ function Step1LLMConfig({
   return (
     <Box flexDirection="column">
       <SectionHeader
-        title="Step 1: LLM Provider"
-        subtitle="Choose the AI provider for code generation"
+        title={`${stepLabel}: LLM Provider`}
+        subtitle={
+          mode === 'local'
+            ? 'Local only mode: generation runs on your machine via Ollama'
+            : 'Choose the AI provider for code generation'
+        }
       />
 
       {phase === 'provider' && (
         <Box flexDirection="column">
           <Text color={UI_COLORS.logo}>Select your LLM provider:</Text>
           <Box marginTop={1}>
-            <SelectInput items={LLM_PROVIDERS} onSelect={handleProviderSelect} />
+            <SelectInput items={providersForMode(mode)} onSelect={handleProviderSelect} />
           </Box>
         </Box>
       )}
@@ -327,6 +394,7 @@ function Step1LLMConfig({
 // ---------------------------------------------------------------------------
 
 interface Step2Props {
+  stepLabel: string;
   token: string;
   validation: ValidationState;
   onTokenChange: (t: string) => void;
@@ -335,7 +403,7 @@ interface Step2Props {
   onNavigate?: (screen: Screen) => void;
 }
 
-function Step2GitHub({ token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step2Props) {
+function Step2GitHub({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step2Props) {
   const [mode, setMode] = useState<'menu' | 'input'>('menu');
 
   const menuItems = [
@@ -360,8 +428,8 @@ function Step2GitHub({ token, validation, onTokenChange, onSubmit, onSkip, onNav
   return (
     <Box flexDirection="column">
       <SectionHeader
-        title="Step 2: GitHub Integration"
-        subtitle="Optional: create a repo and push dashboard code to GitHub"
+        title={`${stepLabel}: GitHub Integration`}
+        subtitle="All remote mode: create a repo and push dashboard code to GitHub"
       />
 
       {mode === 'menu' && (
@@ -396,6 +464,7 @@ function Step2GitHub({ token, validation, onTokenChange, onSubmit, onSkip, onNav
 // ---------------------------------------------------------------------------
 
 interface Step3Props {
+  stepLabel: string;
   token: string;
   validation: ValidationState;
   onTokenChange: (t: string) => void;
@@ -404,7 +473,7 @@ interface Step3Props {
   onNavigate?: (screen: Screen) => void;
 }
 
-function Step3Vercel({ token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step3Props) {
+function Step3Vercel({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step3Props) {
   const [mode, setMode] = useState<'menu' | 'input'>('menu');
 
   const menuItems = [
@@ -429,8 +498,8 @@ function Step3Vercel({ token, validation, onTokenChange, onSubmit, onSkip, onNav
   return (
     <Box flexDirection="column">
       <SectionHeader
-        title="Step 3: Vercel Deployment"
-        subtitle="Required for one-click Vercel deployment (optional)"
+        title={`${stepLabel}: Vercel Deployment`}
+        subtitle="All remote mode: required for the live web app deployment"
       />
 
       {mode === 'menu' && (
@@ -465,6 +534,8 @@ function Step3Vercel({ token, validation, onTokenChange, onSubmit, onSkip, onNav
 // ---------------------------------------------------------------------------
 
 interface Step4Props {
+  stepLabel: string;
+  mode: AppMode;
   username: string;
   password: string;
   passwordConfirm: string;
@@ -476,6 +547,8 @@ interface Step4Props {
 }
 
 function Step4Credentials({
+  stepLabel,
+  mode,
   username,
   password,
   passwordConfirm,
@@ -507,8 +580,12 @@ function Step4Credentials({
   return (
     <Box flexDirection="column">
       <SectionHeader
-        title="Step 4: Dashboard Credentials"
-        subtitle="Secure login credentials for your deployed dashboard"
+        title={`${stepLabel}: Dashboard Credentials`}
+        subtitle={
+          modeAllowsDeploy(mode)
+            ? 'Secure login credentials for your deployed dashboard'
+            : 'Login credentials for your locally previewed dashboard'
+        }
       />
 
       <Box flexDirection="column" gap={1}>
@@ -579,8 +656,16 @@ function Step4Credentials({
 export function SetupWizard({ onComplete, onNavigate, configService }: SetupWizardProps) {
   const config = configService ?? new ConfigService();
 
-  // Step state
-  const [step, setStep] = useState<WizardStep>(1);
+  // Step state — mode first, so the end result is clear from the beginning.
+  const [step, setStep] = useState<WizardStep>('mode');
+  const [mode, setMode] = useState<AppMode>(() => getAppMode(config));
+
+  // Which steps this wizard run walks through, given the chosen mode.
+  const visibleSteps: WizardStep[] = modeAllowsDeploy(mode)
+    ? ['mode', 'llm', 'github', 'vercel', 'credentials']
+    : ['mode', 'llm', 'credentials'];
+  const stepNumber = visibleSteps.indexOf(step) + 1;
+  const stepLabelFor = (s: WizardStep) => `Step ${visibleSteps.indexOf(s) + 1}`;
 
   // ESC key handler - go back to welcome screen
   useInput((_input, key) => {
@@ -602,6 +687,21 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+
+  // -------------------------------------------------------------------------
+  // Step 0: Mode selection — saved immediately so every later surface
+  // (chat commands, pipeline, agent CLI) reads the same contract.
+  // -------------------------------------------------------------------------
+  const handleModeSelect = useCallback((selected: AppMode) => {
+    setMode(selected);
+    config.set('app.mode', selected);
+    if (selected === 'local') {
+      // Local only: generation must stay on-machine.
+      setLLMProvider('ollama');
+      setLLMModel(DEFAULT_MODELS.ollama);
+    }
+    setStep('llm');
+  }, [config]);
 
   // Validation states
   const [step1Validation, setStep1Validation] = useState<ValidationState>({ status: 'idle' });
@@ -648,7 +748,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
           config.set('llm.model', modelToUse);
           config.set('llm.effort', llmEffort);
           setStep1Validation({ status: 'success', message: 'Codex login validated!' });
-          setTimeout(() => setStep(2), 800);
+          setTimeout(() => setStep(modeAllowsDeploy(mode) ? 'github' : 'credentials'), 800);
         } else {
           setStep1Validation({
             status: 'error',
@@ -681,7 +781,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
 
         setStep1Validation({ status: 'success', message: 'Connection validated!' });
         // Brief pause then advance
-        setTimeout(() => setStep(2), 800);
+        setTimeout(() => setStep(modeAllowsDeploy(mode) ? 'github' : 'credentials'), 800);
       } else {
         // Provide user-friendly error messages
         let errorMsg = result.error ?? 'Invalid credentials';
@@ -740,7 +840,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         } else {
           setStep2Validation({ status: 'success', message: `Token saved for ${data.login ?? 'GitHub user'}. Install gh CLI manually for automatic repo creation.` });
         }
-        setTimeout(() => setStep(3), 800);
+        setTimeout(() => setStep('vercel'), 800);
       } else {
         const body = await response.json() as { message?: string };
         setStep2Validation({ status: 'error', message: body.message ?? 'Invalid GitHub token' });
@@ -752,7 +852,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
 
   const handleStep2Skip = useCallback(() => {
     setGithubSkipped(true);
-    setStep(3);
+    setStep('vercel');
   }, []);
 
   // -------------------------------------------------------------------------
@@ -771,7 +871,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       if (validation.success) {
         config.setEncrypted('vercel.token', vercelToken.trim());
         setStep3Validation({ status: 'success', message: 'Vercel token validated!' });
-        setTimeout(() => setStep(4), 800);
+        setTimeout(() => setStep('credentials'), 800);
       } else {
         setStep3Validation({
           status: 'error',
@@ -785,7 +885,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
 
   const handleStep3Skip = useCallback(() => {
     setVercelSkipped(true);
-    setStep(4);
+    setStep('credentials');
   }, []);
 
   // -------------------------------------------------------------------------
@@ -819,6 +919,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       setStep4Validation({ status: 'success', message: 'Credentials saved securely!' });
 
       const finalConfig: WizardConfig = {
+        mode,
         llmProvider,
         llmApiKey,
         llmModel: llmModel || DEFAULT_MODELS[llmProvider],
@@ -839,7 +940,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
     }
   }, [
     username, password, passwordConfirm,
-    llmProvider, llmApiKey, llmModel, ollamaHost,
+    mode, llmProvider, llmApiKey, llmModel, ollamaHost,
     githubToken, githubSkipped, vercelToken, vercelSkipped,
     config, onComplete,
   ]);
@@ -857,12 +958,18 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       </Box>
 
       {/* Step indicator */}
-      <StepIndicator current={step} total={4} />
+      <StepIndicator current={stepNumber} total={visibleSteps.length} />
 
       {/* Step content */}
       <Box borderStyle="round" borderColor={UI_COLORS.border} padding={1} flexDirection="column">
-        {step === 1 && (
+        {step === 'mode' && (
+          <StepModeSelect onModeSelect={handleModeSelect} onNavigate={onNavigate} />
+        )}
+
+        {step === 'llm' && (
           <Step1LLMConfig
+            mode={mode}
+            stepLabel={stepLabelFor('llm')}
             provider={llmProvider}
             apiKey={llmApiKey}
             model={llmModel}
@@ -881,8 +988,9 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
           />
         )}
 
-        {step === 2 && (
+        {step === 'github' && (
           <Step2GitHub
+            stepLabel={stepLabelFor('github')}
             token={githubToken}
             validation={step2Validation}
             onTokenChange={setGithubToken}
@@ -892,8 +1000,9 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
           />
         )}
 
-        {step === 3 && (
+        {step === 'vercel' && (
           <Step3Vercel
+            stepLabel={stepLabelFor('vercel')}
             token={vercelToken}
             validation={step3Validation}
             onTokenChange={setVercelToken}
@@ -903,8 +1012,10 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
           />
         )}
 
-        {step === 4 && (
+        {step === 'credentials' && (
           <Step4Credentials
+            stepLabel={stepLabelFor('credentials')}
+            mode={mode}
             username={username}
             password={password}
             passwordConfirm={passwordConfirm}
