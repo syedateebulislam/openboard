@@ -28,7 +28,7 @@ import { GitHubService } from '../services/deploy/GitHubService.js';
 import { VercelService } from '../services/deploy/VercelService.js';
 import type { LLMConfig, LLMEffort } from '../types/llm.js';
 import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, MODEL_CHOICES } from '../config/llmCatalog.js';
-import { APP_MODES, allowedProvidersForMode, getAppMode, modeAllowsDeploy, type AppMode } from '../config/appModes.js';
+import { APP_MODES, allowedProvidersForMode, appModeInfo, getAppMode, modeAllowsDeploy, type AppMode } from '../config/appModes.js';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
 
@@ -166,6 +166,10 @@ interface StepModeProps {
 }
 
 function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
+  // Detail for the highlighted option renders below the list, so each mode is
+  // described exactly once instead of a legend + a duplicate select list.
+  const [highlighted, setHighlighted] = useState<AppMode>(APP_MODES[0].id);
+
   const items = [
     ...APP_MODES.map((mode, index) => ({
       label: `${index + 1}. ${mode.label} — ${mode.summary}`,
@@ -181,16 +185,11 @@ function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
         subtitle="This decides what you get at the end — and what leaves your machine"
       />
 
-      <Box flexDirection="column" marginBottom={1}>
-        {APP_MODES.map((mode, index) => (
-          <Text key={mode.id} color={UI_COLORS.subtitle}>
-            {index + 1}. {mode.label}: {mode.detail}
-          </Text>
-        ))}
-      </Box>
-
       <SelectInput
         items={items}
+        onHighlight={(item) => {
+          if (item.value !== 'back') setHighlighted(item.value as AppMode);
+        }}
         onSelect={(item) => {
           if (item.value === 'back') {
             if (onNavigate) onNavigate('welcome');
@@ -199,6 +198,10 @@ function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
           onModeSelect(item.value as AppMode);
         }}
       />
+
+      <Box marginTop={1}>
+        <Text color={UI_COLORS.subtitle}>{appModeInfo(highlighted).detail}</Text>
+      </Box>
     </Box>
   );
 }

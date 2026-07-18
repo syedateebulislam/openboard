@@ -19,6 +19,7 @@ import type { BoardConfig } from './types/board.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
+  appModeInfo,
   describeAppMode,
   getAppMode,
   modeAllowsDeploy,
@@ -92,6 +93,9 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
 
 function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [status, setStatus] = useState('');
+  // Detail for the highlighted option renders below the list — each mode is
+  // described once instead of a legend duplicating the select entries.
+  const [highlighted, setHighlighted] = useState<AppMode>(APP_MODES[0].id);
 
   useInput((_input, key) => {
     if (key.escape) onNavigate('settings');
@@ -126,21 +130,20 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
     <Box flexDirection="column" padding={2}>
       <Text bold color={UI_COLORS.logo}>App Mode</Text>
       <Text color={UI_COLORS.subtitle}>What OpenBoard produces — and what leaves your machine.</Text>
-      <Box marginTop={1} flexDirection="column">
-        {APP_MODES.map((m, index) => (
-          <Text key={m.id} color={UI_COLORS.subtitle}>
-            {index + 1}. {m.label}: {m.detail}
-          </Text>
-        ))}
-      </Box>
       <Box marginTop={1}>
         <SelectInput
           items={items}
+          onHighlight={(item) => {
+            if (item.value !== 'back') setHighlighted(item.value as AppMode);
+          }}
           onSelect={(item) => {
             if (item.value === 'back') onNavigate('settings');
             else selectMode(item.value as AppMode);
           }}
         />
+      </Box>
+      <Box marginTop={1}>
+        <Text color={UI_COLORS.subtitle}>{appModeInfo(highlighted).detail}</Text>
       </Box>
       {status && (
         <Box marginTop={1}>
