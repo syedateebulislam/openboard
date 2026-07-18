@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
 import { crossSpawn, IS_WINDOWS, IS_MAC, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
 import type { ProgressCallback } from '../build/BuildService.js';
 
@@ -112,9 +112,62 @@ export class GitHubService {
     try {
       const { code, stderr } = await runGitCommand(['init'], projectDir);
       if (code !== 0) return { success: false, error: stderr };
+      await GitHubService.ensureProtectedDataExcluded(projectDir);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Raw dashboard rows (api/_data/*.json, api/_data/protected-data.ts) must
+   * never enter Git history: GitHub repo readers, forks, and old commits would
+   * expose them even though the deployed HTTP endpoint is authenticated.
+   *
+   * Exclusion is written to .git/info/exclude — NOT .gitignore — so the
+   * Vercel CLI (which honors .gitignore when packaging uploads) still ships
+   * the data files to the deployment. Already-tracked data files from older
+   * projects are untracked (git rm --cached); the working-tree copies stay.
+   */
+  static async ensureProtectedDataExcluded(projectDir: string): Promise<void> {
+    const patterns = ['api/_data/*.json', 'api/_data/protected-data.ts'];
+    try {
+      const excludePath = join(projectDir, '.git', 'info', 'exclude');
+      if (!existsSync(join(projectDir, '.git'))) return;
+      mkdirSync(dirname(excludePath), { recursive: true });
+
+      let existing = '';
+      try {
+        existing = readFileSync(excludePath, 'utf-8');
+      } catch {
+        existing = '';
+      }
+      const missing = patterns.filter(pattern => !existing.split(/\r?\n/).includes(pattern));
+      if (missing.length > 0) {
+        const block = [
+          '# OpenBoard: raw dashboard data is deployed via Vercel CLI upload but never pushed to GitHub.',
+          ...missing,
+        ].join('\n');
+        const next = existing.length > 0 && !existing.endsWith('\n')
+          ? `${existing}\n${block}\n`
+          : `${existing}${block}\n`;
+        writeFileSync(excludePath, next, 'utf-8');
+      }
+
+      // Untrack data files that were committed before this exclusion existed.
+      const tracked = await runGitCommand(['ls-files', '--', 'api/_data'], projectDir, 10_000);
+      if (tracked.code === 0 && tracked.stdout.trim()) {
+        const files = tracked.stdout
+          .trim()
+          .split('\n')
+          .map(line => line.trim())
+          .filter(file => file.endsWith('.json') || file.endsWith('protected-data.ts'));
+        if (files.length > 0) {
+          await runGitCommand(['rm', '--cached', '-q', '--', ...files], projectDir, 15_000);
+        }
+      }
+    } catch {
+      // Best-effort: a failure here must not block commit/push flows.
     }
   }
 
@@ -172,6 +225,9 @@ export class GitHubService {
 
   static async commit(projectDir: string, message: string, onProgress?: ProgressCallback): Promise<GitHubResult> {
     try {
+      // Keep raw dashboard data out of Git before staging anything.
+      await GitHubService.ensureProtectedDataExcluded(projectDir);
+
       // Add all files
       let result = await runGitCommand(['add', '.'], projectDir, 30_000, onProgress);
       if (result.code !== 0) return { success: false, error: result.stderr };
@@ -227,7 +283,9 @@ export class GitHubService {
     return { success: true, commitHash: hashResult.stdout.trim() };
   }
 
-  static async push(projectDir: string, branch = 'main', onProgress?: ProgressCallback): Promise<GitHubResult> {
+  // The branch parameter is kept for API compatibility but the push always
+  // targets the repo's current branch.
+  static async push(projectDir: string, _branch = 'main', onProgress?: ProgressCallback): Promise<GitHubResult> {
     try {
       const branchResult = await runGitCommand(['branch', '--show-current'], projectDir);
       const currentBranch = branchResult.stdout.trim() || 'main';

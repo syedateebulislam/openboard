@@ -29,7 +29,10 @@ function runVercelCommand(
   timeoutMs = 180_000,
   onProgress?: ProgressCallback,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  return crossSpawn('vercel', withVercelAuthArgs(args), {
+  // Auth travels exclusively via the VERCEL_TOKEN env var (getVercelEnv).
+  // Never pass `--token <secret>` argv: process arguments are visible to
+  // process inspection and diagnostic tooling.
+  return crossSpawn('vercel', args, {
     cwd,
     timeoutMs,
     onProgress,
@@ -55,16 +58,6 @@ function getVercelEnv(): Record<string, string | undefined> | undefined {
   if (token) return { VERCEL_TOKEN: token };
   if (hasUnreadableEncryptedVercelToken()) return { VERCEL_TOKEN: undefined };
   return undefined;
-}
-
-function getVercelAuthArgs(): string[] | undefined {
-  const token = getSavedVercelToken();
-  return token ? ['--token', token] : undefined;
-}
-
-function withVercelAuthArgs(args: string[]): string[] {
-  const authArgs = getVercelAuthArgs();
-  return authArgs ? [...args, ...authArgs] : args;
 }
 
 function getVercelTeamId(): string | undefined {
@@ -519,7 +512,7 @@ export class VercelService {
 
     for (const env of environments) {
       // Remove existing value first (ignore errors if it doesn't exist)
-      await crossSpawn('vercel', withVercelAuthArgs(['env', 'rm', key, env, '--yes']), {
+      await crossSpawn('vercel', ['env', 'rm', key, env, '--yes'], {
         cwd: projectDir,
         timeoutMs: 15_000,
         env: getVercelEnv(),
@@ -527,7 +520,7 @@ export class VercelService {
 
       // Add new value via stdin
       const ok = await new Promise<boolean>((resolve) => {
-        const invocation = resolveSpawnInvocation('vercel', withVercelAuthArgs(['env', 'add', key, env]));
+        const invocation = resolveSpawnInvocation('vercel', ['env', 'add', key, env]);
         const proc = spawn(invocation.command, invocation.args, {
           cwd: projectDir,
           shell: invocation.useShell,
@@ -572,9 +565,9 @@ export class VercelService {
     if (existsSync(join(projectDir, '.vercel'))) {
       const auth = await VercelService.checkAuthenticated(projectDir);
       if (!auth.success) {
-        onProgress?.('Skipping Vercel env vars because Vercel is not authenticated.');
+        onProgress?.('Cannot set Vercel env vars because Vercel is not authenticated.');
         onProgress?.(`   ${auth.error?.split('\n')[0] ?? 'Re-enter the Vercel token in setup/settings.'}`);
-        return true;
+        return false;
       }
 
       const envVars: [string, string][] = [
@@ -595,6 +588,7 @@ export class VercelService {
         onProgress?.('Credentials set on Vercel');
       } else {
         onProgress?.('Some Vercel credential env vars were not set.');
+        return false;
       }
     } else {
       onProgress?.('Wrote .env file (Vercel env vars will be set after first deploy)');

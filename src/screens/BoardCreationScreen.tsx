@@ -5,7 +5,7 @@ import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
 import type { BoardConfig } from '../types/board.js';
 import { BOARD_PRESETS, createBoardConfig, type BoardPreset } from '../config/boardPresets.js';
-import { DataParserService, type ParsedData } from '../services/data/DataParserService.js';
+import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { UI_COLORS } from '../theme.js';
@@ -75,9 +75,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   const [boardName, setBoardName] = useState('');
 
   // Analysis results
-  const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [analysis, setAnalysis] = useState<DataAnalysis | null>(null);
-  const [analysisSummary, setAnalysisSummary] = useState('');
 
   // Error
   const [errorMessage, setErrorMessage] = useState('');
@@ -127,11 +125,8 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
       try {
         const parsed = await DataParserService.parse(filePath);
         const dataAnalysis = DataAnalyzer.analyze(parsed);
-        const summary = DataAnalyzer.generateSummary(dataAnalysis);
 
-        setParsedData(parsed);
         setAnalysis(dataAnalysis);
-        setAnalysisSummary(summary);
         setStep('show-summary');
       } catch (e) {
         setErrorMessage(e instanceof Error ? e.message : String(e));
@@ -142,7 +137,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   );
 
   // Keyboard: ESC goes back, Enter confirms on show-summary
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) {
       if (step === 'enter-file') setStep('select-preset');
       else if (step === 'enter-name') setStep('enter-file');
@@ -276,7 +271,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         </Box>
         <Box marginTop={1}>
           <Text color={UI_COLORS.subtitle}>
-            Supports .csv, .xlsx, .xls, and .json files · ESC to go back
+            Supports .csv, .xlsx, and .json files · ESC to go back
           </Text>
         </Box>
       </Box>

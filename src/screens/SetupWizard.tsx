@@ -583,7 +583,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const [step, setStep] = useState<WizardStep>(1);
 
   // ESC key handler - go back to welcome screen
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape && onNavigate) {
       onNavigate('welcome');
     }

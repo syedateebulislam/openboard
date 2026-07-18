@@ -61,9 +61,9 @@ describe('Mobile header layout', () => {
 describe('Excel support surfaces', () => {
   it('is mentioned in the CLI help and creation screen', () => {
     const cli = readFileSync(join(REPO, 'src', 'index.tsx'), 'utf-8');
-    expect(cli).toContain('.csv, .xlsx, .xls, or .json');
+    expect(cli).toContain('.csv, .xlsx, or .json');
     const screen = readFileSync(join(REPO, 'src', 'screens', 'BoardCreationScreen.tsx'), 'utf-8');
-    expect(screen).toContain('.csv, .xlsx, .xls, and .json');
+    expect(screen).toContain('.csv, .xlsx, and .json');
   });
 });
 

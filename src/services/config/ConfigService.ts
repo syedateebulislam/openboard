@@ -76,7 +76,6 @@ const ENCRYPTION_KEY_SALT = 'openboard-config-encryption-v1';
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12; // 96 bits for GCM
-const AUTH_TAG_LENGTH = 16;
 const ENCRYPTED_PREFIX = 'enc:';
 
 /**
@@ -296,6 +295,8 @@ export class ConfigService {
   /**
    * Read a sensitive string value.
    * Supports encrypted config first and legacy plaintext config as a fallback.
+   * Legacy plaintext secrets are re-encrypted in place on first read so the
+   * config file at rest converges to encrypted-only secrets.
    */
   getSecret(key: string): string | undefined {
     const raw = this.getRaw(key);
@@ -306,6 +307,11 @@ export class ConfigService {
       } catch {
         return undefined;
       }
+    }
+    try {
+      this.setEncrypted(key, raw);
+    } catch {
+      // Migration is best-effort (e.g. read-only config dir); still serve the value.
     }
     return raw;
   }

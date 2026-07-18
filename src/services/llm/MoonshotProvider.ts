@@ -51,7 +51,7 @@ export class MoonshotProvider implements LLMProvider {
       // Test with a minimal completion request instead of list models
       // Some providers don't support model listing
       const client = await this.getClient();
-      const testResponse = await client.chat.completions.create({
+      await client.chat.completions.create({
         model: this.model,
         messages: [{ role: 'user', content: 'hi' }],
         max_tokens: 1,

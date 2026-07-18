@@ -271,6 +271,9 @@ export class ProjectManager {
     }
 
     try {
+      // Keep raw dashboard data out of Git before staging anything.
+      await GitHubService.ensureProtectedDataExcluded(projectDir);
+
       // Stage all files
       const addResult = await crossSpawn('git', ['add', '.'], { cwd: projectDir, timeoutMs: 30_000 });
       if (addResult.code !== 0) return { success: false, error: addResult.stderr };
@@ -552,7 +555,13 @@ export class ProjectManager {
       onProgress?.(credentials.error ?? 'Dashboard credentials are missing.');
       return { success: false, error: credentials.error };
     }
-    await VercelService.injectCredentials(projectDir, credentials.credentials, onProgress);
+    const injected = await VercelService.injectCredentials(projectDir, credentials.credentials, onProgress);
+    if (!injected) {
+      return {
+        success: false,
+        error: 'Dashboard credential env vars could not be set on the Vercel project. Deployment stopped so the dashboard does not go live with stale or missing auth. Check the Vercel token/scope and retry.',
+      };
+    }
 
     // Step 4: Deploy
     const result = await VercelService.deployProduction(projectDir, onProgress);

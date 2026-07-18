@@ -169,23 +169,11 @@ describe('ProjectManager', () => {
   });
 
   // ════════════════════════════════════════════════════════════════════════════
-  // 3. Install dependencies
-  // ════════════════════════════════════════════════════════════════════════════
-
-  describe('install', () => {
-    it('should install npm dependencies in scaffolded project', async () => {
-      const board = makeBoard();
-      const scaffoldResult = await pm.scaffold(board);
-      expect(scaffoldResult.success).toBe(true);
-
-      const installResult = await pm.install(scaffoldResult.projectDir!);
-      expect(installResult.success).toBe(true);
-      expect(existsSync(join(scaffoldResult.projectDir!, 'node_modules'))).toBe(true);
-    }, 660_000); // cold-cache npm install on CI runners can take minutes
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // 4. Build
+  // 3./4./5. Install / Build / Preview
+  //
+  // Real `npm install`, vite builds, and dev-server startup live in
+  // tests/integration/project-lifecycle.test.ts (npm run test:integration).
+  // Only the fast failure paths stay in the default unit run.
   // ════════════════════════════════════════════════════════════════════════════
 
   describe('build', () => {
@@ -193,55 +181,13 @@ describe('ProjectManager', () => {
       const result = await pm.build('/nonexistent/project');
       expect(result.success).toBe(false);
     });
-
-    it('should build successfully after scaffold + install', async () => {
-      const board = makeBoard();
-      const scaffoldResult = await pm.scaffold(board);
-      expect(scaffoldResult.success).toBe(true);
-
-      const installResult = await pm.install(scaffoldResult.projectDir!);
-      expect(installResult.success).toBe(true);
-
-      const buildResult = await pm.build(scaffoldResult.projectDir!);
-      expect(buildResult.success, `build failed: ${buildResult.error}`).toBe(true);
-      // Vite produces a dist/ folder
-      expect(existsSync(join(scaffoldResult.projectDir!, 'dist'))).toBe(true);
-    }, 720_000); // install + vite build on cold CI runners
   });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // 5. Preview (local dev server)
-  // ════════════════════════════════════════════════════════════════════════════
 
   describe('preview', () => {
     it('should fail if no package.json exists', async () => {
       const result = await pm.preview('/nonexistent/project');
       expect(result.success).toBe(false);
     });
-
-    // Real dev-server startup is environment-bound (port binding, spawn
-    // timing) and flaky on shared CI runners; the full-lifecycle test already
-    // proves vite works. Keep this as a local-only smoke test.
-    it.skipIf(process.env.CI)('should start and stop a local dev server', async () => {
-      const board = makeBoard();
-      const scaffoldResult = await pm.scaffold(board);
-      expect(scaffoldResult.success).toBe(true);
-
-      const installResult = await pm.install(scaffoldResult.projectDir!);
-      expect(installResult.success).toBe(true);
-
-      const previewResult = await pm.preview(scaffoldResult.projectDir!);
-      expect(previewResult.success).toBe(true);
-      expect(previewResult.url).toMatch(/^http:\/\/localhost:\d+/);
-
-      // Server should be running
-      expect(pm.isPreviewRunning(scaffoldResult.projectDir!)).toBe(true);
-
-      // Stop it
-      pm.stopPreview(scaffoldResult.projectDir!);
-      // After stop, should no longer be running
-      expect(pm.isPreviewRunning(scaffoldResult.projectDir!)).toBe(false);
-    }, 120_000);
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -528,42 +474,6 @@ export default function App() {
     });
   });
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // 11. Full lifecycle (scaffold → install → build → git)
-  // ════════════════════════════════════════════════════════════════════════════
-
-  describe('full lifecycle', () => {
-    it('should scaffold, install, build, and git-init a complete project', async () => {
-      const board = makeBoard({ name: 'full-lifecycle' });
-
-      // 1. Scaffold
-      const scaffoldResult = await pm.scaffold(board);
-      expect(scaffoldResult.success).toBe(true);
-      const projectDir = scaffoldResult.projectDir!;
-
-      // 2. Install
-      const installResult = await pm.install(projectDir);
-      expect(installResult.success).toBe(true);
-
-      // 3. Build
-      const buildResult = await pm.build(projectDir);
-      expect(buildResult.success, `build failed: ${buildResult.error}`).toBe(true);
-      expect(existsSync(join(projectDir, 'dist'))).toBe(true);
-
-      // 4. Git init + commit
-      const gitInitResult = await pm.gitInit(projectDir);
-      expect(gitInitResult.success).toBe(true);
-
-      const commitResult = await pm.gitCommit(projectDir, 'Initial commit');
-      expect(commitResult.success).toBe(true);
-      expect(commitResult.commitHash).toBeTruthy();
-
-      // 5. Project info reflects all steps
-      const info = pm.getProjectInfo(projectDir);
-      expect(info!.hasPackageJson).toBe(true);
-      expect(info!.hasNodeModules).toBe(true);
-      expect(info!.hasDist).toBe(true);
-      expect(info!.hasGit).toBe(true);
-    }, 900_000); // full lifecycle: cold install + build + git on CI runners
-  });
+  // Full lifecycle (scaffold → install → build → git) moved to
+  // tests/integration/project-lifecycle.test.ts.
 });

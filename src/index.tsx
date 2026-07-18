@@ -36,7 +36,7 @@ const cli = meow(`
   Options
     --dashboard         Dashboard id, name, or title
     --all               Target all dashboards (regen; with --prompt: modify all; with agent remove: remove all)
-    --data              Data source file: .csv, .xlsx, .xls, or .json
+    --data              Data source file: .csv, .xlsx, or .json
     --name              Dashboard display name for creation
     --type              Dashboard type: health, finance, grocery, travel, food,
                         shopping, subscriptions, utilities, invoices, custom
@@ -224,7 +224,7 @@ function successPayload(action: string, result: DashboardUpdateResult, dashboard
   };
 }
 
-function boardStatus(service: DashboardUpdateService, board: BoardConfig) {
+function boardStatus(board: BoardConfig) {
   const dataFiles = board.dataFiles.map((file) => {
     let mtime: string | undefined;
     let exists = false;
@@ -606,14 +606,14 @@ if (!command || command === 'start') {
       printJson({
         success: true,
         action: 'list',
-        dashboards: boards.map((board) => boardStatus(service, board)),
+        dashboards: boards.map((board) => boardStatus(board)),
       });
     } else {
       if (boards.length === 0) {
         console.log('No dashboards registered.');
       }
       for (const board of boards) {
-        const status = boardStatus(service, board);
+        const status = boardStatus(board);
         console.log(`${board.name}  "${board.title}"  ${board.type}${status.dataStale ? '  [data changed since last generation]' : ''}`);
         if (board.deployUrl) console.log(`  ${board.deployUrl}`);
       }
@@ -636,7 +636,7 @@ if (!command || command === 'start') {
       else console.error(error);
       process.exit(1);
     }
-    const status = boardStatus(service, board);
+    const status = boardStatus(board);
     if (jsonMode) {
       printJson({ success: true, action: 'status', ...status });
     } else {

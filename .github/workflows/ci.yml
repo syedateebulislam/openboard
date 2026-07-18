@@ -10,6 +10,7 @@ jobs:
   test:
     # crossSpawn has Windows-specific cmd-shim handling; run both OSes so
     # platform-only regressions surface in CI instead of in the field.
+    # Fast, deterministic gate: unit tests only (tests/integration excluded).
     strategy:
       fail-fast: false
       matrix:
@@ -22,7 +23,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # Lifecycle tests commit inside scaffolded projects; runners ship with
+      # Some unit tests commit inside scaffolded projects; runners ship with
       # no git identity, which ensureCommitAuthor correctly rejects.
       - run: |
           git config --global user.name "OpenBoard CI"
@@ -30,6 +31,28 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - run: npm run test:run
+      - run: npm run test:unit
+        env:
+          OPENBOARD_ENCRYPTION_SECRET: ci-test-secret
+
+  integration:
+    # Real npm install + vite build lifecycle inside a scaffolded project.
+    # Expensive, so it runs once per OS on a single Node version.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: |
+          git config --global user.name "OpenBoard CI"
+          git config --global user.email "ci@openboard.dev"
+      - run: npm ci
+      - run: npm run test:integration
         env:
           OPENBOARD_ENCRYPTION_SECRET: ci-test-secret

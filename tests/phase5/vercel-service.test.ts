@@ -111,7 +111,7 @@ describe('VercelService', () => {
       expect(result.error).toContain('Re-enter the Vercel token');
     });
 
-    it('should pass saved Vercel tokens to CLI auth and env auth', async () => {
+    it('should pass saved Vercel tokens via env auth only (never argv)', async () => {
       new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
       mockCrossSpawn.mockResolvedValueOnce(mockSuccess('user@example.com'));
 
@@ -120,7 +120,7 @@ describe('VercelService', () => {
       expect(result.success).toBe(true);
       expect(mockCrossSpawn).toHaveBeenCalledWith(
         'vercel',
-        ['whoami', '--token', 'vcp_test_token_123'],
+        ['whoami'],
         expect.objectContaining({
           env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
         }),
@@ -396,7 +396,7 @@ describe('VercelService', () => {
       expect(deployCall[1]).toContain('--prod');
     });
 
-    it('should pass saved Vercel tokens to deploy CLI auth and env auth', async () => {
+    it('should pass saved Vercel tokens to deploy via env auth only (never argv)', async () => {
       new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
       mockCrossSpawn.mockResolvedValueOnce(mockSuccess());
       mockCrossSpawn.mockResolvedValueOnce(mockSuccess('https://my-board.vercel.app'));
@@ -405,7 +405,7 @@ describe('VercelService', () => {
 
       expect(result.success).toBe(true);
       const deployCall = mockCrossSpawn.mock.calls[1];
-      expect(deployCall[1]).toEqual(['--yes', '--prod', '--token', 'vcp_test_token_123']);
+      expect(deployCall[1]).toEqual(['--yes', '--prod']);
       expect(deployCall[2]).toEqual(expect.objectContaining({
         env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
       }));
@@ -581,7 +581,7 @@ describe('VercelService', () => {
       rmSync(dir, { recursive: true, force: true });
     });
 
-    it('should pass saved Vercel tokens while setting env vars', async () => {
+    it('should pass saved Vercel tokens while setting env vars via env auth only (never argv)', async () => {
       const dir = makeTempDir();
       mkdirSync(join(dir, '.vercel'), { recursive: true });
       new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
@@ -590,13 +590,13 @@ describe('VercelService', () => {
       const result = await VercelService.setEnvVar(dir, 'DASHBOARD_USERNAME', 'admin', ['production']);
 
       expect(result).toBe(true);
-      expect(mockCrossSpawn.mock.calls[0][1]).toEqual(['env', 'rm', 'DASHBOARD_USERNAME', 'production', '--yes', '--token', 'vcp_test_token_123']);
+      expect(mockCrossSpawn.mock.calls[0][1]).toEqual(['env', 'rm', 'DASHBOARD_USERNAME', 'production', '--yes']);
       expect(mockCrossSpawn.mock.calls[0][2]).toEqual(expect.objectContaining({
         env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
       }));
       expect(mockSpawn).toHaveBeenCalledWith(
         expect.stringMatching(/^vercel(\.cmd)?$/),
-        ['env', 'add', 'DASHBOARD_USERNAME', 'production', '--token', 'vcp_test_token_123'],
+        ['env', 'add', 'DASHBOARD_USERNAME', 'production'],
         expect.objectContaining({
           env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
         }),

@@ -35,7 +35,7 @@ export type Screen =
 
 // Placeholder components with "Go Back" option
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('welcome');
   });
 
@@ -77,7 +77,7 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('settings');
   });
 
@@ -154,7 +154,7 @@ function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('settings');
   });
 
@@ -249,7 +249,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [ollamaHost, setOllamaHost] = useState('http://127.0.0.1:11434');
   const [status, setStatus] = useState('');
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('settings');
   });
 
@@ -396,7 +396,7 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('settings');
   });
 
@@ -451,7 +451,7 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
 }
 
 function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) onNavigate('welcome');
   });
 

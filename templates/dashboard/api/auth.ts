@@ -3,10 +3,17 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { buildAuthCookie, clearAuthCookie, verifyAuth } from './_auth.js';
 
-// Simple in-memory rate limiter (resets on cold start, but effective for basic protection)
+// Best-effort in-memory rate limiter.
+//
+// LIMITATION (serverless): every Vercel instance and cold start has its own
+// independent Map, so the cap applies per instance, not globally. It still
+// slows down single-instance brute force, which is the realistic path for a
+// single-user dashboard. For a durable global limit, back this with Vercel
+// KV/Upstash or move auth to an identity provider.
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60 * 1000; // 1 minute
+const MAX_TRACKED_KEYS = 5000; // hard memory bound under IP-spray attacks
 
 function getRateLimitKey(req: VercelRequest): string {
   const forwarded = req.headers['x-forwarded-for'];
@@ -14,20 +21,35 @@ function getRateLimitKey(req: VercelRequest): string {
   return ip.trim();
 }
 
+function pruneExpired(now: number): void {
+  for (const [key, record] of loginAttempts) {
+    if (now > record.resetAt) loginAttempts.delete(key);
+  }
+}
+
 function isRateLimited(key: string): boolean {
   const now = Date.now();
+  pruneExpired(now);
+
+  if (loginAttempts.size >= MAX_TRACKED_KEYS && !loginAttempts.has(key)) {
+    // Evict the oldest live entry so the map stays bounded.
+    const oldest = loginAttempts.keys().next().value;
+    if (oldest !== undefined) loginAttempts.delete(oldest);
+  }
+
   const record = loginAttempts.get(key);
-  
-  if (!record || now > record.resetAt) {
+  if (!record) {
     loginAttempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return false;
   }
-  
+
   record.count++;
-  if (record.count > MAX_ATTEMPTS) {
-    return true;
-  }
-  return false;
+  return record.count > MAX_ATTEMPTS;
+}
+
+/** Test-only introspection: number of tracked rate-limit entries. */
+export function getRateLimiterSize(): number {
+  return loginAttempts.size;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
