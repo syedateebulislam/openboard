@@ -38,8 +38,10 @@ import { PromptHistoryService } from '../services/project/PromptHistoryService.j
 import { UI_COLORS } from '../theme.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
+import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
 
 const projectManager = new ProjectManager();
+const projectCommands = new ProjectCommandHandlers(projectManager);
 
 // ─── Message ID generator using crypto for uniqueness ───────────────────────
 function generateMsgId(): string {
@@ -1118,26 +1120,8 @@ For the current board "${board.title}":
 
         try {
           reporter.phase('build');
-          // Auto-install if node_modules missing
-          const info = projectManager.getProjectInfo(projectDir);
-          if (info && !info.hasNodeModules) {
-            onProgress('Installing dependencies...');
-            const installResult = await projectManager.install(projectDir, onProgress);
-            if (!installResult.success) {
-              onProgress(`Install failed: ${installResult.error}`);
-              setPipeline(null);
-              finishLog(logId);
-              setIsLoading(false);
-              return;
-            }
-          }
-
-          const result = await projectManager.build(projectDir, onProgress);
-          if (!result.success) {
-            onProgress(`Build failed: ${result.error}`);
-          } else {
-            onProgress(`Build complete. Output: ${result.outputDir}`);
-          }
+          const result = await projectCommands.build(projectDir, onProgress);
+          if (!result.success) onProgress(result.error ?? 'Build failed.');
 
           setPipeline(null);
           finishLog(logId);
@@ -1299,44 +1283,8 @@ Requirements:
         const onProgress = createProgressCallback(logId);
 
         try {
-          // Stop existing preview if running
-          if (isRestart) {
-            onProgress('Stopping current preview server...');
-            projectManager.stopPreview(projectDir);
-          }
-
-          // Auto-install if node_modules missing
-          const info = projectManager.getProjectInfo(projectDir);
-          if (info && !info.hasNodeModules) {
-            onProgress('Installing dependencies...');
-            const installResult = await projectManager.install(projectDir, onProgress);
-            if (!installResult.success) {
-              onProgress(`Install failed: ${installResult.error}`);
-              finishLog(logId);
-              setIsLoading(false);
-              return;
-            }
-          }
-
-          // Rebuild before restarting to pick up latest code changes
-          if (isRestart) {
-            onProgress('Rebuilding with latest changes...');
-            const buildResult = await projectManager.build(projectDir, onProgress);
-            if (!buildResult.success) {
-              onProgress(`Build failed: ${buildResult.error}`);
-              finishLog(logId);
-              setIsLoading(false);
-              return;
-            }
-            onProgress('Build successful');
-          }
-
-          const result = await projectManager.preview(projectDir, undefined, onProgress);
-          if (result.success) {
-            onProgress(`Preview running at ${result.url || 'http://localhost:5173'}`);
-          } else {
-            onProgress(`Preview failed: ${result.error}`);
-          }
+          const result = await projectCommands.preview(projectDir, onProgress);
+          if (!result.success) onProgress(result.error ?? 'Preview failed.');
         } catch (error: any) {
           onProgress(`Preview error: ${error.message}`);
         }

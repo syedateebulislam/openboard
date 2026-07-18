@@ -11,7 +11,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { VercelService } from '../../src/services/deploy/VercelService.js';
 import { crossSpawn } from '../../src/utils/crossSpawn.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
-import { spawn } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -24,19 +23,7 @@ vi.mock('../../src/utils/crossSpawn.js', () => ({
   IS_LINUX: true,
 }));
 
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({
-    stderr: { on: vi.fn() },
-    stdout: { on: vi.fn() },
-    stdin: { write: vi.fn(), end: vi.fn() },
-    on: vi.fn((event: string, cb: (code?: number) => void) => {
-      if (event === 'close') setImmediate(() => cb(0));
-    }),
-  })),
-}));
-
 const mockCrossSpawn = vi.mocked(crossSpawn);
-const mockSpawn = vi.mocked(spawn);
 const TOKEN = 'vcp_secret_token_abc';
 let testConfigDir: string | undefined;
 
@@ -51,10 +38,7 @@ function makeTempDir(): string {
 }
 
 function allSpawnedArgs(): string[][] {
-  return [
-    ...mockCrossSpawn.mock.calls.map(call => call[1]),
-    ...mockSpawn.mock.calls.map(call => (call[1] ?? []) as string[]),
-  ];
+  return mockCrossSpawn.mock.calls.map(call => call[1]);
 }
 
 function expectNoTokenInArgv(): void {
@@ -83,19 +67,22 @@ describe('Vercel token hygiene', () => {
     delete process.env.OPENBOARD_CONFIG_DIR;
   });
 
-  it('checkAuthenticated authenticates via VERCEL_TOKEN env, never argv', async () => {
-    mockCrossSpawn.mockResolvedValueOnce(mockSuccess('user@example.com'));
+  it('checkAuthenticated validates saved tokens through bearer auth, never argv', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"projects":[]}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
 
     const result = await VercelService.checkAuthenticated('/test/project');
 
     expect(result.success).toBe(true);
-    expect(mockCrossSpawn).toHaveBeenCalledWith(
-      'vercel',
-      ['whoami'],
-      expect.objectContaining({
-        env: expect.objectContaining({ VERCEL_TOKEN: TOKEN }),
-      }),
-    );
+    expect(mockCrossSpawn).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toEqual(expect.objectContaining({
+        headers: expect.objectContaining({ authorization: `Bearer ${TOKEN}` }),
+      }));
+    }
     expectNoTokenInArgv();
   });
 
@@ -126,11 +113,13 @@ describe('Vercel token hygiene', () => {
     expect(mockCrossSpawn.mock.calls[0][2]).toEqual(expect.objectContaining({
       env: expect.objectContaining({ VERCEL_TOKEN: TOKEN }),
     }));
-    expect(mockSpawn).toHaveBeenCalledWith(
-      expect.stringMatching(/^vercel(\.cmd)?$/),
+    expect(mockCrossSpawn).toHaveBeenNthCalledWith(
+      2,
+      'vercel',
       ['env', 'add', 'DASHBOARD_USERNAME', 'production'],
       expect.objectContaining({
         env: expect.objectContaining({ VERCEL_TOKEN: TOKEN }),
+        stdin: 'admin',
       }),
     );
     expectNoTokenInArgv();

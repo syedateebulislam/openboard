@@ -3,9 +3,8 @@ import { basename, extname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
 import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
-import { defaultModelFor as getDefaultModel, normalizeEffort } from '../../config/llmCatalog.js';
-import { getAppMode, modeAllowsDeploy, providerAllowedInMode } from '../../config/appModes.js';
-import { ConfigService } from '../config/ConfigService.js';
+import { getAppMode, modeAllowsDeploy } from '../../config/appModes.js';
+import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
 import { LLMService } from '../llm/LLMService.js';
@@ -16,7 +15,6 @@ import { DeployVerificationService } from '../deploy/DeployVerificationService.j
 import { extractFiles } from '../../utils/codeExtractor.js';
 import { classifyAgentError } from '../../utils/errorCodes.js';
 import type { BoardConfig } from '../../types/board.js';
-import type { LLMConfig } from '../../types/llm.js';
 import { BoardRegistryService } from './BoardRegistryService.js';
 import { PromptHistoryService } from './PromptHistoryService.js';
 import { ProjectLockService } from './ProjectLockService.js';
@@ -25,6 +23,9 @@ import { PipelineReporter } from './pipelinePhases.js';
 import type { PipelineEventSink } from './pipelinePhases.js';
 import { RunStateService } from './RunStateService.js';
 import type { RunRecord, RunTokenUsage } from './RunStateService.js';
+import { DashboardManifestService } from './DashboardManifestService.js';
+import { DashboardBuildPipeline } from './DashboardBuildPipeline.js';
+import { RefreshAllDashboardsUseCase } from './useCases/RefreshAllDashboardsUseCase.js';
 
 export type UpdateProgress = (line: string) => void;
 
@@ -76,42 +77,16 @@ export interface PromptUpdateOptions {
   dryRun?: boolean;
 }
 
-// Default models come from the shared catalog (src/config/llmCatalog.ts).
-
-function createLLMConfig(config: ConfigService): LLMConfig {
-  const provider = config.get('llm.provider') as LLMConfig['provider'] | undefined;
-  if (!provider) {
-    throw new Error('No LLM provider configured. Configure LLM settings first.');
-  }
-
-  // Mode contract: Local only mode never sends prompts/data to a cloud LLM.
-  const mode = getAppMode(config);
-  if (!providerAllowedInMode(provider, mode)) {
-    throw new Error(
-      `LLM provider "${provider}" is not allowed in ${mode} mode — Local only mode generates with Ollama on your machine. ` +
-      'Switch the provider (Settings > Update LLM provider) or change the mode (Settings > App mode).',
-    );
-  }
-
-  let apiKey: string | undefined;
-  try {
-    apiKey = config.getDecrypted('llm.apiKey');
-  } catch {
-    const rawApiKey = config.get('llm.apiKey');
-    apiKey = typeof rawApiKey === 'string' && !rawApiKey.startsWith('enc:')
-      ? rawApiKey
-      : undefined;
-  }
-
-  return {
-    provider,
-    model: (config.get('llm.model') as string | undefined) || getDefaultModel(provider),
-    apiKey,
-    baseUrl: config.get('llm.baseUrl') as string | undefined,
-    ollamaHost: config.get('llm.ollamaHost') as string | undefined,
-    effort: normalizeEffort(config.get('llm.effort')),
-  };
+interface RefreshExecutionOptions {
+  /** Batch refresh already owns the workspace lock. */
+  lockHeld?: boolean;
+  /** Generate/register only; the batch performs one final build/deploy. */
+  deferFinalize?: boolean;
+  /** Force every board in a batch to use the shared workspace. */
+  projectDir?: string;
 }
+
+// Default models come from the shared catalog (src/config/llmCatalog.ts).
 
 function isGeneratedPathRejection(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -168,29 +143,7 @@ export async function removeDashboardFromGeneratedApp(
     return 'Skipped UI cleanup because src/App.tsx was not found.';
   }
 
-  const config = new ConfigService();
-  const provider = config.get('llm.provider') as string | undefined;
-  if (!provider) {
-    throw new Error('No LLM provider is configured, so generated UI cleanup cannot run.');
-  }
-
-  let apiKey: string | undefined;
-  try {
-    apiKey = config.getDecrypted('llm.apiKey');
-  } catch {
-    apiKey = config.get('llm.apiKey') as string | undefined;
-  }
-
-  const llmConfig: LLMConfig = {
-    provider: provider as LLMConfig['provider'],
-    model: (config.get('llm.model') as string | undefined) || getDefaultModel(provider),
-    apiKey,
-    baseUrl: config.get('llm.baseUrl') as string | undefined,
-    ollamaHost: config.get('llm.ollamaHost') as string | undefined,
-    effort: normalizeEffort(config.get('llm.effort')),
-  };
-
-  const llm = LLMService.createProvider(llmConfig);
+  const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
   const currentApp = readFileSync(appPath, 'utf-8');
   const prompt = `${SYSTEM_PROMPT}
 
@@ -240,6 +193,7 @@ export class DashboardUpdateService {
   private templateService: TemplateService;
   private events?: PipelineEventSink;
   private runs: RunStateService;
+  private manifest: DashboardManifestService;
 
   constructor(
     registry = new BoardRegistryService(),
@@ -255,6 +209,7 @@ export class DashboardUpdateService {
     this.templateService = templateService;
     this.events = events;
     this.runs = runs;
+    this.manifest = new DashboardManifestService(templateService);
   }
 
   listBoards(): BoardConfig[] {
@@ -438,21 +393,46 @@ export class DashboardUpdateService {
   }
 
   async updateAll(onProgress?: UpdateProgress): Promise<DashboardUpdateResult[]> {
-    const results: DashboardUpdateResult[] = [];
-    for (const board of this.listBoards()) {
-      this.note(onProgress, `\n=== Updating ${board.title} ===`);
-      results.push(await this.updateBoard(board, onProgress));
-    }
-    return results;
+    return new RefreshAllDashboardsUseCase({
+      listBoards: () => this.listBoards(),
+      projectDir: (boards) => this.registry.getSharedProjectDir() || boards[0]?.outputDir,
+      acquireLock: (projectDir) => ProjectLockService.acquire(projectDir),
+      refresh: (board, projectDir, progress) => this.updateBoard(board, progress, {
+        lockHeld: true,
+        deferFinalize: true,
+        projectDir,
+      }),
+      syncComposition: async (projectDir, progress) => this.syncMasterTab(
+        projectDir,
+        this.makeReporter(progress),
+      ),
+      finalize: (board, writtenFiles, count, progress) => this.buildPushDeploy(
+        board,
+        writtenFiles,
+        `Regenerate ${count} dashboard(s): ${new Date().toISOString()}`,
+        this.makeReporter(progress),
+      ),
+      reconcile: (results, finalized, projectDir) => this.reconcileBatchResults(results, finalized, projectDir),
+      failure: (board, message, errorCode) => ({
+        success: false,
+        board,
+        error: message,
+        errorCode: errorCode ?? classifyAgentError(message),
+      }),
+    }).execute(onProgress);
   }
 
-  async updateBoard(board: BoardConfig, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+  async updateBoard(
+    board: BoardConfig,
+    onProgress?: UpdateProgress,
+    execution: RefreshExecutionOptions = {},
+  ): Promise<DashboardUpdateResult> {
     const run = this.runs.createRun('refresh', { dashboard: board.name });
     const reporter = this.makeReporter(onProgress, run);
     let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
 
     try {
-      const projectDir = board.outputDir || this.registry.getSharedProjectDir();
+      const projectDir = execution.projectDir || board.outputDir || this.registry.getSharedProjectDir();
       if (!projectDir) {
         return this.failure(run, { board }, 'No generated app workspace found.');
       }
@@ -488,17 +468,14 @@ export class DashboardUpdateService {
       const latestSummary = DataAnalyzer.generateSummary(analysis);
       reporter.log(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
 
-      lock = ProjectLockService.acquire(projectDir);
-      if (!lock.success) {
-        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+      if (!execution.lockHeld) {
+        lock = ProjectLockService.acquire(projectDir);
+        if (!lock.success) {
+          return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+        }
       }
 
       await this.writeProtectedData(board, parsed, latestSummary, reporter.progress);
-
-      const currentAppPath = join(projectDir, 'src', 'App.tsx');
-      const currentApp = existsSync(currentAppPath)
-        ? readFileSync(currentAppPath, 'utf-8').slice(0, 12000)
-        : '';
 
       const boards = this.registry.listBoards();
       const historyText = promptHistory
@@ -524,16 +501,12 @@ ${latestSummary}
 Saved prompt history to preserve:
 ${historyText}
 
-Current src/App.tsx:
-${currentApp}
-
 Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
-3. Preserve other dashboard tabs in the shared OpenBoard app, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx.
-4. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-5. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
-6. Return all changed files using the required //CODE_START format.`;
+3. Return one primary exported dashboard component plus only its required helper files.
+4. Do not return App.tsx, navigation, authentication, or components/MasterDashboard.tsx; OpenBoard owns those files.
+5. Return all changed files using the required //CODE_START format.`;
 
       const writtenFiles = await this.generateAndWriteFiles(board, prompt, reporter, run);
       if (writtenFiles.length === 0) {
@@ -562,6 +535,16 @@ Requirements:
         dataSummary: latestSummary,
       });
 
+      if (execution.deferFinalize) {
+        return {
+          success: true,
+          board: updatedBoard,
+          writtenFiles,
+          runId: run.runId,
+          tokenUsage: run.tokenUsage,
+        };
+      }
+
       const masterFiles = await this.syncMasterTab(projectDir, reporter, run);
 
       return await this.buildPushDeploy(
@@ -582,7 +565,7 @@ Requirements:
    * Remove a dashboard everywhere, so the deployed app matches the registry.
    *
    * Steps:
-   *  1. LLM cleanup of src/App.tsx (drop tab/import/content).
+   *  1. Deterministic manifest removal of the tab/import/content.
    *  2. Delete orphaned component files unique to this dashboard.
    *  3. Delete the dashboard's protected data (json + aggregate + module).
    *  4. Remove from the registry + prompt history.
@@ -622,8 +605,8 @@ Requirements:
 
       const remainingBoards = this.registry.listBoards().filter((b) => b.id !== board.id);
 
-      // 1. Clean App.tsx. Removing the LAST dashboard is deterministic (no LLM):
-      //    restore the blank Welcome shell and drop the master tab component.
+      // 1. App.tsx/tab composition is product-owned. Removing a dashboard only
+      //    changes registry data; the manifest is regenerated before build.
       reporter.phase('generate');
       if (remainingBoards.length === 0) {
         reporter.log('Removing the last dashboard — restoring the empty OpenBoard shell...');
@@ -631,9 +614,7 @@ Requirements:
         await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
         this.registry.setMasterState(undefined);
       } else {
-        reporter.log(`Cleaning generated UI for "${board.title}"...`);
-        const cleanupMessage = await removeDashboardFromGeneratedApp(board, remainingBoards, projectDir);
-        reporter.log(cleanupMessage);
+        reporter.log(`Removing "${board.title}" from the deterministic dashboard manifest...`);
       }
 
       // 2. Delete orphaned component files that no remaining dashboard uses.
@@ -1115,8 +1096,8 @@ Requirements:
   }
 
   /**
-   * Generate or refresh the master "Overview" tab (components/MasterDashboard.tsx
-   * + App.tsx) so it always reflects the current set of dashboards. Skips the
+   * Generate or refresh the master "Overview" component. App.tsx and its
+   * manifest are product-owned. Skips the
    * LLM call when the dashboard set is unchanged and the component exists.
    * Failures are non-fatal: the pipeline continues with the per-dashboard
    * changes, and the stored state is left untouched so the next dashboard
@@ -1145,22 +1126,16 @@ Requirements:
       }
 
       reporter.log(`Generating the master Overview tab across ${boards.length} dashboard(s)...`);
-      const currentApp = this.readCurrentApp(projectDir);
       const prompt = `${MASTER_DASHBOARD_PROMPT}
 
 Registered dashboards (ALL must be represented in the master overview; their slugs key data.dashboards):
 ${boards.map((b) => `- ${b.title} (slug: ${b.name}, type: ${b.type})${b.dataSummary ? `\n  Data analysis: ${b.dataSummary.slice(0, 1500)}` : ''}`).join('\n')}
 
-Current src/App.tsx:
-${currentApp}
-
 Requirements:
-1. Return ONLY App.tsx and components/MasterDashboard.tsx (plus optional utils/ helpers for the cross-app aggregation) using the required //CODE_START format.
-2. The FIRST entry in the tabs array MUST be { id: 'master', label: 'Overview' } (no group) rendering <MasterDashboard />, and 'master' MUST be the default active tab.
-3. Remove the Welcome tab and its "Dashboard Ready" card if present.
-4. Preserve every existing dashboard tab, import, and panel branch in App.tsx exactly.
-5. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right) and all auth behavior.
-6. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).`;
+1. Return ONLY components/MasterDashboard.tsx plus optional utils/ helpers using the required //CODE_START format.
+2. Export MasterDashboard as a named or default React component.
+3. Do not return App.tsx, tabs, navigation, authentication, or generated/dashboardManifest.tsx.
+4. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).`;
 
       const placeholderBoard: BoardConfig = {
         id: 'master',
@@ -1192,7 +1167,6 @@ Requirements:
     userPrompt?: string,
     typeProvided = true,
   ): string {
-    const currentApp = this.readCurrentApp(board.outputDir);
     const boards = this.registry.listBoards();
     const intent = resolveInitialIntent({ userPrompt, type: board.type, typeProvided });
 
@@ -1215,23 +1189,17 @@ ${boards.map((b) => `- ${b.title} (${b.name}, ${b.type})`).join('\n') || '- none
 Data analysis:
 ${dataSummary}
 
-Current src/App.tsx:
-${currentApp}
-
 Requirements:
-1. Add "${board.title}" as its own dashboard tab in the shared OpenBoard UI.
-2. Preserve all existing tabs/components in App.tsx, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx (a dedicated follow-up step maintains it).
-3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-4. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
-5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
-6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
-7. Use the actual fields and patterns from the data analysis to create useful metrics/charts.
-8. Return all changed files using the required //CODE_START format.`;
+1. Return one primary exported dashboard component for "${board.title}" and any helper files it requires.
+2. Do not return App.tsx, tabs, navigation, authentication, generated/dashboardManifest.tsx, or components/MasterDashboard.tsx.
+3. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
+4. Do NOT embed raw source rows or sensitive data in component files or frontend data files.
+5. Use the actual fields and patterns from the data analysis to create useful metrics/charts.
+6. Return all changed files using the required //CODE_START format.`;
   }
 
   private buildPromptUpdatePrompt(board: BoardConfig, dataSummary: string, userPrompt: string): string {
     const historyText = buildHistoryText(this.history.read(board.id));
-    const currentApp = this.readCurrentApp(board.outputDir);
     const boards = this.registry.listBoards();
 
     return `Update the "${board.title}" dashboard tab according to this agent/user prompt:
@@ -1253,18 +1221,14 @@ ${dataSummary}
 Saved prompt history for this dashboard:
 ${historyText || '- none'}
 
-Current src/App.tsx:
-${currentApp}
-
 Requirements:
 1. Apply the requested change only to the "${board.title}" dashboard tab unless the prompt explicitly asks otherwise.
-2. Preserve other dashboard tabs/components in the shared OpenBoard app, including the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx unless the prompt explicitly targets the master/overview tab.
-3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
-4. Preserve the OpenBoard header shell (the <HeaderLinks /> links on the left, the clickable app-brand button, the greeting/ThemeToggle/Logout on the right); keep the title text exactly "OpenBoard" — do not replace it with "${board.title}".
-5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
-6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
-7. Keep the dashboard aligned with the latest data analysis.
-8. Return all changed files using the required //CODE_START format.`;
+2. Return the updated primary dashboard component and only its required helpers.
+3. Do not return App.tsx, navigation, authentication, generated/dashboardManifest.tsx, or components/MasterDashboard.tsx unless explicitly targeting the master overview.
+4. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
+5. Do NOT embed raw source rows or sensitive data in component files or frontend data files.
+6. Keep the dashboard aligned with the latest data analysis.
+7. Return all changed files using the required //CODE_START format.`;
   }
 
   /** Progress note that reaches both the line callback and the event sink. */
@@ -1313,7 +1277,7 @@ Requirements:
     reporter: PipelineReporter,
     run?: RunRecord,
   ): Promise<string[]> {
-    const llm = LLMService.createProvider(createLLMConfig(new ConfigService()));
+    const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
     reporter.phase('generate');
     reporter.log('Generating dashboard code with configured LLM...');
     let usageReported = false;
@@ -1341,7 +1305,11 @@ Requirements:
       });
     }
 
-    const files = extractFiles(response);
+    const extracted = extractFiles(response);
+    const files = extracted.filter((file) => file.path !== 'App.tsx');
+    if (files.length !== extracted.length) {
+      reporter.log('Ignored LLM App.tsx output; OpenBoard owns shell and tab composition.');
+    }
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir || files.length === 0) return [];
 
@@ -1437,7 +1405,7 @@ Requirements:
 3. Preserve AuthProvider, LoginPage, useAuth wiring and all dashboard tabs.
 4. Do not introduce new dependencies.`;
 
-        const llm = LLMService.createProvider(createLLMConfig(new ConfigService()));
+        const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
         const response = await llm.complete({
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
@@ -1496,34 +1464,19 @@ Requirements:
       return this.failure(run, { board, writtenFiles }, 'No generated app workspace found.');
     }
 
-    // Re-sync shell-owned files from the template so header/CSS/api fixes
-    // reach existing projects on every deploy. Non-fatal on failure.
-    try {
-      const synced = await this.templateService.syncShellFiles(projectDir);
-      reporter.log(`Synced ${synced.length} shell file(s) from template.`);
-    } catch (err: any) {
-      reporter.log(`Warning: shell sync skipped: ${err.message}`);
-    }
-
-    reporter.phase('build');
-    const info = this.projectManager.getProjectInfo(projectDir);
-    if (info && !info.hasNodeModules) {
-      reporter.log('Installing dependencies...');
-      const installResult = await this.projectManager.install(projectDir, reporter.progress);
-      if (!installResult.success) {
-        return this.failure(run, { board, writtenFiles }, `Install failed: ${installResult.error}`);
-      }
-    }
-
-    reporter.log('Building project...');
-    let buildResult: { success: boolean; error?: string } = await this.projectManager.build(projectDir, reporter.progress);
-    if (!buildResult.success && writtenFiles.length > 0) {
-      buildResult = await this.repairAndRebuild(projectDir, writtenFiles, buildResult.error, reporter, run);
-    }
+    const buildPipeline = new DashboardBuildPipeline({
+      boards: () => this.registry.listBoards(),
+      syncManifest: (dir, boards) => this.manifest.sync(dir, boards),
+      syncShell: (dir) => this.templateService.syncShellFiles(dir),
+      hasDependencies: (dir) => this.projectManager.getProjectInfo(dir)?.hasNodeModules ?? true,
+      install: (dir, progress) => this.projectManager.install(dir, progress),
+      build: (dir, progress) => this.projectManager.build(dir, progress),
+      repair: (dir, files, error) => this.repairAndRebuild(dir, files, error, reporter, run),
+    });
+    const buildResult = await buildPipeline.execute(projectDir, writtenFiles, reporter);
     if (!buildResult.success) {
-      return this.failure(run, { board, writtenFiles }, `Build failed: ${buildResult.error}`);
+      return this.failure(run, { board, writtenFiles }, buildResult.error ?? 'Build failed.');
     }
-    reporter.log('Build successful');
 
     // Mode contract: only All remote publishes. Local/hybrid pipelines end at
     // the local build — the user previews the dashboard on their machine.
@@ -1605,9 +1558,36 @@ Requirements:
     };
   }
 
-  private readCurrentApp(projectDir: string): string {
-    const appPath = join(projectDir, 'src', 'App.tsx');
-    return existsSync(appPath) ? readFileSync(appPath, 'utf-8').slice(0, 12000) : '';
+  private reconcileBatchResults(
+    results: DashboardUpdateResult[],
+    finalized: DashboardUpdateResult,
+    projectDir: string,
+  ): DashboardUpdateResult[] {
+    return results.map((result) => {
+      if (!result.success || !result.board) return result;
+      const run = result.runId ? this.runs.get(result.runId) : undefined;
+      if (!finalized.success) {
+        const error = finalized.error ?? 'Batch build/deploy failed.';
+        if (run) this.runs.fail(run, error, finalized.errorCode);
+        return { ...result, success: false, error, errorCode: finalized.errorCode };
+      }
+      if (run) {
+        this.runs.complete(run, {
+          boardId: result.board.id,
+          boardName: result.board.name,
+          boardTitle: result.board.title,
+          projectDir,
+          writtenFiles: result.writtenFiles,
+          deployUrl: finalized.deployUrl,
+        });
+      }
+      return {
+        ...result,
+        deployUrl: finalized.deployUrl,
+        verified: finalized.verified,
+        tokenUsage: run?.tokenUsage,
+      };
+    });
   }
 
   /**
@@ -1615,8 +1595,7 @@ Requirements:
    *
    * Conservative on purpose — a file is deleted only when it is a dashboard
    * component (components/*.tsx), is not the shared auth shell, is not claimed
-   * by any remaining dashboard, and is no longer referenced by the cleaned
-   * App.tsx. Returns the relative paths that were deleted.
+   * by any remaining dashboard. Returns the relative paths that were deleted.
    */
   private async deleteOrphanedComponents(
     board: BoardConfig,
@@ -1624,8 +1603,6 @@ Requirements:
     projectDir: string,
     onProgress?: UpdateProgress,
   ): Promise<string[]> {
-    const appPath = join(projectDir, 'src', 'App.tsx');
-    const cleanedApp = existsSync(appPath) ? readFileSync(appPath, 'utf-8') : '';
     const keepPaths = new Set(
       remainingBoards.flatMap((b) => b.components.map((p) => p.replace(/\\/g, '/'))),
     );
@@ -1636,9 +1613,6 @@ Requirements:
       if (!/^components\/.+\.tsx$/.test(normalized)) continue;       // dashboard components only
       if (/AuthProvider|LoginPage/.test(normalized)) continue;       // never the auth shell
       if (keepPaths.has(normalized)) continue;                       // still owned by another board
-
-      const baseName = normalized.replace(/^.*\//, '').replace(/\.tsx$/, '');
-      if (cleanedApp.includes(baseName)) continue;                   // still referenced by App.tsx
 
       try {
         await this.templateService.deleteGeneratedFile(projectDir, normalized);

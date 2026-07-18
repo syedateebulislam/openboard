@@ -33,6 +33,12 @@ export interface CrossSpawnOptions {
   onProgress?: (line: string) => void;
   /** If true, the process runs detached. Default: false */
   detached?: boolean;
+  /** Optional stdin payload. Useful for credentials without exposing argv. */
+  stdin?: string;
+  /** Cancel the process and its children. */
+  signal?: AbortSignal;
+  /** Maximum stdout/stderr retained per stream. Defaults to 8 MiB. */
+  maxOutputBytes?: number;
 }
 
 /**
@@ -113,54 +119,96 @@ export function crossSpawn(
     timeoutMs = 120_000,
     env,
     onProgress,
+    detached = !IS_WINDOWS,
+    stdin,
+    signal,
+    maxOutputBytes = 8 * 1024 * 1024,
   } = options;
 
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error(`Command "${cmd}" was aborted`), { name: 'AbortError' }));
+      return;
+    }
     const invocation = resolveSpawnInvocation(cmd, args, useShell);
     const spawnOpts: SpawnOptions = {
       cwd,
       shell: invocation.useShell,
       env: mergeEnv(env),
+      detached,
     };
 
     const proc = spawn(invocation.command, invocation.args, spawnOpts);
     let stdout = '';
     let stderr = '';
+    let stdoutLine = '';
+    let stderrLine = '';
+    let settled = false;
+
+    const appendBounded = (current: string, chunk: string): string => {
+      const next = current + chunk;
+      return next.length <= maxOutputBytes ? next : next.slice(-maxOutputBytes);
+    };
+
+    const emitLines = (chunk: string, pending: string, setPending: (value: string) => void) => {
+      if (!onProgress) return;
+      const parts = (pending + chunk).split(/\r?\n/);
+      setPending(parts.pop() ?? '');
+      for (const line of parts) if (line) onProgress(line);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
 
     const timer = setTimeout(() => {
-      proc.kill();
-      reject(new Error(`Command "${cmd}" timed out after ${timeoutMs / 1000}s`));
+      killProcess(proc);
+      fail(new Error(`Command "${cmd}" timed out after ${timeoutMs / 1000}s`));
     }, timeoutMs);
+
+    const onAbort = () => {
+      killProcess(proc);
+      fail(Object.assign(new Error(`Command "${cmd}" was aborted`), { name: 'AbortError' }));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     proc.stdout?.on('data', (d: Buffer) => {
       const text = d.toString();
-      stdout += text;
-      if (onProgress) {
-        for (const line of text.split('\n').filter(Boolean)) {
-          onProgress(line);
-        }
-      }
+      stdout = appendBounded(stdout, text);
+      emitLines(text, stdoutLine, (value) => { stdoutLine = value; });
     });
 
     proc.stderr?.on('data', (d: Buffer) => {
       const text = d.toString();
-      stderr += text;
-      if (onProgress) {
-        for (const line of text.split('\n').filter(Boolean)) {
-          onProgress(line);
-        }
-      }
+      stderr = appendBounded(stderr, text);
+      emitLines(text, stderrLine, (value) => { stderrLine = value; });
     });
 
     proc.on('close', (code) => {
-      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (onProgress && stdoutLine) onProgress(stdoutLine);
+      if (onProgress && stderrLine) onProgress(stderrLine);
       resolve({ stdout, stderr, code: code ?? 1 });
     });
 
     proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
+      fail(err);
     });
+
+    if (stdin !== undefined) {
+      proc.stdin?.write(stdin);
+      proc.stdin?.end();
+    }
   });
 }
 
@@ -196,8 +244,18 @@ export function crossSpawnLive(
  */
 export function killProcess(proc: ChildProcess): void {
   if (IS_WINDOWS && proc.pid) {
-    spawn('taskkill', ['/pid', proc.pid.toString(), '/f', '/t']);
+    const killer = spawn('taskkill', ['/pid', proc.pid.toString(), '/f', '/t'], { stdio: 'ignore' });
+    killer.unref();
   } else {
+    if (proc.pid) {
+      try {
+        // crossSpawn uses a detached process group on Unix so descendants die too.
+        process.kill(-proc.pid, 'SIGTERM');
+        return;
+      } catch {
+        // Live/non-detached children may not own a process group.
+      }
+    }
     proc.kill('SIGTERM');
   }
 }

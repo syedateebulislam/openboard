@@ -63,10 +63,10 @@ describe('Accessibility safeguards', () => {
     expect(css).toContain('.app-tabs:has(> .tab-btn)');
   });
 
-  it('should instruct the LLM to preserve accessible tabs and charts', () => {
+  it('should keep tabs product-owned while instructing the LLM on accessible charts', () => {
     expect(SYSTEM_PROMPT).toContain('DashboardTabs');
-    expect(SYSTEM_PROMPT).toContain('aria-selected');
-    expect(SYSTEM_PROMPT).toContain('role="tabpanel"');
+    expect(SYSTEM_PROMPT).toContain('NEVER return or edit App.tsx');
+    expect(SYSTEM_PROMPT).toContain('Do not implement tab navigation');
     expect(SYSTEM_PROMPT).toContain('must not rely on color alone');
 
     const componentPrompt = buildComponentGenerationPrompt('Chart', 'test', 'type Row = {}', 'rows', '<div />');
@@ -74,11 +74,12 @@ describe('Accessibility safeguards', () => {
     expect(componentPrompt).toContain('do not rely on color alone');
   });
 
-  it('should instruct the LLM on grouped tabs, the period toggle, and chart hygiene', () => {
-    // Grouped navigation: tabs carry a category from a fixed vocabulary.
-    expect(SYSTEM_PROMPT).toContain('{ id, label, group }');
-    expect(SYSTEM_PROMPT).toContain('"Food & Dining"');
-    expect(SYSTEM_PROMPT).toContain('PRESERVE the group of every existing tab');
+  it('should deterministically own grouped tabs and instruct the LLM on chart hygiene', () => {
+    const manifest = readFileSync(join(process.cwd(), 'src/services/project/DashboardManifestService.ts'), 'utf-8');
+    // Grouped navigation comes from the typed board registry, not LLM output.
+    expect(manifest).toContain("food: 'Food & Dining'");
+    expect(manifest).toContain('group: ${JSON.stringify(dashboardGroup(board.type))}');
+    expect(SYSTEM_PROMPT).toContain('registers the primary component as a tab automatically');
     // Required Weekly/Monthly/Quarterly trend card via the shared segmented control.
     expect(SYSTEM_PROMPT).toContain('Weekly / Monthly / Quarterly');
     expect(SYSTEM_PROMPT).toContain('.segmented');

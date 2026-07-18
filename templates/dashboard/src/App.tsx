@@ -1,5 +1,5 @@
 import './App.css'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './components/AuthProvider'
 import { BrandLogo } from './components/BrandLogo'
 import { LoginPage } from './components/LoginPage'
@@ -7,16 +7,22 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { DashboardTabs } from './components/DashboardTabs'
 import type { DashboardTabItem } from './components/DashboardTabs'
 import { HeaderLinks } from './components/HeaderLinks'
+import { dashboardTabs, renderDashboard } from './generated/dashboardManifest'
 
 function DashboardContent() {
   const { isAuthenticated, user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState('welcome');
+  const tabs: DashboardTabItem[] = dashboardTabs.length > 0
+    ? dashboardTabs
+    : [{ id: 'welcome', label: 'Welcome' }];
+  const [activeTab, setActiveTab] = useState(() => tabs[0].id);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.id === activeTab)) setActiveTab(tabs[0].id);
+  }, [activeTab, tabs]);
 
   if (!isAuthenticated) {
     return <LoginPage />;
   }
-
-  const tabs: DashboardTabItem[] = [{ id: 'welcome', label: 'Welcome' }];
 
   return (
     <div className="app-container">
@@ -46,13 +52,13 @@ function DashboardContent() {
       <main className="app-content">
         <DashboardTabs tabs={tabs} activeId={activeTab} onSelect={setActiveTab} />
         <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
-          <div className="card kpi-card">
+          {dashboardTabs.length === 0 ? <div className="card kpi-card">
             <p className="kpi-label">Welcome</p>
             <p className="kpi-value">Dashboard Ready</p>
             <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
               Your OpenBoard master UI is ready. Add dashboards as tabs from OpenBoard.
             </p>
-          </div>
+          </div> : renderDashboard(activeTab)}
         </div>
       </main>
     </div>

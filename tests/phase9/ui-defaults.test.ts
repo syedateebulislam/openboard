@@ -70,7 +70,7 @@ describe('Excel support surfaces', () => {
 describe('Default model centralization', () => {
   it('resolves known providers and falls back for unknown ones', () => {
     expect(defaultModelFor('anthropic')).toBe(DEFAULT_MODELS.anthropic);
-    expect(defaultModelFor('moonshot')).toBe('moonshot-v1-128k');
+    expect(defaultModelFor('moonshot')).toBe(DEFAULT_MODELS.moonshot);
     expect(defaultModelFor('nope')).toBe(DEFAULT_MODELS.openai);
   });
 

@@ -4,8 +4,8 @@
  * Implements the LLMProvider interface using OpenAI-compatible API.
  * Moonshot AI provides Kimi models including Kimi 2.5.
  * 
- * API: https://api.moonshot.cn/v1
- * Models: moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k, etc.
+ * API: https://api.moonshot.ai/v1
+ * Models: kimi-k3, kimi-k2.7-code, kimi-k2.6, and Moonshot v1 legacy models.
  */
 
 import type OpenAI from 'openai';
@@ -35,7 +35,7 @@ export class MoonshotProvider implements LLMProvider {
       // Moonshot uses OpenAI-compatible API
       this.clientPromise = import('openai').then(
         ({ default: OpenAI }) =>
-          new OpenAI({ apiKey: this.apiKey, baseURL: 'https://api.moonshot.cn/v1' }),
+          new OpenAI({ apiKey: this.apiKey, baseURL: 'https://api.moonshot.ai/v1' }),
       );
     }
     return this.clientPromise;

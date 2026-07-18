@@ -17,7 +17,7 @@ import { GitHubService } from '../deploy/GitHubService.js';
 import { VercelService } from '../deploy/VercelService.js';
 import { AuthService } from '../auth/AuthService.js';
 import type { LLMConfig, LLMEffort } from '../../types/llm.js';
-import { LLM_EFFORTS, defaultModelFor, isValidEffort } from '../../config/llmCatalog.js';
+import { LLM_EFFORTS, LLM_PROVIDER_NAMES, defaultModelFor, isValidEffort } from '../../config/llmCatalog.js';
 import {
   APP_MODE_IDS,
   describeAppMode,
@@ -32,8 +32,8 @@ import type { AgentErrorCode } from '../../utils/errorCodes.js';
 export type ProgressFn = (line: string) => void;
 
 /** Providers OpenBoard's setup supports (subset of the LLMConfig union). */
-const PROVIDERS = ['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama'] as const;
-type SetupProvider = (typeof PROVIDERS)[number];
+const PROVIDERS = LLM_PROVIDER_NAMES;
+type SetupProvider = LLMConfig['provider'];
 
 export interface SetupPartResult {
   configured: boolean;
@@ -43,7 +43,7 @@ export interface SetupPartResult {
 }
 
 export interface SetupStatus {
-  /** Privacy mode: local (Ollama + preview), hybrid (cloud LLM + preview), remote (full pipeline). */
+  /** Privacy mode: local (Ollama/LM Studio + preview), hybrid (cloud LLM + preview), remote (full pipeline). */
   mode: AppMode;
   modeDescription: string;
   llm: { provider: string; model?: string; effort?: string } | null;
@@ -59,6 +59,8 @@ export interface ConfigureLLMInput {
   effort?: string;
   apiKey?: string;
   ollamaHost?: string;
+  /** OpenAI-compatible base URL, primarily for a local LM Studio server. */
+  baseUrl?: string;
   /** ChatGPT/Codex access token for a fully-headless `openai-codex` sign-in. */
   codexAccessToken?: string;
   /** Streams login progress (e.g. the device-auth URL/code) so agents can relay it. */
@@ -127,7 +129,7 @@ export class SetupService {
 
   /**
    * Set the app mode — the privacy contract picked before everything else:
-   * local (Ollama + local preview), hybrid (cloud LLM + local preview),
+   * local (Ollama/LM Studio + local preview), hybrid (cloud LLM + local preview),
    * remote (cloud LLM + GitHub + live Vercel app).
    */
   configureMode(mode?: string): SetupPartResult {
@@ -145,22 +147,28 @@ export class SetupService {
 
     const provider = this.config.get('llm.provider') as string | undefined;
     if (provider && !providerAllowedInMode(provider, trimmed)) {
-      notes.push(`Warning: configured LLM provider "${provider}" is not allowed in this mode — reconfigure with \`openboard agent setup llm --provider ollama\`.`);
+      const recommendation = trimmed === 'local'
+        ? 'choose `ollama` or `lmstudio`'
+        : 'choose a cloud provider';
+      notes.push(`Warning: configured LLM provider "${provider}" is not allowed in this mode — ${recommendation}.`);
     }
     return { configured: true, detail: `Mode set to ${trimmed} (${notes.join(' ')})` };
   }
 
   async configureLLM(input: ConfigureLLMInput): Promise<SetupPartResult> {
     const provider = input.provider?.trim() as SetupProvider | undefined;
-    if (!provider || !PROVIDERS.includes(provider)) {
+    if (!provider || !(PROVIDERS as string[]).includes(provider)) {
       return { configured: false, error: `Invalid or missing --provider. Use one of: ${PROVIDERS.join(', ')}.`, errorCode: 'E_VALIDATION' };
     }
 
     const mode = getAppMode(this.config);
     if (!providerAllowedInMode(provider, mode)) {
+      const guidance = mode === 'local'
+        ? 'Local only mode uses Ollama or LM Studio.'
+        : 'Hybrid mode lists cloud LLM providers only; local providers are available in Local only and All remote modes.';
       return {
         configured: false,
-        error: `Provider "${provider}" is not allowed in ${mode} mode — Local only mode uses Ollama. Change mode first: openboard agent setup mode --mode hybrid|remote.`,
+        error: `Provider "${provider}" is not allowed in ${mode} mode — ${guidance}`,
         errorCode: 'E_VALIDATION',
       };
     }
@@ -172,8 +180,9 @@ export class SetupService {
     const effort = effortInput as LLMEffort | undefined;
     const apiKey = input.apiKey?.trim();
     const ollamaHost = input.ollamaHost?.trim();
+    const baseUrl = input.baseUrl?.trim();
 
-    if (provider !== 'ollama' && provider !== 'openai-codex' && !apiKey) {
+    if (provider !== 'ollama' && provider !== 'lmstudio' && provider !== 'openai-codex' && !apiKey) {
       return { configured: false, error: `An API key is required for provider "${provider}".`, errorCode: 'E_VALIDATION' };
     }
 
@@ -182,6 +191,7 @@ export class SetupService {
       model,
       apiKey: apiKey || undefined,
       ollamaHost: ollamaHost || undefined,
+      baseUrl: baseUrl || undefined,
     };
 
     // Codex: if not already signed in, sign in headlessly (access token / API
@@ -217,6 +227,8 @@ export class SetupService {
     if (effort) this.config.set('llm.effort', effort);
     if (provider === 'ollama' && ollamaHost) {
       this.config.set('llm.ollamaHost', ollamaHost);
+    } else if (provider === 'lmstudio') {
+      this.config.set('llm.baseUrl', baseUrl || 'http://127.0.0.1:1234/v1');
     } else if (apiKey) {
       this.config.setEncrypted('llm.apiKey', apiKey);
     }
@@ -287,6 +299,7 @@ export class SetupService {
     const githubUser = this.config.get('github.username') as string | undefined;
     const hasGithub = githubUser !== undefined || this.config.has('github.token');
     const mode = getAppMode(this.config);
+    const effort = this.config.get('llm.effort') as string | undefined;
     return {
       mode,
       modeDescription: describeAppMode(mode),
@@ -294,7 +307,7 @@ export class SetupService {
         ? {
             provider,
             model: this.config.get('llm.model') as string | undefined,
-            effort: this.config.get('llm.effort') as string | undefined,
+            ...(effort ? { effort } : {}),
           }
         : null,
       github: hasGithub ? { username: githubUser } : null,

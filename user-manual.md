@@ -56,7 +56,7 @@ Menu options:
 The setup wizard asks for your **mode first**, so you know from the beginning
 what you will get at the end — and what leaves your machine:
 
-1. **Local only** — local LLM (Ollama) + local preview only. Nothing leaves
+1. **Local only** — local LLM (Ollama or LM Studio) + local preview only. Nothing leaves
    your machine: no cloud LLM, no GitHub, no Vercel.
 2. **Hybrid** — cloud LLM (Codex/Claude/GPT/…) + local preview only. Prompts
    and data summaries go to your LLM provider; no GitHub push, no live
@@ -68,7 +68,7 @@ features simply do not exist in those modes.
 
 After the mode, the wizard walks through the steps that apply:
 
-1. LLM provider (Local only mode offers just Ollama)
+1. LLM provider (Local only mode offers Ollama and LM Studio)
 2. GitHub token *(All remote mode only)*
 3. Vercel token *(All remote mode only)*
 4. Dashboard login credentials
@@ -78,12 +78,21 @@ Supported LLM providers:
 - OpenAI API key
 - OpenAI Codex / ChatGPT subscription through browser/device login
 - Anthropic
+- Google Gemini (AI Studio API key)
 - Moonshot
-- Ollama (the only provider in Local only mode)
+- xAI (Grok)
+- Mistral AI
+- OpenRouter (models from multiple leading organizations)
+- Ollama (local model library and runtime)
+- LM Studio (local OpenAI-compatible server; start it from the Developer tab)
+
+Each provider shows eight recent text/code model choices. The catalog was
+reviewed against provider documentation on July 18, 2026; actual availability
+can still vary by API account, plan, and region.
 
 The mode and every setting can be changed later from Settings (Settings > App
 mode). Switching to All remote later asks for GitHub/Vercel tokens; switching
-to Local only requires the Ollama provider.
+to Local only requires either the Ollama or LM Studio provider.
 
 ## Create A Dashboard
 

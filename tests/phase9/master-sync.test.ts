@@ -1,6 +1,6 @@
 /**
  * Phase 9 — syncMasterTab behavior (the master "Overview" tab lifecycle):
- *  - generates App.tsx + MasterDashboard.tsx via the LLM and stores the state hash
+ *  - generates only MasterDashboard.tsx via the LLM and stores the state hash
  *  - skips the LLM call when the dashboard set is unchanged and the component exists
  *  - deletes MasterDashboard.tsx and clears state when no dashboards remain
  *  - an LLM failure is non-fatal and leaves the stored state untouched (retry later)
@@ -114,21 +114,22 @@ describe('DashboardUpdateService.syncMasterTab', () => {
     };
   }
 
-  it('generates App.tsx + MasterDashboard.tsx and stores the master state hash', async () => {
+  it('generates MasterDashboard.tsx, ignores App.tsx, and stores the master state hash', async () => {
     const { service, registry } = makeService(fakeRegistry([makeBoard()], workspace));
     const written = await service.syncMasterTab(workspace, new PipelineReporter());
 
     expect(completeMock).toHaveBeenCalledTimes(1);
-    expect(written).toEqual(expect.arrayContaining(['App.tsx', 'components/MasterDashboard.tsx']));
+    expect(written).toEqual(['components/MasterDashboard.tsx']);
     expect(existsSync(join(workspace, 'src', 'components', 'MasterDashboard.tsx'))).toBe(true);
-    expect(readFileSync(join(workspace, 'src', 'App.tsx'), 'utf-8')).toContain('function App');
+    expect(readFileSync(join(workspace, 'src', 'App.tsx'), 'utf-8')).toBe('// current app');
     expect(registry.setMasterState).toHaveBeenCalledWith(
       expect.objectContaining({ hash: expect.any(String) }),
     );
-    // The prompt carries the dashboard list + current App.tsx context.
+    // The prompt carries the dashboard list without handing shell ownership to the LLM.
     const prompt = String(completeMock.mock.calls[0]?.[0]?.messages?.at(-1)?.content ?? '');
     expect(prompt).toContain('useAllDashboardsData');
     expect(prompt).toContain('Dash (slug: dash');
+    expect(prompt).toContain('Return ONLY components/MasterDashboard.tsx');
   });
 
   it('skips the LLM call when the dashboard set is unchanged and the component exists', async () => {
@@ -201,7 +202,7 @@ describe('DashboardUpdateService.syncMasterTab', () => {
 
     const written = await service.syncMasterTab(workspace, new PipelineReporter());
 
-    expect(written).toEqual(expect.arrayContaining(['App.tsx', 'components/MasterDashboard.tsx']));
+    expect(written).toEqual(['components/MasterDashboard.tsx']);
     expect(written).not.toContain('App.css');
     expect(existsSync(join(workspace, 'src', 'App.css'))).toBe(false); // shell-owned, not written
   });

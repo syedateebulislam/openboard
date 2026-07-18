@@ -152,7 +152,7 @@ describe('ProjectManager', () => {
       expect(result.success).toBe(true);
       const envContent = readFileSync(join(result.projectDir!, '.env'), 'utf-8');
       expect(envContent).toContain('DASHBOARD_USERNAME=admin');
-      expect(envContent).toContain('DASHBOARD_PASSWORD_HASH=hash-value');
+      expect(envContent).toContain(`DASHBOARD_PASSWORD_HASH_B64="${Buffer.from('hash-value').toString('base64')}"`);
       expect(envContent).toContain('JWT_SECRET=jwt-value');
 
       rmSync(configDir, { recursive: true, force: true });

@@ -49,6 +49,7 @@
     "test:run": "vitest run",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "bench:data": "vitest run benchmarks/data-parser.benchmark.test.ts",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },

@@ -52,7 +52,7 @@ export interface VercelProject {
 
 export interface EnvironmentVariables {
   DASHBOARD_USERNAME: string;
-  DASHBOARD_PASSWORD_HASH: string;
+  DASHBOARD_PASSWORD_HASH_B64: string;
   JWT_SECRET: string;
   [key: string]: string;
 }

@@ -132,11 +132,14 @@ export class OpenAIProvider implements LLMProvider {
    */
   async *stream(options: LLMCompletionOptions): AsyncIterable<LLMStreamChunk> {
     const client = await this.getClient();
+    const reasoningEffort = openaiReasoningEffort(this.model, this.effort);
     const stream = await client.chat.completions.create({
       model: this.model,
       messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
       stream: true,
-      temperature: options.temperature ?? 0.7,
+      ...(reasoningEffort
+        ? { reasoning_effort: reasoningEffort, max_completion_tokens: options.maxTokens ?? 4096 }
+        : { temperature: options.temperature ?? 0.7 }),
     });
 
     for await (const chunk of stream) {

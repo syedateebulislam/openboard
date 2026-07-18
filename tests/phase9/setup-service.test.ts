@@ -62,7 +62,7 @@ describe('SetupService (headless setup)', () => {
       const r = await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' });
       expect(r.configured).toBe(true);
       expect(config.get('llm.provider')).toBe('openai');
-      expect(config.get('llm.model')).toBe('gpt-4o'); // default applied
+      expect(config.get('llm.model')).toBe('gpt-5.6-terra'); // current default applied
       expect(config.getDecrypted('llm.apiKey')).toBe('sk-test');
     });
 
@@ -180,7 +180,7 @@ describe('SetupService (headless setup)', () => {
     await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' });
     await setup.configureDashboardAuth('admin', 'supersecret');
     const status = setup.status();
-    expect(status.llm).toEqual({ provider: 'openai', model: 'gpt-4o' });
+    expect(status.llm).toEqual({ provider: 'openai', model: 'gpt-5.6-terra' });
     expect(status.dashboardAuth).toBe(true);
   });
 });

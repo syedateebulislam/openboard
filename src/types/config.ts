@@ -3,7 +3,9 @@
  * These match the Zod schema in ConfigService.
  */
 
-export type LLMProvider = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
+import type { LLMProviderName } from './llm.js';
+
+export type LLMProvider = LLMProviderName;
 
 export interface LLMConfig {
   provider?: LLMProvider;

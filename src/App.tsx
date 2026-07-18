@@ -14,7 +14,7 @@ import { OpenAICodexProvider } from './services/llm/OpenAICodexProvider.js';
 import { GitHubService } from './services/deploy/GitHubService.js';
 import { VercelService } from './services/deploy/VercelService.js';
 import { AuthService } from './services/auth/AuthService.js';
-import type { LLMConfig } from './types/llm.js';
+import type { LLMConfig, LLMProviderName } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
 import { UI_COLORS } from './theme.js';
 import {
@@ -26,6 +26,7 @@ import {
   providerAllowedInMode,
   type AppMode,
 } from './config/appModes.js';
+import { DEFAULT_MODELS, LLM_PROVIDER_CHOICES, MODEL_CHOICES } from './config/llmCatalog.js';
 
 const projectManager = new ProjectManager();
 
@@ -304,33 +305,18 @@ function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'moonshot' | 'gemini' | 'ollama';
 type LLMSettingsStep = 'provider' | 'apiKey' | 'model' | 'ollamaHost' | 'saving';
 
 const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back' }> = [
-  { label: 'OpenAI API Key', value: 'openai' },
-  { label: '(Recommended) OpenAI Codex / ChatGPT subscription', value: 'openai-codex' },
-  { label: 'Anthropic', value: 'anthropic' },
-  { label: 'Moonshot AI', value: 'moonshot' },
-  { label: 'Google Gemini', value: 'gemini' },
-  { label: 'Ollama', value: 'ollama' },
+  ...LLM_PROVIDER_CHOICES.map(({ label, value }) => ({ label, value })),
   { label: '← Go Back', value: 'back' },
 ];
-
-const DEFAULT_LLM_MODELS: Record<LLMProviderName, string> = {
-  openai: 'gpt-4o',
-  'openai-codex': 'gpt-5.5',
-  anthropic: 'claude-sonnet-4-5',
-  moonshot: 'moonshot-v1-128k',
-  gemini: 'gemini-2.5-pro',
-  ollama: 'qwen2.5-coder:7b',
-};
 
 function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [step, setStep] = useState<LLMSettingsStep>('provider');
   const [provider, setProvider] = useState<LLMProviderName>('openai');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gpt-4o');
+  const [model, setModel] = useState(DEFAULT_MODELS.openai);
   const [ollamaHost, setOllamaHost] = useState('http://127.0.0.1:11434');
   const [status, setStatus] = useState('');
 
@@ -338,11 +324,11 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
     if (key.escape) onNavigate('settings');
   });
 
-  const saveLLM = async () => {
+  const saveLLM = async (modelOverride?: string) => {
     setStep('saving');
     setStatus('Validating LLM settings...');
     try {
-      const selectedModel = model.trim() || DEFAULT_LLM_MODELS[provider];
+      const selectedModel = modelOverride?.trim() || model.trim() || DEFAULT_MODELS[provider];
 
       if (provider === 'openai-codex') {
         const validation = await new OpenAICodexProvider(selectedModel).validate();
@@ -369,9 +355,10 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
         model: selectedModel,
         apiKey: apiKey.trim() || undefined,
         ollamaHost: ollamaHost.trim() || undefined,
+        baseUrl: provider === 'lmstudio' ? ollamaHost.trim() || undefined : undefined,
       };
 
-      if (provider !== 'ollama' && !configToValidate.apiKey) {
+      if (provider !== 'ollama' && provider !== 'lmstudio' && !configToValidate.apiKey) {
         setStatus('API key is required for this provider.');
         setStep('apiKey');
         return;
@@ -381,7 +368,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       const validation = await llm.validate();
       if (!validation.valid) {
         setStatus(validation.error ?? 'LLM validation failed.');
-        setStep(provider === 'ollama' ? 'ollamaHost' : 'apiKey');
+        setStep(provider === 'ollama' || provider === 'lmstudio' ? 'ollamaHost' : 'apiKey');
         return;
       }
 
@@ -390,6 +377,8 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       config.set('llm.model', selectedModel);
       if (provider === 'ollama') {
         config.set('llm.ollamaHost', ollamaHost.trim());
+      } else if (provider === 'lmstudio') {
+        config.set('llm.baseUrl', ollamaHost.trim());
       } else if (apiKey.trim()) {
         config.setEncrypted('llm.apiKey', apiKey.trim());
       }
@@ -398,7 +387,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       setStep('provider');
     } catch (error: any) {
       setStatus(`Could not save LLM settings: ${error.message}`);
-      setStep(provider === 'ollama' ? 'ollamaHost' : provider === 'openai-codex' ? 'provider' : 'apiKey');
+      setStep(provider === 'ollama' || provider === 'lmstudio' ? 'ollamaHost' : provider === 'openai-codex' ? 'provider' : 'apiKey');
     }
   };
 
@@ -412,7 +401,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
         <Text bold color={UI_COLORS.logo}>LLM Provider</Text>
         <Text color={UI_COLORS.subtitle}>
           {mode === 'local'
-            ? 'Local only mode: generation runs on your machine via Ollama.'
+            ? 'Local only mode: generation runs on your machine via Ollama or LM Studio.'
             : 'Choose the provider to configure.'}
         </Text>
         {status && (
@@ -429,8 +418,10 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
                 return;
               }
               setProvider(item.value);
-              setModel(DEFAULT_LLM_MODELS[item.value]);
-              setStep(item.value === 'ollama' ? 'ollamaHost' : item.value === 'openai-codex' ? 'model' : 'apiKey');
+              setModel(DEFAULT_MODELS[item.value]);
+              if (item.value === 'lmstudio') setOllamaHost('http://127.0.0.1:1234/v1');
+              if (item.value === 'ollama') setOllamaHost('http://127.0.0.1:11434');
+              setStep(item.value === 'ollama' || item.value === 'lmstudio' ? 'ollamaHost' : item.value === 'openai-codex' ? 'model' : 'apiKey');
             }}
           />
         </Box>
@@ -455,10 +446,10 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   if (step === 'ollamaHost') {
     return (
       <Box flexDirection="column" padding={2}>
-        <Text bold color={UI_COLORS.logo}>Ollama Host</Text>
+        <Text bold color={UI_COLORS.logo}>{provider === 'lmstudio' ? 'LM Studio Local Server' : 'Ollama Host'}</Text>
         <Box marginTop={1}>
           <Text color={UI_COLORS.logo}>Host › </Text>
-          <TextInput value={ollamaHost} onChange={setOllamaHost} onSubmit={() => setStep('model')} placeholder="http://127.0.0.1:11434" />
+          <TextInput value={ollamaHost} onChange={setOllamaHost} onSubmit={() => setStep('model')} placeholder={provider === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434'} />
         </Box>
         {status && <Text color="red">{status}</Text>}
         <Text color={UI_COLORS.subtitle}>Press Enter to continue · ESC to go back</Text>
@@ -471,8 +462,13 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       <Text bold color={UI_COLORS.logo}>LLM Model</Text>
       <Text color={UI_COLORS.subtitle}>Provider: {provider}</Text>
       <Box marginTop={1}>
-        <Text color={UI_COLORS.logo}>Model › </Text>
-        <TextInput value={model} onChange={setModel} onSubmit={saveLLM} placeholder={DEFAULT_LLM_MODELS[provider]} />
+        <SelectInput
+          items={MODEL_CHOICES[provider]}
+          onSelect={(item) => {
+            setModel(item.value);
+            setTimeout(() => void saveLLM(item.value), 0);
+          }}
+        />
       </Box>
       {status && (
         <Box marginTop={1}>

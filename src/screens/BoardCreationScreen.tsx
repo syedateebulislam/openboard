@@ -57,7 +57,7 @@ function presetItems(): SelectItem[] {
 export function hasConfiguredLLM(config = new ConfigService()): boolean {
   const provider = config.get('llm.provider') as string | undefined;
   if (!provider) return false;
-  if (provider === 'ollama' || provider === 'openai-codex') return true;
+  if (provider === 'ollama' || provider === 'lmstudio' || provider === 'openai-codex') return true;
   return Boolean(config.getSecret('llm.apiKey'));
 }
 

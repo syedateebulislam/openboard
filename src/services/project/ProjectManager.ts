@@ -154,11 +154,10 @@ export class ProjectManager {
         const jwtSecret = cfg.getSecret('credentials.jwtSecret');
 
         if (username && passwordHash && jwtSecret) {
-          VercelService.writeEnvFile(projectDir, {
-            DASHBOARD_USERNAME: username,
-            DASHBOARD_PASSWORD_HASH: passwordHash,
-            JWT_SECRET: jwtSecret,
-          });
+          VercelService.writeEnvFile(
+            projectDir,
+            VercelService.credentialEnvVars({ username, passwordHash, jwtSecret }),
+          );
         }
       } catch {
         // Config not available — skip credential injection
@@ -220,6 +219,16 @@ export class ProjectManager {
       return { success: false, error: 'No package.json found in project directory' };
     }
     try {
+      const credentials = this.getDashboardCredentialsForDeploy();
+      if (!credentials.success || !credentials.credentials) {
+        return { success: false, error: credentials.error ?? 'Dashboard credentials are missing.' };
+      }
+      VercelService.writeEnvFile(
+        projectDir,
+        VercelService.credentialEnvVars(credentials.credentials),
+      );
+      this.syncProductShellFiles(projectDir, onProgress);
+      onProgress?.('Refreshed local preview credentials');
       const result = await PreviewService.start(projectDir, port, onProgress);
       return {
         success: result.success,
@@ -676,6 +685,11 @@ export class ProjectManager {
     'src/components/DashboardHeader.tsx',
     'src/components/InsightCard.tsx',
     'src/hooks/useTheme.ts',
+    'api/_auth.ts',
+    'api/auth.ts',
+    'api/dashboard-data.ts',
+    'vite.config.ts',
+    'vite.local-api.ts',
     'public/favicon.svg',
   ];
 

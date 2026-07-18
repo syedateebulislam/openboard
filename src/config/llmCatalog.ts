@@ -1,21 +1,41 @@
 /**
- * LLM catalog — the single source of truth for provider model lists, default
- * models, and the execution-effort levels. Shared by the SetupWizard pickers,
- * the in-chat /model command, and `openboard agent setup` validation so all
- * three stay in sync.
+ * LLM catalog — shared by setup, settings, chat commands, and headless setup.
+ *
+ * Curated from provider documentation on 2026-07-18. Each provider exposes
+ * eight recent text/code choices. Provider model APIs remain the authority for
+ * account/region-specific availability.
  */
 
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 
-export const LLM_EFFORTS: LLMEffort[] = ['low', 'medium', 'high', 'max'];
+export interface LLMProviderChoice {
+  label: string;
+  value: LLMProviderName;
+  auth: 'subscription' | 'api-key' | 'local';
+}
 
+export const LLM_PROVIDER_CHOICES: LLMProviderChoice[] = [
+  { label: '(Subscription) OpenAI Codex / ChatGPT — browser login', value: 'openai-codex', auth: 'subscription' },
+  { label: 'OpenAI API — GPT-5.6 family', value: 'openai', auth: 'api-key' },
+  { label: 'Anthropic API — Claude 5 / 4.x', value: 'anthropic', auth: 'api-key' },
+  { label: 'Google AI Studio API — Gemini 3.x / 2.5', value: 'gemini', auth: 'api-key' },
+  { label: 'Moonshot API — Kimi', value: 'moonshot', auth: 'api-key' },
+  { label: 'xAI API — Grok', value: 'xai', auth: 'api-key' },
+  { label: 'Mistral AI API — Mistral / Devstral', value: 'mistral', auth: 'api-key' },
+  { label: 'OpenRouter API — leading labs through one key', value: 'openrouter', auth: 'api-key' },
+  { label: '(Local) LM Studio — downloaded GGUF/MLX models', value: 'lmstudio', auth: 'local' },
+  { label: '(Local) Ollama — open-weight models on your machine', value: 'ollama', auth: 'local' },
+];
+
+export const LLM_PROVIDER_NAMES = LLM_PROVIDER_CHOICES.map((provider) => provider.value);
+
+export const LLM_EFFORTS: LLMEffort[] = ['low', 'medium', 'high', 'max'];
 export const DEFAULT_EFFORT: LLMEffort = 'medium';
 
 export function isValidEffort(value: unknown): value is LLMEffort {
   return typeof value === 'string' && (LLM_EFFORTS as string[]).includes(value);
 }
 
-/** Read + normalize an effort value from config/flags; falls back to medium. */
 export function normalizeEffort(value: unknown): LLMEffort {
   return isValidEffort(value) ? value : DEFAULT_EFFORT;
 }
@@ -28,110 +48,159 @@ export const EFFORT_CHOICES: Array<{ label: string; value: LLMEffort }> = [
 ];
 
 export const DEFAULT_MODELS: Record<LLMProviderName, string> = {
-  openai: 'gpt-4o',
-  'openai-codex': 'gpt-5.5',
-  anthropic: 'claude-sonnet-4-5',
-  moonshot: 'moonshot-v1-128k',
-  gemini: 'gemini-2.5-pro',
-  ollama: 'qwen2.5-coder:7b',
+  openai: 'gpt-5.6-terra',
+  'openai-codex': 'gpt-5.6-terra',
+  anthropic: 'claude-sonnet-5',
+  gemini: 'gemini-3.5-flash',
+  moonshot: 'kimi-k3',
+  xai: 'grok-4.5',
+  mistral: 'mistral-medium-latest',
+  openrouter: 'openai/gpt-5.6-terra',
+  lmstudio: '__auto__',
+  ollama: 'qwen3.5:9b',
 };
 
-/** Default model for a provider name from config/flags; unknown → openai's. */
 export function defaultModelFor(provider: string): string {
   return DEFAULT_MODELS[provider as LLMProviderName] ?? DEFAULT_MODELS.openai;
 }
 
-export const MODEL_CHOICES: Record<LLMProviderName, Array<{ label: string; value: string }>> = {
+type ModelChoice = { label: string; value: string };
+
+export const MODEL_CHOICES: Record<LLMProviderName, ModelChoice[]> = {
   openai: [
-    { label: 'GPT-4o (Latest, 128K context)', value: 'gpt-4o' },
-    { label: 'GPT-4 Turbo (Fast, 128K context)', value: 'gpt-4-turbo' },
-    { label: 'GPT-3.5 Turbo (Cheap, 16K context)', value: 'gpt-3.5-turbo' },
+    { label: 'GPT-5.6 Sol — flagship reasoning and coding', value: 'gpt-5.6-sol' },
+    { label: 'GPT-5.6 Terra — balanced (recommended)', value: 'gpt-5.6-terra' },
+    { label: 'GPT-5.6 Luna — economical and high-volume', value: 'gpt-5.6-luna' },
+    { label: 'GPT-5.6 — latest flagship alias', value: 'gpt-5.6' },
+    { label: 'GPT-5.4 — strong professional work', value: 'gpt-5.4' },
+    { label: 'GPT-5.4 Mini — faster and lower cost', value: 'gpt-5.4-mini' },
+    { label: 'GPT-5.3 Codex — coding specialist', value: 'gpt-5.3-codex' },
+    { label: 'GPT-5.2 — previous flagship', value: 'gpt-5.2' },
   ],
   'openai-codex': [
-    { label: 'GPT-5.5 (Codex recommended)', value: 'gpt-5.5' },
-    { label: 'GPT-5.4 (Codex)', value: 'gpt-5.4' },
-    { label: 'GPT-5.4 Mini (Codex, fast)', value: 'gpt-5.4-mini' },
-    { label: 'GPT-5.3 Codex', value: 'gpt-5.3-codex' },
+    { label: 'GPT-5.6 Sol — highest-capability Codex model', value: 'gpt-5.6-sol' },
+    { label: 'GPT-5.6 Terra — balanced intelligence and cost', value: 'gpt-5.6-terra' },
+    { label: 'GPT-5.6 Luna — fast and economical', value: 'gpt-5.6-luna' },
+    { label: 'GPT-5.5 — high-capability coding', value: 'gpt-5.5' },
+    { label: 'GPT-5.4 — agentic coding', value: 'gpt-5.4' },
+    { label: 'GPT-5.4 Mini — fast coding', value: 'gpt-5.4-mini' },
+    { label: 'GPT-5.3 Codex — coding specialist', value: 'gpt-5.3-codex' },
+    { label: 'GPT-5.2 Codex — previous coding model', value: 'gpt-5.2-codex' },
   ],
   anthropic: [
-    { label: 'Claude Opus 4.5 (Most capable, 200K)', value: 'claude-opus-4-5' },
-    { label: 'Claude Sonnet 4.5 (Balanced, 200K)', value: 'claude-sonnet-4-5' },
-    { label: 'Claude Haiku 3.5 (Fast, 200K)', value: 'claude-haiku-3-5' },
-  ],
-  moonshot: [
-    { label: 'Kimi v1-128k (128K context)', value: 'moonshot-v1-128k' },
-    { label: 'Kimi v1-32k (32K context)', value: 'moonshot-v1-32k' },
-    { label: 'Kimi v1-8k (8K context)', value: 'moonshot-v1-8k' },
+    { label: 'Claude Fable 5 — highest capability', value: 'claude-fable-5' },
+    { label: 'Claude Opus 4.8 — complex agentic coding', value: 'claude-opus-4-8' },
+    { label: 'Claude Sonnet 5 — speed + intelligence (recommended)', value: 'claude-sonnet-5' },
+    { label: 'Claude Haiku 4.5 — fastest', value: 'claude-haiku-4-5' },
+    { label: 'Claude Opus 4.7 — previous Opus', value: 'claude-opus-4-7' },
+    { label: 'Claude Opus 4.6 — long-context reasoning', value: 'claude-opus-4-6' },
+    { label: 'Claude Sonnet 4.6 — balanced previous generation', value: 'claude-sonnet-4-6' },
+    { label: 'Claude Sonnet 4.5 — stable coding model', value: 'claude-sonnet-4-5' },
   ],
   gemini: [
-    { label: 'Gemini 2.5 Pro (Most capable, 1M context — AI Pro plan)', value: 'gemini-2.5-pro' },
-    { label: 'Gemini 2.5 Flash (Fast, 1M context)', value: 'gemini-2.5-flash' },
-    { label: 'Gemini 2.0 Flash (Fast, 1M context)', value: 'gemini-2.0-flash' },
+    { label: 'Gemini 3.5 Flash — stable agentic/coding model', value: 'gemini-3.5-flash' },
+    { label: 'Gemini 3.1 Pro Preview — advanced reasoning', value: 'gemini-3.1-pro-preview' },
+    { label: 'Gemini Pro Latest — newest Pro alias', value: 'gemini-pro-latest' },
+    { label: 'Gemini Flash Latest — newest Flash alias', value: 'gemini-flash-latest' },
+    { label: 'Gemini Flash-Lite Latest — newest budget alias', value: 'gemini-flash-lite-latest' },
+    { label: 'Gemini 2.5 Pro — stable deep reasoning', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.5 Flash — stable price/performance', value: 'gemini-2.5-flash' },
+    { label: 'Gemini 2.5 Flash-Lite — stable low latency', value: 'gemini-2.5-flash-lite' },
+  ],
+  moonshot: [
+    { label: 'Kimi K3 — newest 1M-context flagship', value: 'kimi-k3' },
+    { label: 'Kimi K2.7 Code — dedicated coding model', value: 'kimi-k2.7-code' },
+    { label: 'Kimi K2.7 Code Highspeed — up to 260 tok/s', value: 'kimi-k2.7-code-highspeed' },
+    { label: 'Kimi K2.6 — multimodal reasoning and agents', value: 'kimi-k2.6' },
+    { label: 'Kimi K2.5 — previous multimodal agent', value: 'kimi-k2.5' },
+    { label: 'Moonshot v1 128K — legacy long context', value: 'moonshot-v1-128k' },
+    { label: 'Moonshot v1 32K — compact context', value: 'moonshot-v1-32k' },
+    { label: 'Moonshot v1 8K — short text', value: 'moonshot-v1-8k' },
+  ],
+  xai: [
+    { label: 'Grok 4.5 — newest coding/agentic flagship', value: 'grok-4.5' },
+    { label: 'Grok 4.3 — fast general reasoning', value: 'grok-4.3' },
+    { label: 'Grok Build 0.1 — agentic coding', value: 'grok-build-0.1' },
+    { label: 'Grok 4.20 Reasoning — deep reasoning', value: 'grok-4.20-reasoning' },
+    { label: 'Grok 4.20 — general model', value: 'grok-4.20' },
+    { label: 'Grok 4.1 Fast Reasoning — compatibility alias', value: 'grok-4-1-fast-reasoning' },
+    { label: 'Grok 4 Fast Reasoning — compatibility alias', value: 'grok-4-fast-reasoning' },
+    { label: 'Grok 3 — compatibility alias', value: 'grok-3' },
+  ],
+  mistral: [
+    { label: 'Mistral Medium 3.5 — latest frontier model', value: 'mistral-medium-latest' },
+    { label: 'Mistral Small 4 — efficient hybrid model', value: 'mistral-small-latest' },
+    { label: 'Mistral Large 3 — open-weight flagship', value: 'mistral-large-latest' },
+    { label: 'Devstral 2 — software engineering agents', value: 'devstral-latest' },
+    { label: 'Devstral Small 2 — efficient coding agent', value: 'devstral-small-latest' },
+    { label: 'Magistral Medium 1.2 — reasoning', value: 'magistral-medium-latest' },
+    { label: 'Magistral Small 1.2 — open reasoning', value: 'magistral-small-latest' },
+    { label: 'Codestral — code generation/completion', value: 'codestral-latest' },
+  ],
+  openrouter: [
+    { label: 'OpenAI GPT-5.6 Terra — balanced frontier', value: 'openai/gpt-5.6-terra' },
+    { label: 'Anthropic Claude Sonnet 5 — fast frontier', value: 'anthropic/claude-sonnet-5' },
+    { label: 'Google Gemini 3.5 Flash — agentic/coding', value: 'google/gemini-3.5-flash' },
+    { label: 'xAI Grok 4.5 — coding and knowledge work', value: 'x-ai/grok-4.5' },
+    { label: 'DeepSeek V4 Pro — open reasoning/coding', value: 'deepseek/deepseek-v4-pro' },
+    { label: 'Mistral Medium 3.5 — frontier multimodal', value: 'mistralai/mistral-medium-3.5' },
+    { label: 'Qwen 3.5 — open multimodal agent', value: 'qwen/qwen3.5-397b-a17b' },
+    { label: 'OpenAI GPT-OSS 120B — open-weight reasoning', value: 'openai/gpt-oss-120b' },
+  ],
+  lmstudio: [
+    { label: 'Auto — first LLM exposed by LM Studio (recommended)', value: '__auto__' },
+    { label: 'OpenAI GPT-OSS 20B — local reasoning (16GB+ RAM)', value: 'openai/gpt-oss-20b' },
+    { label: 'Qwen 3.5 9B — balanced coding and reasoning', value: 'qwen/qwen3.5-9b' },
+    { label: 'Qwen 3 Coder 30B — agentic coding', value: 'qwen/qwen3-coder-30b' },
+    { label: 'Google Gemma 3 12B — multimodal general model', value: 'google/gemma-3-12b' },
+    { label: 'Mistral Small 3.2 24B — tool use and coding', value: 'mistralai/mistral-small-3.2-24b' },
+    { label: 'DeepSeek R1 Distill Qwen 14B — reasoning', value: 'deepseek/deepseek-r1-distill-qwen-14b' },
+    { label: 'Microsoft Phi-4 14B — compact reasoning', value: 'microsoft/phi-4' },
   ],
   ollama: [
-    // 🏆 Best for Code Generation
-    { label: '🥇 Qwen2.5-Coder 7B (4.5GB) - Best code quality', value: 'qwen2.5-coder:7b' },
-    { label: '🔥 DeepSeek-Coder-V2 16B (8.9GB) - Advanced coding', value: 'deepseek-coder-v2:16b' },
-    { label: '💻 CodeLlama 13B (7.4GB) - Python/JS specialist', value: 'codellama:13b' },
-    { label: '⚡ CodeLlama 7B (3.8GB) - Fast coding', value: 'codellama:7b' },
-    { label: '🌏 Yi-Coder 9B (5.4GB) - Multilingual code', value: 'yi-coder:9b' },
-
-    // 🎯 Best General Purpose
-    { label: '🦙 Llama 3.1 8B (4.7GB) - Latest Meta model', value: 'llama3.1:8b' },
-    { label: '🦙 Llama 3.2 3B (2GB) - Ultra compact', value: 'llama3.2:3b' },
-    { label: '💎 Gemma2 9B (5.4GB) - Google\'s best', value: 'gemma2:9b' },
-    { label: '🧠 Phi-3 Medium 14B (7.9GB) - Microsoft efficient', value: 'phi3:14b' },
-
-    // ⚡ Best for Speed
-    { label: '🚀 Mistral 7B (4.1GB) - Blazing fast', value: 'mistral:7b' },
-    { label: '🏃 Phi-3 Mini (2.3GB) - Tiny powerhouse', value: 'phi3:mini' },
-    { label: '⚡ Qwen2.5 7B (4.5GB) - Fast multilingual', value: 'qwen2.5:7b' },
+    { label: 'Qwen 3.5 9B (6.6GB) — balanced local default', value: 'qwen3.5:9b' },
+    { label: 'Qwen 3.5 4B (3.4GB) — compact multimodal', value: 'qwen3.5:4b' },
+    { label: 'Qwen 3 Coder 30B — agentic coding', value: 'qwen3-coder:30b' },
+    { label: 'OpenAI GPT-OSS 20B (14GB) — local reasoning', value: 'gpt-oss:20b' },
+    { label: 'OpenAI GPT-OSS 120B — workstation/server reasoning', value: 'gpt-oss:120b' },
+    { label: 'Google Gemma 3 4B (3.3GB) — compact multimodal', value: 'gemma3:4b' },
+    { label: 'Google Gemma 3 12B (8.1GB) — balanced multimodal', value: 'gemma3:12b' },
+    { label: 'Google Gemma 3 27B (17GB) — highest Gemma quality', value: 'gemma3:27b' },
+    { label: 'Mistral Small 3.2 24B (15GB) — tools and coding', value: 'mistral-small3.2:24b' },
+    { label: 'Mistral Nemo 12B — efficient 128K context', value: 'mistral-nemo:12b' },
+    { label: 'DeepSeek R1 8B — compact reasoning', value: 'deepseek-r1:8b' },
+    { label: 'DeepSeek R1 14B — balanced reasoning', value: 'deepseek-r1:14b' },
+    { label: 'DeepSeek R1 32B — stronger reasoning', value: 'deepseek-r1:32b' },
+    { label: 'Meta Llama 4 Scout — multimodal MoE', value: 'llama4:scout' },
+    { label: 'Microsoft Phi-4 14B — compact reasoning', value: 'phi4:14b' },
+    { label: 'Devstral 24B — Mistral software engineering', value: 'devstral:24b' },
   ],
 };
 
-// ── Effort → provider parameter mapping ─────────────────────────────────────
-//
-// | effort | OpenAI (reasoning models)  | Anthropic thinking | Codex CLI            |
-// |--------|----------------------------|--------------------|----------------------|
-// | low    | reasoning_effort: low      | off                | model_reasoning_effort=low    |
-// | medium | reasoning_effort: medium   | off                | model_reasoning_effort=medium |
-// | high   | reasoning_effort: high     | budget 4096        | model_reasoning_effort=high   |
-// | max    | reasoning_effort: high     | budget 10000       | model_reasoning_effort=high   |
-//
-// Gemini / Moonshot / Ollama have no comparable knob today — effort is a
-// documented no-op there (only the heartbeat applies).
-
-/**
- * OpenAI `reasoning_effort` for reasoning-capable models (o-series / gpt-5*).
- * Returns undefined for non-reasoning models (which reject the parameter).
- */
-export function openaiReasoningEffort(
-  model: string,
-  effort: LLMEffort | undefined,
-): 'low' | 'medium' | 'high' | undefined {
-  if (!effort) return undefined;
-  if (!/^(o\d|gpt-5)/i.test(model)) return undefined;
+export function openaiReasoningEffort(model: string, effort: LLMEffort | undefined): 'low' | 'medium' | 'high' | undefined {
+  if (!effort || !/^(o\d|gpt-5)/i.test(model)) return undefined;
   return effort === 'max' ? 'high' : effort;
 }
 
-/**
- * Anthropic extended-thinking token budget. Only high/max enable thinking;
- * low/medium keep the fast default path. Returns undefined for models that do
- * not support extended thinking (generation < 4, e.g. claude-haiku-3-5) —
- * sending `thinking` to those models is a 400 on every call.
- */
-export function anthropicThinkingBudget(
-  effort: LLMEffort | undefined,
-  model: string,
-): number | undefined {
-  if (!/-[4-9]-\d/.test(model)) return undefined;
+export function anthropicThinkingBudget(effort: LLMEffort | undefined, model: string): number | undefined {
+  // Claude 4.6+ and Claude 5 use adaptive thinking/effort rather than the
+  // legacy `thinking: { type: enabled }` request used by this provider.
+  if (!/-4-5/.test(model)) return undefined;
   if (effort === 'high') return 4096;
   if (effort === 'max') return 10000;
   return undefined;
 }
 
-/** Codex CLI `model_reasoning_effort` config value. */
 export function codexReasoningEffort(effort: LLMEffort | undefined): 'low' | 'medium' | 'high' | undefined {
   if (!effort) return undefined;
   return effort === 'max' ? 'high' : effort;
+}
+
+/**
+ * Migrate model aliases that the API catalog may expose but ChatGPT-backed
+ * Codex does not accept. Existing OpenBoard configs can contain the old bare
+ * `gpt-5.6` value, so normalize it at runtime instead of breaking regeneration.
+ */
+export function normalizeCodexSubscriptionModel(model: string): string {
+  return model === 'gpt-5.6' ? DEFAULT_MODELS['openai-codex'] : model;
 }

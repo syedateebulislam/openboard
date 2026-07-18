@@ -7,7 +7,7 @@
  * A lock is stale when its process is gone or it is older than 30 minutes.
  */
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const LOCK_FILE = '.openboard.lock';
@@ -36,33 +36,40 @@ function isProcessAlive(pid: number): boolean {
 export class ProjectLockService {
   static acquire(projectDir: string): LockHandle {
     const lockPath = join(projectDir, LOCK_FILE);
+    const payload: LockPayload = { pid: process.pid, createdAt: new Date().toISOString() };
+    let acquired = false;
 
-    if (existsSync(lockPath)) {
-      const existing = ProjectLockService.readLock(lockPath);
-      const stale =
-        !existing ||
-        !isProcessAlive(existing.pid) ||
-        Date.now() - new Date(existing.createdAt).getTime() > STALE_AFTER_MS;
-
-      if (!stale) {
-        return {
-          success: false,
-          error: `Project is locked by another OpenBoard run (pid ${existing!.pid}, since ${existing!.createdAt}). Retry after it finishes.`,
-          release: () => {},
-        };
-      }
+    // `wx` is the lock: creation succeeds for exactly one contender. A stale
+    // lock is removed and creation is attempted once more.
+    for (let attempt = 0; attempt < 2 && !acquired; attempt++) {
       try {
-        unlinkSync(lockPath);
-      } catch {
-        // fall through; write below will overwrite
+        writeFileSync(lockPath, JSON.stringify(payload), { flag: 'wx' });
+        acquired = true;
+      } catch (error: unknown) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== 'EEXIST') {
+          return { success: false, error: `Could not acquire project lock: ${err.message}`, release: () => {} };
+        }
+        const existing = ProjectLockService.readLock(lockPath);
+        const stale = !existing || !isProcessAlive(existing.pid) ||
+          Date.now() - new Date(existing.createdAt).getTime() > STALE_AFTER_MS;
+        if (!stale) {
+          return {
+            success: false,
+            error: `Project is locked by another OpenBoard run (pid ${existing!.pid}, since ${existing!.createdAt}). Retry after it finishes.`,
+            release: () => {},
+          };
+        }
+        try {
+          unlinkSync(lockPath);
+        } catch (unlinkError: unknown) {
+          const message = unlinkError instanceof Error ? unlinkError.message : String(unlinkError);
+          return { success: false, error: `Could not remove stale project lock: ${message}`, release: () => {} };
+        }
       }
     }
-
-    const payload: LockPayload = { pid: process.pid, createdAt: new Date().toISOString() };
-    try {
-      writeFileSync(lockPath, JSON.stringify(payload), { flag: 'w' });
-    } catch (err: any) {
-      return { success: false, error: `Could not acquire project lock: ${err.message}`, release: () => {} };
+    if (!acquired) {
+      return { success: false, error: 'Could not acquire project lock after removing a stale lock.', release: () => {} };
     }
 
     let released = false;

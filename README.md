@@ -12,7 +12,7 @@ The very first choice in setup is the **app mode**, so you know from the beginni
 
 | # | Mode | You get | What leaves your machine |
 |---|------|---------|--------------------------|
-| 1 | **Local only** | Local LLM (Ollama) + local preview | Nothing — no cloud LLM, no GitHub, no Vercel |
+| 1 | **Local only** | Local LLM (Ollama or LM Studio) + local preview | Nothing — no cloud LLM, no GitHub, no Vercel |
 | 2 | **Hybrid** | Cloud LLM (Codex/Claude/GPT/…) + local preview | Prompts + data summaries to your LLM provider only |
 | 3 | **All remote** | Cloud LLM + GitHub + live Vercel web app | LLM traffic, code to GitHub, data + app to Vercel |
 
@@ -60,7 +60,8 @@ openboard
 OpenBoard needs these configured once:
 
 - App mode: Local only / Hybrid / All remote (asked first — see [Modes](#modes--pick-your-privacy-level-first)).
-- LLM provider: OpenAI API key, OpenAI Codex browser/device login, Anthropic, Moonshot, Google Gemini, or Ollama (Local only mode: Ollama).
+- LLM provider: OpenAI API, OpenAI Codex via ChatGPT subscription, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, local Ollama, or local LM Studio.
+- Local choices span Qwen, Gemma, Mistral/Devstral, OpenAI GPT-OSS, DeepSeek R1, Llama, and Phi in multiple hardware sizes. LM Studio can automatically select the first model its local server exposes.
 - Model and execution effort (`low` / `medium` / `high` / `max`) — picked from lists in the wizard; effort maps to each provider's reasoning knob (OpenAI `reasoning_effort`, Anthropic extended thinking, Codex `model_reasoning_effort`).
 - GitHub token or authenticated GitHub CLI *(All remote mode only)*.
 - Vercel token or Vercel Git integration *(All remote mode only)*.

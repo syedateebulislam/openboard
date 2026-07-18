@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
-import { crossSpawn, IS_WINDOWS, IS_MAC, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
+import { crossSpawn, IS_WINDOWS, IS_MAC } from '../../utils/crossSpawn.js';
 import type { ProgressCallback } from '../build/BuildService.js';
 
 export interface GitHubResult {
@@ -441,36 +441,17 @@ export class GitHubService {
 
       onProgress?.('Authenticating gh CLI with token...');
     try {
-      const { spawn } = await import('node:child_process');
-
-      return new Promise<boolean>((resolve) => {
-        const invocation = resolveSpawnInvocation('gh', ['auth', 'login', '--with-token']);
-        const proc = spawn(invocation.command, invocation.args, {
-          shell: invocation.useShell,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-
-        let stderr = '';
-        proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-
-        proc.on('close', (code) => {
-          if (code === 0) {
-            onProgress?.('gh CLI authenticated successfully');
-            resolve(true);
-          } else {
-            onProgress?.(`gh auth failed: ${stderr.trim()}`);
-            resolve(false);
-          }
-        });
-
-        proc.on('error', () => {
-          resolve(false);
-        });
-
-        // Write token to stdin
-        proc.stdin?.write(token);
-        proc.stdin?.end();
+      const result = await crossSpawn('gh', ['auth', 'login', '--with-token'], {
+        cwd: process.cwd(),
+        timeoutMs: 60_000,
+        stdin: token,
       });
+      if (result.code === 0) {
+        onProgress?.('gh CLI authenticated successfully');
+        return true;
+      }
+      onProgress?.(`gh auth failed: ${result.stderr.trim()}`);
+      return false;
     } catch (error: any) {
       onProgress?.(`gh auth error: ${error.message}`);
       return false;

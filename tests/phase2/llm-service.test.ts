@@ -45,6 +45,15 @@ describe('LLMService', () => {
       expect(provider.name).toBe('ollama');
     });
 
+    it('should create a local LM Studio provider without an API key', () => {
+      const provider = LLMService.createProvider({
+        provider: 'lmstudio',
+        model: '__auto__',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+      });
+      expect(provider.name).toBe('lmstudio');
+    });
+
     it('should create MoonshotProvider for moonshot config', () => {
       const provider = LLMService.createProvider({
         provider: 'moonshot',
@@ -53,6 +62,16 @@ describe('LLMService', () => {
       });
       expect(provider.name).toBe('moonshot');
     });
+
+    for (const providerName of ['xai', 'mistral', 'openrouter'] as const) {
+      it(`should create an OpenAI-compatible provider for ${providerName}`, () => {
+        const provider = LLMService.createProvider({
+          provider: providerName,
+          apiKey: 'test-key',
+        });
+        expect(provider.name).toBe(providerName);
+      });
+    }
 
     it('should throw for unknown provider', () => {
       expect(() =>

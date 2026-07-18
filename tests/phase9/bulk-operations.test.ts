@@ -81,7 +81,12 @@ function fakeRegistry(initial: BoardConfig[], sharedDir?: string) {
 }
 
 function fakeHistory() {
-  return { append: vi.fn(), read: () => [], ensure: vi.fn(), delete: vi.fn() };
+  return {
+    append: vi.fn(),
+    read: () => [{ source: 'initial', prompt: 'Create dashboard' }],
+    ensure: vi.fn(),
+    delete: vi.fn(),
+  };
 }
 
 function fakeProjectManager() {
@@ -155,6 +160,28 @@ describe('Bulk dashboard operations', () => {
   });
 
   // ── updateAllWithPrompt ────────────────────────────────────────────────────
+
+  describe('updateAll regeneration', () => {
+    it('regenerates every board but builds, pushes, and deploys only once', async () => {
+      const csv = join(workspace, 'refresh.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      const boards = [
+        makeBoard({ name: 'a', title: 'A', outputDir: workspace, dataFiles: [csv] }),
+        makeBoard({ name: 'b', title: 'B', outputDir: workspace, dataFiles: [csv] }),
+      ];
+      const registry = fakeRegistry(boards, workspace);
+      const { service, projectManager, history } = makeService({ registry, runsDir });
+
+      const results = await service.updateAll();
+
+      expect(results).toHaveLength(2);
+      expect(results.every((result) => result.success)).toBe(true);
+      expect(history.append).toHaveBeenCalledTimes(2);
+      expect(projectManager.build).toHaveBeenCalledTimes(1);
+      expect(projectManager.commitAndPush).toHaveBeenCalledTimes(1);
+      expect(projectManager.deploy).toHaveBeenCalledTimes(1);
+    });
+  });
 
   describe('updateAllWithPrompt', () => {
     it('fails validation when no dashboards are registered', async () => {

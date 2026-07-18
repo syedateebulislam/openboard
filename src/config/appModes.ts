@@ -4,12 +4,12 @@
  * The mode is the FIRST choice OpenBoard asks for, so the user knows from the
  * beginning exactly what the end result is and what leaves their machine:
  *
- *   1. local  — Local only:  local LLM (Ollama) + local preview.
+ *   1. local  — Local only:  local LLM (Ollama or LM Studio) + local preview.
  *               Nothing leaves the machine.
  *   2. hybrid — Cloud LLM (Codex/Claude/GPT/…) + local preview only.
  *               Prompts and data summaries go to the LLM provider;
  *               no GitHub push, no live deployment.
- *   3. remote — All remote:  cloud LLM + GitHub push + live Vercel web app.
+ *   3. remote — All remote:  any LLM + GitHub push + live Vercel web app.
  *
  * Single source of truth shared by the SetupWizard, the welcome/settings
  * screens, the in-chat command gating, the agentic pipeline, and
@@ -18,6 +18,7 @@
 
 import { ConfigService } from '../services/config/ConfigService.js';
 import type { LLMProviderName } from '../types/llm.js';
+import { LLM_PROVIDER_NAMES } from './llmCatalog.js';
 
 export type AppMode = 'local' | 'hybrid' | 'remote';
 
@@ -41,7 +42,7 @@ export const APP_MODES: AppModeInfo[] = [
   {
     id: 'local',
     label: 'Local only',
-    summary: 'Local LLM (Ollama) + local preview only',
+    summary: 'Local LLM (Ollama or LM Studio) + local preview only',
     detail: 'Nothing leaves your machine. No cloud LLM, no GitHub, no Vercel.',
   },
   {
@@ -53,7 +54,7 @@ export const APP_MODES: AppModeInfo[] = [
   {
     id: 'remote',
     label: 'All remote',
-    summary: 'Cloud LLM + GitHub + live Vercel web app',
+    summary: 'Any LLM + GitHub + live Vercel web app',
     detail: 'Full pipeline: LLM generation, GitHub push, and a deployed dashboard URL.',
   },
 ];
@@ -92,11 +93,17 @@ export function modeAllowsDeploy(mode: AppMode): boolean {
   return mode === 'remote';
 }
 
-const ALL_PROVIDERS: LLMProviderName[] = ['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama'];
+const ALL_PROVIDERS: LLMProviderName[] = [...LLM_PROVIDER_NAMES];
+const LOCAL_PROVIDERS: LLMProviderName[] = ['ollama', 'lmstudio'];
+const CLOUD_PROVIDERS = ALL_PROVIDERS.filter(
+  (provider) => !LOCAL_PROVIDERS.includes(provider),
+);
 
 /** LLM providers selectable in the given mode. */
 export function allowedProvidersForMode(mode: AppMode): LLMProviderName[] {
-  return modeAllowsCloudLLM(mode) ? ALL_PROVIDERS : ['ollama'];
+  if (mode === 'local') return LOCAL_PROVIDERS;
+  if (mode === 'hybrid') return CLOUD_PROVIDERS;
+  return ALL_PROVIDERS;
 }
 
 export function providerAllowedInMode(provider: string, mode: AppMode): boolean {

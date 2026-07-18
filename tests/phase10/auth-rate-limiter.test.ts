@@ -49,7 +49,7 @@ function uniqueIp(): string {
 describe('dashboard auth rate limiter', () => {
   beforeEach(() => {
     process.env.DASHBOARD_USERNAME = 'admin';
-    process.env.DASHBOARD_PASSWORD_HASH = bcrypt.hashSync('correct-password', 4);
+    process.env.DASHBOARD_PASSWORD_HASH_B64 = Buffer.from(bcrypt.hashSync('correct-password', 4)).toString('base64');
     process.env.JWT_SECRET = 'test-jwt-secret';
   });
 
@@ -57,6 +57,7 @@ describe('dashboard auth rate limiter', () => {
     vi.useRealTimers();
     delete process.env.DASHBOARD_USERNAME;
     delete process.env.DASHBOARD_PASSWORD_HASH;
+    delete process.env.DASHBOARD_PASSWORD_HASH_B64;
     delete process.env.JWT_SECRET;
   });
 

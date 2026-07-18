@@ -41,10 +41,11 @@ const cli = meow(`
     --type              Dashboard type: health, finance, grocery, travel, food,
                         shopping, subscriptions, utilities, invoices, custom
     --prompt            User prompt for initial generation or dashboard update
-    --mode              App mode (agent setup): local (Ollama + local preview),
+    --mode              App mode (agent setup): local (Ollama/LM Studio + local preview),
                         hybrid (cloud LLM + local preview), remote (cloud LLM +
                         GitHub + live Vercel web app)
     --effort            LLM execution effort: low, medium, high, max (agent setup)
+    --base-url          LM Studio API URL (default http://127.0.0.1:1234/v1)
     --json              Emit machine-readable JSON (NDJSON progress on stderr)
     --dry-run           Parse + analyze and return the plan; no LLM call, no deploy
     --idempotency-key   Reuse the result of a prior succeeded create with this key
@@ -121,6 +122,9 @@ const cli = meow(`
       type: 'string',
     },
     ollamaHost: {
+      type: 'string',
+    },
+    baseUrl: {
       type: 'string',
     },
     githubToken: {
@@ -401,6 +405,7 @@ if (!command || command === 'start') {
       effort: cli.flags.effort,
       apiKey,
       ollamaHost: cli.flags.ollamaHost,
+      baseUrl: cli.flags.baseUrl,
       codexAccessToken,
       onProgress: setupProgress,
     };

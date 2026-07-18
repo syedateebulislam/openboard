@@ -21,6 +21,7 @@ import {
   openaiReasoningEffort,
   anthropicThinkingBudget,
   codexReasoningEffort,
+  normalizeCodexSubscriptionModel,
   MODEL_CHOICES,
   DEFAULT_MODELS,
 } from '../../src/config/llmCatalog.js';
@@ -115,10 +116,16 @@ describe('llmCatalog effort mapping', () => {
     expect(codexReasoningEffort(undefined)).toBeUndefined();
   });
 
+  it('migrates the unsupported bare GPT-5.6 Codex alias', () => {
+    expect(normalizeCodexSubscriptionModel('gpt-5.6')).toBe('gpt-5.6-terra');
+    expect(normalizeCodexSubscriptionModel('gpt-5.6-sol')).toBe('gpt-5.6-sol');
+  });
+
   it('has model choices and a default model for every provider', () => {
     for (const provider of Object.keys(DEFAULT_MODELS) as Array<keyof typeof DEFAULT_MODELS>) {
-      expect(MODEL_CHOICES[provider].length).toBeGreaterThan(0);
+      expect(MODEL_CHOICES[provider].length).toBeGreaterThanOrEqual(8);
       expect(DEFAULT_MODELS[provider]).toBeTruthy();
+      expect(MODEL_CHOICES[provider].some((choice) => choice.value === DEFAULT_MODELS[provider])).toBe(true);
     }
   });
 });

@@ -25,12 +25,13 @@ describe('Master Overview tab contract', () => {
     expect(MASTER_DASHBOARD_PROMPT).toMatch(/Weekly \/ Monthly \/ Quarterly/);
   });
 
-  it('protects the master tab, HeaderLinks, and welcome lifecycle in the system prompt', () => {
-    expect(SYSTEM_PROMPT).toContain("{ id: 'master', label: 'Overview' }");
+  it('protects product-owned composition and the master component in the system prompt', () => {
+    expect(SYSTEM_PROMPT).toContain('NEVER return or edit App.tsx');
+    expect(SYSTEM_PROMPT).toContain('generated/dashboardManifest.tsx');
     expect(SYSTEM_PROMPT).toContain('MasterDashboard');
     expect(SYSTEM_PROMPT).toContain('src/hooks/useAllDashboardsData.ts');
     expect(SYSTEM_PROMPT).toContain('src/components/HeaderLinks.tsx');
-    expect(SYSTEM_PROMPT).toMatch(/WELCOME TAB/);
+    expect(SYSTEM_PROMPT).toContain('registers the primary component as a tab automatically');
     expect(SYSTEM_PROMPT).toMatch(/never write src\/App\.css or src\/index\.css/i);
   });
 
@@ -78,12 +79,14 @@ describe('Shell file ownership + sync', () => {
     await expect(ts.writeGeneratedFile(projectDir, 'components/generated.css', '.x {}')).resolves.toBeUndefined();
   });
 
-  it('re-copies shell files into an existing project without touching LLM-owned files', async () => {
-    // Simulate an existing project with a customized (LLM-owned) App.tsx and a
-    // stale shell App.css.
+  it('re-copies the product-owned shell while preserving generated components', async () => {
+    // Simulate an existing project with stale product-owned App files and a
+    // generated dashboard component.
     mkdirSync(join(projectDir, 'src'), { recursive: true });
+    mkdirSync(join(projectDir, 'src', 'components'), { recursive: true });
     writeFileSync(join(projectDir, 'src', 'App.tsx'), '// custom generated app', 'utf-8');
     writeFileSync(join(projectDir, 'src', 'App.css'), '/* stale */', 'utf-8');
+    writeFileSync(join(projectDir, 'src', 'components', 'SalesDashboard.tsx'), '// generated dashboard', 'utf-8');
 
     const synced = await ts.syncShellFiles(projectDir);
 
@@ -91,12 +94,13 @@ describe('Shell file ownership + sync', () => {
     expect(synced).toContain('src/components/HeaderLinks.tsx');
     expect(synced).toContain('src/hooks/useAllDashboardsData.ts');
     expect(synced).toContain('api/dashboard-data.ts');
-    expect(synced).not.toContain('src/App.tsx');
+    expect(synced).toContain('src/App.tsx');
     expect(synced).not.toContain('package.json');
 
-    // Shell CSS refreshed from the template; LLM-owned App.tsx untouched.
+    // Product shell refreshed from the template; dashboard-owned code untouched.
     expect(readFileSync(join(projectDir, 'src', 'App.css'), 'utf-8')).not.toBe('/* stale */');
-    expect(readFileSync(join(projectDir, 'src', 'App.tsx'), 'utf-8')).toBe('// custom generated app');
+    expect(readFileSync(join(projectDir, 'src', 'App.tsx'), 'utf-8')).toContain('dashboardManifest');
+    expect(readFileSync(join(projectDir, 'src', 'components', 'SalesDashboard.tsx'), 'utf-8')).toBe('// generated dashboard');
     expect(existsSync(join(projectDir, 'package.json'))).toBe(false);
   });
 });

@@ -3,7 +3,7 @@
  *
  * The mode is the first choice in every setup surface so the user knows from
  * the beginning what the end result is:
- *   1. local  — local LLM (Ollama) + local preview only
+ *   1. local  — local LLM (Ollama/LM Studio) + local preview only
  *   2. hybrid — cloud LLM + local preview only
  *   3. remote — cloud LLM + GitHub + live Vercel web app
  */
@@ -67,9 +67,10 @@ describe('app mode model', () => {
   it('local mode allows neither cloud LLMs nor deploys', () => {
     expect(modeAllowsCloudLLM('local')).toBe(false);
     expect(modeAllowsDeploy('local')).toBe(false);
-    expect(allowedProvidersForMode('local')).toEqual(['ollama']);
+    expect(allowedProvidersForMode('local')).toEqual(['ollama', 'lmstudio']);
     expect(providerAllowedInMode('openai', 'local')).toBe(false);
     expect(providerAllowedInMode('ollama', 'local')).toBe(true);
+    expect(providerAllowedInMode('lmstudio', 'local')).toBe(true);
   });
 
   it('hybrid mode allows cloud LLMs but not deploys', () => {
@@ -77,12 +78,16 @@ describe('app mode model', () => {
     expect(modeAllowsDeploy('hybrid')).toBe(false);
     expect(providerAllowedInMode('openai-codex', 'hybrid')).toBe(true);
     expect(providerAllowedInMode('anthropic', 'hybrid')).toBe(true);
+    expect(providerAllowedInMode('ollama', 'hybrid')).toBe(false);
+    expect(providerAllowedInMode('lmstudio', 'hybrid')).toBe(false);
   });
 
   it('remote mode allows the full pipeline', () => {
     expect(modeAllowsCloudLLM('remote')).toBe(true);
     expect(modeAllowsDeploy('remote')).toBe(true);
     expect(allowedProvidersForMode('remote')).toContain('ollama');
+    expect(allowedProvidersForMode('remote')).toContain('lmstudio');
+    expect(allowedProvidersForMode('remote')).toContain('openai');
   });
 
   it('blockedDeployMessage explains the mode and points at /preview + Settings', () => {

@@ -20,8 +20,12 @@ import type {
   LLMValidationResult,
   LLMMessage,
 } from '../../types/llm.js';
-import { codexReasoningEffort } from '../../config/llmCatalog.js';
-import { crossSpawn, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
+import {
+  MODEL_CHOICES,
+  codexReasoningEffort,
+  normalizeCodexSubscriptionModel,
+} from '../../config/llmCatalog.js';
+import { crossSpawn, killProcess, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 type ProgressCallback = (line: string) => void;
@@ -71,25 +75,6 @@ function messagesToPrompt(messages: LLMMessage[]): string {
     .join('\n\n');
 }
 
-// Kill the spawned process AND its children. codex spawns a model runtime
-// subprocess; a bare proc.kill() leaves it orphaned (especially on Windows).
-function killProcessTree(pid: number | undefined): void {
-  if (!pid) return;
-  if (process.platform === 'win32') {
-    try {
-      spawn('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
-    } catch {
-      /* best effort */
-    }
-  } else {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      /* best effort */
-    }
-  }
-}
-
 function runWithStdin(
   cmd: string,
   args: string[],
@@ -97,67 +82,19 @@ function runWithStdin(
   timeoutMs: number,
   onProgress?: ProgressCallback,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve, reject) => {
-    const invocation = resolveSpawnInvocation(cmd, args);
-    const proc = spawn(invocation.command, invocation.args, {
-      cwd: process.cwd(),
-      shell: invocation.useShell,
-      env: codexEnv(),
-    });
-
-    let stdout = '';
-    let stderr = '';
-    const start = Date.now();
-
-    // Heartbeat so non-interactive callers (and agent runners that poll for
-    // output) can see the generation is alive even while codex is silent.
-    const heartbeat = onProgress
-      ? setInterval(() => {
-          const elapsed = Math.round((Date.now() - start) / 1000);
-          onProgress(`  codex still generating… ${elapsed}s elapsed`);
-        }, 12_000)
-      : undefined;
-    const stopHeartbeat = () => {
-      if (heartbeat) clearInterval(heartbeat);
-    };
-
-    const timer = setTimeout(() => {
-      stopHeartbeat();
-      killProcessTree(proc.pid);
-      proc.kill();
-      reject(new Error(`Command "${cmd}" timed out after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-
-    // codex writes status/progress to stderr; surface trimmed lines as liveness.
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      if (onProgress) {
-        for (const line of text.split('\n')) {
-          const trimmed = line.trim();
-          if (trimmed) onProgress(`  codex: ${trimmed.slice(0, 180)}`);
-        }
-      }
-    });
-
-    proc.on('error', (err) => {
-      stopHeartbeat();
-      clearTimeout(timer);
-      reject(err);
-    });
-
-    proc.on('close', (code) => {
-      stopHeartbeat();
-      clearTimeout(timer);
-      resolve({ stdout, stderr, code: code ?? 1 });
-    });
-
-    proc.stdin?.write(stdin);
-    proc.stdin?.end();
+  const start = Date.now();
+  const heartbeat = onProgress ? setInterval(() => {
+    const elapsed = Math.round((Date.now() - start) / 1000);
+    onProgress(`  codex still generating… ${elapsed}s elapsed`);
+  }, 12_000) : undefined;
+  return crossSpawn(cmd, args, {
+    cwd: process.cwd(),
+    timeoutMs,
+    env: { CODEX_HOME: codexHome() },
+    stdin,
+    onProgress: onProgress ? (line) => onProgress(`  codex: ${line.slice(0, 180)}`) : undefined,
+  }).finally(() => {
+    if (heartbeat) clearInterval(heartbeat);
   });
 }
 
@@ -199,8 +136,7 @@ function runCodexLoginCommand(
       settled = true;
       clearTimeout(hardTimer);
       if (graceTimer) clearTimeout(graceTimer);
-      killProcessTree(proc.pid);
-      proc.kill();
+      killProcess(proc);
       resolve(result);
     };
 
@@ -253,7 +189,7 @@ export class OpenAICodexProvider implements LLMProvider {
   private effort?: LLMEffort;
 
   constructor(model: string, effort?: LLMEffort) {
-    this.model = model;
+    this.model = normalizeCodexSubscriptionModel(model);
     this.effort = effort;
   }
 
@@ -333,12 +269,7 @@ export class OpenAICodexProvider implements LLMProvider {
   }
 
   async listModels(): Promise<string[]> {
-    return [
-      'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex',
-    ];
+    return MODEL_CHOICES['openai-codex'].map((choice) => choice.value);
   }
 
   async complete(options: LLMCompletionOptions): Promise<string> {

@@ -53,6 +53,6 @@ describe('ManageBoardsScreen cleanup helpers', () => {
 
     await expect(
       removeDashboardFromGeneratedApp(makeBoard(), [], tempDir),
-    ).rejects.toThrow(/No LLM provider is configured/);
+    ).rejects.toThrow(/No LLM provider (?:is )?configured/);
   });
 });

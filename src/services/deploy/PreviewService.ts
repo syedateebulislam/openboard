@@ -1,6 +1,7 @@
 import { type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 import { crossSpawnLive, killProcess } from '../../utils/crossSpawn.js';
 import type { ProgressCallback } from '../build/BuildService.js';
 
@@ -12,8 +13,32 @@ export interface PreviewResult {
   process?: ChildProcess;
 }
 
-// Global registry to track running dev servers
-const runningServers = new Map<string, ChildProcess>();
+interface RunningPreview {
+  process: ChildProcess;
+  port: number;
+  url: string;
+}
+
+// Global registry to track running dev servers and their actual bound ports.
+const runningServers = new Map<string, RunningPreview>();
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', () => resolve(false));
+    server.listen({ host: '127.0.0.1', port }, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function findAvailablePort(preferred: number): Promise<number> {
+  for (let port = preferred; port < preferred + 20; port++) {
+    if (await isPortAvailable(port)) return port;
+  }
+  throw new Error(`No available preview port found between ${preferred} and ${preferred + 19}`);
+}
 
 export class PreviewService {
   static async start(
@@ -23,14 +48,16 @@ export class PreviewService {
   ): Promise<PreviewResult> {
     try {
       // Check if already running
-      if (runningServers.has(projectDir)) {
+      const existing = runningServers.get(projectDir);
+      if (existing && !existing.process.killed && existing.process.exitCode === null) {
         return {
           success: true,
-          url: `http://localhost:${port}`,
-          port,
-          process: runningServers.get(projectDir),
+          url: existing.url,
+          port: existing.port,
+          process: existing.process,
         };
       }
+      if (existing) runningServers.delete(projectDir);
 
       // Check if package.json exists
       const packageJsonPath = join(projectDir, 'package.json');
@@ -41,24 +68,51 @@ export class PreviewService {
         };
       }
 
-      // Start dev server using crossSpawnLive (handles platform differences)
-      const proc = crossSpawnLive('npm', ['run', 'dev'], {
+      const selectedPort = await findAvailablePort(port);
+      const url = `http://127.0.0.1:${selectedPort}`;
+
+      // Pass the port directly to Vite. Vite does not read the generic PORT
+      // environment variable, which previously made OpenBoard report a URL
+      // different from the port Vite actually selected.
+      const proc = crossSpawnLive('npm', [
+        'run',
+        'dev',
+        '--',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(selectedPort),
+        '--strictPort',
+      ], {
         cwd: projectDir,
-        env: { PORT: port.toString() },
         detached: false,
       });
 
       // Track the process
-      runningServers.set(projectDir, proc);
+      runningServers.set(projectDir, { process: proc, port: selectedPort, url });
 
       let output = '';
       let hasStarted = false;
 
-      return new Promise((resolve, reject) => {
+      return await new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (result: PreviewResult) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(result);
+        };
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          runningServers.delete(projectDir);
+          reject(error);
+        };
         const timeout = setTimeout(() => {
           if (!hasStarted) {
             PreviewService.stop(projectDir);
-            reject(new Error('Dev server failed to start within 30 seconds'));
+            fail(new Error(`Dev server failed to start within 30 seconds. Output: ${output.slice(-4000)}`));
           }
         }, 30_000);
 
@@ -72,18 +126,13 @@ export class PreviewService {
           }
 
           // Check for common dev server start patterns
-          if (
-            text.includes('Local:') ||
-            text.includes('localhost') ||
-            text.includes('ready in') ||
-            text.includes('server running')
-          ) {
+          const normalized = output.replace(/\u001b\[[0-9;]*m/g, '');
+          if (/Local:\s+https?:\/\/(?:localhost|127\.0\.0\.1):\d+/i.test(normalized) || /ready in/i.test(normalized)) {
             hasStarted = true;
-            clearTimeout(timeout);
-            resolve({
+            finish({
               success: true,
-              url: `http://localhost:${port}`,
-              port,
+              url,
+              port: selectedPort,
               process: proc,
             });
           }
@@ -100,16 +149,13 @@ export class PreviewService {
         });
 
         proc.on('error', (err) => {
-          clearTimeout(timeout);
-          runningServers.delete(projectDir);
-          reject(err);
+          fail(err);
         });
 
         proc.on('close', (code) => {
           runningServers.delete(projectDir);
           if (!hasStarted && code !== 0) {
-            clearTimeout(timeout);
-            reject(new Error(`Dev server exited with code ${code}: ${output}`));
+            fail(new Error(`Dev server exited with code ${code}: ${output.slice(-4000)}`));
           }
         });
       });
@@ -119,10 +165,10 @@ export class PreviewService {
   }
 
   static stop(projectDir: string): boolean {
-    const proc = runningServers.get(projectDir);
-    if (proc) {
+    const running = runningServers.get(projectDir);
+    if (running) {
       try {
-        killProcess(proc);
+        killProcess(running.process);
         runningServers.delete(projectDir);
         return true;
       } catch {
@@ -133,11 +179,11 @@ export class PreviewService {
   }
 
   static isRunning(projectDir: string): boolean {
-    const proc = runningServers.get(projectDir);
-    if (!proc) return false;
+    const running = runningServers.get(projectDir);
+    if (!running) return false;
 
     try {
-      return !proc.killed && proc.exitCode === null;
+      return !running.process.killed && running.process.exitCode === null;
     } catch {
       return false;
     }

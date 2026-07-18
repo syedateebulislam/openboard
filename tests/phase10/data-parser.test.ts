@@ -65,6 +65,14 @@ describe('DataParserService CSV/JSON regression', () => {
       await expect(DataParserService.parse(join(dir, 'missing.csv')))
         .rejects.toThrow(/File not found/);
     });
+
+    it('reports stream metrics and enforces the materialized row limit', async () => {
+      const path = writeFixture('limited.csv', 'id\n1\n2\n3\n');
+      const parsed = await DataParserService.parse(path);
+      expect(parsed.sourceBytes).toBeGreaterThan(0);
+      expect(parsed.parseDurationMs).toBeGreaterThanOrEqual(0);
+      await expect(DataParserService.parse(path, { maxRows: 2 })).rejects.toThrow(/Row limit exceeded/);
+    });
   });
 
   describe('JSON', () => {

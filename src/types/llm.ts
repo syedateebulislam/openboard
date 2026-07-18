@@ -2,7 +2,17 @@
  * LLM (Large Language Model) type definitions for OpenBoard.
  */
 
-export type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
+export type LLMProviderName =
+  | 'openai'
+  | 'openai-codex'
+  | 'anthropic'
+  | 'gemini'
+  | 'moonshot'
+  | 'xai'
+  | 'mistral'
+  | 'openrouter'
+  | 'lmstudio'
+  | 'ollama';
 
 /**
  * Execution-effort level for generation. Maps to provider reasoning knobs

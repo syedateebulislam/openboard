@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { crossSpawn, resolveSpawnInvocation } from '../../utils/crossSpawn.js';
+import { crossSpawn } from '../../utils/crossSpawn.js';
 import { ConfigService } from '../config/ConfigService.js';
 import type { ProgressCallback } from '../build/BuildService.js';
 
@@ -21,6 +21,17 @@ interface VercelProjectApiResponse {
     scope?: string;
     teamId?: string | null;
   };
+}
+
+interface VercelEnvironmentApiResponse extends VercelProjectApiResponse {
+  failed?: Array<{ error?: { message?: string; key?: string } }>;
+}
+
+interface VercelEnvironmentRecord {
+  id?: string;
+  key?: string;
+  value?: string;
+  target?: string | string[];
 }
 
 function runVercelCommand(
@@ -143,6 +154,125 @@ async function requestVercelProject(
   return { status: response.status, body };
 }
 
+function getLinkedProjectId(projectDir: string): string | undefined {
+  try {
+    const linked = JSON.parse(readFileSync(join(projectDir, '.vercel', 'project.json'), 'utf-8')) as { projectId?: unknown };
+    return typeof linked.projectId === 'string' && linked.projectId ? linked.projectId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getLinkedOrgId(projectDir: string): string | undefined {
+  try {
+    const linked = JSON.parse(readFileSync(join(projectDir, '.vercel', 'project.json'), 'utf-8')) as { orgId?: unknown };
+    return typeof linked.orgId === 'string' && linked.orgId ? linked.orgId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function upsertProjectEnvironment(
+  projectDir: string,
+  envVars: Record<string, string>,
+): Promise<{ handled: boolean; success: boolean; error?: string }> {
+  const token = getSavedVercelToken();
+  const projectId = getLinkedProjectId(projectDir);
+  if (!token || !projectId) return { handled: false, success: false };
+
+  const url = new URL(`/v10/projects/${encodeURIComponent(projectId)}/env`, 'https://api.vercel.com');
+  url.searchParams.set('upsert', 'true');
+  const teamId = getVercelTeamId() ?? getLinkedOrgId(projectDir);
+  if (teamId) url.searchParams.set('teamId', teamId);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    // Vercel can hold separate records for the same key in each target.
+    // Upsert those records individually; a single record with a target array
+    // does not reliably replace projects created by the older CLI flow.
+    body: JSON.stringify(Object.entries(envVars).flatMap(([key, value]) =>
+      ['production', 'preview', 'development'].map((target) => ({
+        key,
+        value,
+        type: 'encrypted',
+        target: [target],
+        comment: 'Managed by OpenBoard dashboard authentication',
+      })))),
+  });
+  const text = await response.text();
+  let body: VercelEnvironmentApiResponse = {};
+  try { body = text ? JSON.parse(text) as VercelEnvironmentApiResponse : {}; } catch { /* reported below */ }
+  const failures = body.failed?.map((item) => item.error?.message).filter(Boolean) ?? [];
+  if (!response.ok || failures.length > 0) {
+    return {
+      handled: true,
+      success: false,
+      error: failures.join('; ') || body.error?.message || text.slice(0, 300) || `HTTP ${response.status}`,
+    };
+  }
+
+
+  // A successful write response is not enough: credential drift locks users
+  // out. List records, then use Vercel's per-variable decrypted-value endpoint
+  // (the old `decrypt=true` list flag is deprecated and may return ciphertext).
+  const verifyUrl = new URL(`/v10/projects/${encodeURIComponent(projectId)}/env`, 'https://api.vercel.com');
+  if (teamId) verifyUrl.searchParams.set('teamId', teamId);
+  const verifyResponse = await fetch(verifyUrl, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const verifyText = await verifyResponse.text();
+  let verifyBody: unknown = [];
+  try { verifyBody = verifyText ? JSON.parse(verifyText) as unknown : []; } catch { /* reported below */ }
+  const records = (Array.isArray(verifyBody)
+    ? verifyBody
+    : verifyBody && typeof verifyBody === 'object' && 'envs' in verifyBody && Array.isArray((verifyBody as { envs: unknown }).envs)
+      ? (verifyBody as { envs: unknown[] }).envs
+      : []) as VercelEnvironmentRecord[];
+  const targets = ['production', 'preview', 'development'];
+  const expectedRecords = Object.entries(envVars).flatMap(([key, value]) => targets.map((target) => {
+    const record = records.find((candidate) => {
+      const recordTargets = Array.isArray(candidate.target) ? candidate.target : [candidate.target];
+      return candidate.key === key && recordTargets.includes(target);
+    });
+    return { key, value, target, id: record?.id };
+  }));
+  const missingIds = expectedRecords.filter((record) => !record.id);
+  if (!verifyResponse.ok || missingIds.length > 0) {
+    return {
+      handled: true,
+      success: false,
+      error: !verifyResponse.ok
+        ? `Vercel credential verification returned HTTP ${verifyResponse.status}`
+        : `Vercel did not create ${missingIds.length} credential target(s)`,
+    };
+  }
+
+  const verified = await Promise.all(expectedRecords.map(async (expected) => {
+    const valueUrl = new URL(
+      `/v1/projects/${encodeURIComponent(projectId)}/env/${encodeURIComponent(expected.id!)}`,
+      'https://api.vercel.com',
+    );
+    if (teamId) valueUrl.searchParams.set('teamId', teamId);
+    const valueResponse = await fetch(valueUrl, { headers: { authorization: `Bearer ${token}` } });
+    const valueText = await valueResponse.text();
+    let record: VercelEnvironmentRecord = {};
+    try { record = valueText ? JSON.parse(valueText) as VercelEnvironmentRecord : {}; } catch { /* mismatch below */ }
+    return valueResponse.ok && record.key === expected.key && record.value === expected.value;
+  }));
+  const mismatches = verified.filter((matches) => !matches).length;
+  if (mismatches > 0) {
+    return {
+      handled: true,
+      success: false,
+      error: `Vercel did not persist ${mismatches} credential target(s) exactly`,
+    };
+  }
+  return { handled: true, success: true };
+}
+
 function writeLocalVercelProject(projectDir: string, project: VercelProjectApiResponse): VercelResult {
   if (!project.id || !project.accountId) {
     return {
@@ -259,17 +389,6 @@ function extractVercelUrl(output: string): string | undefined {
   return urlMatch ? urlMatch[0].replace(/[)\],.]+$/, '') : undefined;
 }
 
-function getVercelProcessEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  const token = getSavedVercelToken();
-  if (token) {
-    env.VERCEL_TOKEN = token;
-  } else if (hasUnreadableEncryptedVercelToken()) {
-    delete env.VERCEL_TOKEN;
-  }
-  return env;
-}
-
 function serializeEnvValue(value: string): string {
   if (/^[A-Za-z0-9_./:@+$-]+$/.test(value)) {
     return value;
@@ -282,6 +401,16 @@ function serializeEnvValue(value: string): string {
 }
 
 export class VercelService {
+  static credentialEnvVars(credentials: { username: string; passwordHash: string; jwtSecret: string }): Record<string, string> {
+    return {
+      DASHBOARD_USERNAME: credentials.username,
+      // bcrypt hashes contain '$', which can be altered by dotenv/shell expansion.
+      // Base64 keeps the exact hash stable across local preview and redeploys.
+      DASHBOARD_PASSWORD_HASH_B64: Buffer.from(credentials.passwordHash, 'utf-8').toString('base64'),
+      JWT_SECRET: credentials.jwtSecret,
+    };
+  }
+
   static async validateTokenForProjectAccess(token: string): Promise<VercelResult> {
     const normalized = normalizeVercelToken(token);
     if (!normalized) {
@@ -334,6 +463,13 @@ export class VercelService {
   }
 
   static async checkAuthenticated(projectDir: string, onProgress?: ProgressCallback): Promise<VercelResult> {
+    const token = getSavedVercelToken();
+    if (token) {
+      // Token-based installs deploy through API/CLI env auth and do not need a
+      // separate global CLI login. Requiring `vercel whoami` here caused valid
+      // API tokens to be rejected before credential injection.
+      return VercelService.validateTokenForProjectAccess(token);
+    }
     try {
       warnUnreadableToken(onProgress);
       const { code, stderr, stdout } = await runVercelCommand(['whoami'], projectDir, 30_000);
@@ -508,8 +644,6 @@ export class VercelService {
     environments: string[] = ['production', 'preview', 'development'],
     onProgress?: ProgressCallback,
   ): Promise<boolean> {
-    const { spawn } = await import('node:child_process');
-
     for (const env of environments) {
       // Remove existing value first (ignore errors if it doesn't exist)
       await crossSpawn('vercel', ['env', 'rm', key, env, '--yes'], {
@@ -519,22 +653,13 @@ export class VercelService {
       }).catch(() => {});
 
       // Add new value via stdin
-      const ok = await new Promise<boolean>((resolve) => {
-        const invocation = resolveSpawnInvocation('vercel', ['env', 'add', key, env]);
-        const proc = spawn(invocation.command, invocation.args, {
-          cwd: projectDir,
-          shell: invocation.useShell,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: getVercelProcessEnv(),
-        });
-
-        let stderr = '';
-        proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-        proc.on('close', (code) => resolve(code === 0));
-        proc.on('error', () => resolve(false));
-        proc.stdin?.write(value);
-        proc.stdin?.end();
-      });
+      const addResult = await crossSpawn('vercel', ['env', 'add', key, env], {
+        cwd: projectDir,
+        timeoutMs: 30_000,
+        env: getVercelEnv(),
+        stdin: value,
+      }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
+      const ok = addResult.code === 0;
 
       if (!ok) {
         onProgress?.(`Failed to set ${key} for ${env}`);
@@ -555,11 +680,8 @@ export class VercelService {
     onProgress?.('Setting dashboard credentials...');
 
     // Write .env for local use
-    VercelService.writeEnvFile(projectDir, {
-      DASHBOARD_USERNAME: credentials.username,
-      DASHBOARD_PASSWORD_HASH: credentials.passwordHash,
-      JWT_SECRET: credentials.jwtSecret,
-    });
+    const credentialEnv = VercelService.credentialEnvVars(credentials);
+    VercelService.writeEnvFile(projectDir, credentialEnv);
 
     // Also set on Vercel project if it's linked
     if (existsSync(join(projectDir, '.vercel'))) {
@@ -570,11 +692,23 @@ export class VercelService {
         return false;
       }
 
-      const envVars: [string, string][] = [
-        ['DASHBOARD_USERNAME', credentials.username],
-        ['DASHBOARD_PASSWORD_HASH', credentials.passwordHash],
-        ['JWT_SECRET', credentials.jwtSecret],
-      ];
+      // Token-authenticated installs use Vercel's atomic upsert API. This
+      // avoids delete/add gaps and preserves values exactly (notably bcrypt).
+      const apiResult = await upsertProjectEnvironment(projectDir, credentialEnv).catch((error) => ({
+        handled: true,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      if (apiResult.handled) {
+        if (apiResult.success) {
+          onProgress?.('Credentials set on Vercel');
+          return true;
+        }
+        onProgress?.(`Could not update Vercel credentials: ${apiResult.error}`);
+        return false;
+      }
+
+      const envVars = Object.entries(credentialEnv);
 
       let allSet = true;
       for (const [key, value] of envVars) {

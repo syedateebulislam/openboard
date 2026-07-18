@@ -33,6 +33,7 @@ const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
 // LLM-generated styles belong in components/*.css (e.g. components/generated.css).
 const GENERATED_FILE_ALLOWLIST = [
   /^App\.tsx$/,
+  /^generated\/[\w.-]+(?:\/[\w.-]+)*\.(?:tsx|ts)$/,
   /^components\/[\w.-]+(?:\/[\w.-]+)*\.(?:tsx|ts|css)$/,
   /^types\/[\w.-]+(?:\/[\w.-]+)*\.ts$/,
   /^hooks\/[\w.-]+(?:\/[\w.-]+)*\.(?:ts|tsx)$/,
@@ -42,9 +43,10 @@ const GENERATED_FILE_ALLOWLIST = [
 
 // Shell-owned files re-copied from the template into every project before each
 // deploy, so template fixes reach existing projects. LLM-owned files are
-// deliberately absent: src/App.tsx, generated components/hooks, api/_data/**,
+// deliberately absent: generated components/hooks, api/_data/**,
 // package.json (dependency drift must be an explicit migration), index.html.
 const SHELL_SYNC_FILES = [
+  'src/App.tsx',
   'src/App.css',
   'src/index.css',
   'src/main.tsx',
@@ -66,6 +68,7 @@ const SHELL_SYNC_FILES = [
   'eslint.config.js',
   'tailwind.config.js',
   'vite.config.ts',
+  'vite.local-api.ts',
   'tsconfig.json',
   'tsconfig.app.json',
   'tsconfig.node.json',

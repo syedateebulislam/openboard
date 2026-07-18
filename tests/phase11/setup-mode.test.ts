@@ -1,7 +1,7 @@
 /**
  * Phase 11 — headless mode setup (`openboard agent setup mode`).
  *
- * The mode gates every later setup part: local restricts the LLM to Ollama,
+ * The mode gates every later setup part: local restricts the LLM to Ollama or LM Studio,
  * and local/hybrid refuse GitHub/Vercel tokens (they are never used).
  */
 
@@ -70,7 +70,7 @@ describe('SetupService modes', () => {
   });
 
   describe('mode gating of setup parts', () => {
-    it('local mode restricts the LLM to Ollama', async () => {
+    it('local mode restricts the LLM to Ollama or LM Studio', async () => {
       const { setup } = newService();
       setup.configureMode('local');
 
@@ -80,6 +80,12 @@ describe('SetupService modes', () => {
 
       const ollama = await setup.configureLLM({ provider: 'ollama' });
       expect(ollama.configured).toBe(true);
+
+      const lmstudio = await setup.configureLLM({
+        provider: 'lmstudio',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+      });
+      expect(lmstudio.configured).toBe(true);
     });
 
     it('hybrid mode allows cloud LLMs but refuses GitHub/Vercel tokens', async () => {
@@ -87,6 +93,8 @@ describe('SetupService modes', () => {
       setup.configureMode('hybrid');
 
       expect((await setup.configureLLM({ provider: 'anthropic', apiKey: 'sk-ant' })).configured).toBe(true);
+      expect((await setup.configureLLM({ provider: 'ollama' })).configured).toBe(false);
+      expect((await setup.configureLLM({ provider: 'lmstudio' })).configured).toBe(false);
 
       const github = await setup.configureGitHub('ghp_token');
       expect(github.configured).toBe(false);

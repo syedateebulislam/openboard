@@ -1,15 +1,14 @@
 /**
  * PHASE 5: VercelService Tests
  *
- * Tests the CLI-based VercelService which uses `vercel` CLI via crossSpawn
- * and `node:child_process` spawn for stdin-piped commands (setEnvVar).
+ * Tests the CLI-based VercelService, including stdin-piped commands through
+ * the shared process runner.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { VercelService } from '../../src/services/deploy/VercelService.js';
 import { crossSpawn } from '../../src/utils/crossSpawn.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
-import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,19 +22,7 @@ vi.mock('../../src/utils/crossSpawn.js', () => ({
   IS_LINUX: true,
 }));
 
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({
-    stderr: { on: vi.fn() },
-    stdout: { on: vi.fn() },
-    stdin: { write: vi.fn(), end: vi.fn() },
-    on: vi.fn((event: string, cb: (code?: number) => void) => {
-      if (event === 'close') setImmediate(() => cb(0));
-    }),
-  })),
-}));
-
 const mockCrossSpawn = vi.mocked(crossSpawn);
-const mockSpawn = vi.mocked(spawn);
 let testConfigDir: string | undefined;
 
 function mockSuccess(stdout = '', stderr = '') {
@@ -113,18 +100,19 @@ describe('VercelService', () => {
 
     it('should pass saved Vercel tokens via env auth only (never argv)', async () => {
       new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
-      mockCrossSpawn.mockResolvedValueOnce(mockSuccess('user@example.com'));
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{"projects":[]}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
 
       const result = await VercelService.checkAuthenticated('/test/project');
 
       expect(result.success).toBe(true);
-      expect(mockCrossSpawn).toHaveBeenCalledWith(
-        'vercel',
-        ['whoami'],
-        expect.objectContaining({
-          env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
-        }),
-      );
+      expect(mockCrossSpawn).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+        headers: expect.objectContaining({ authorization: 'Bearer vcp_test_token_123' }),
+      }));
     });
 
     it('should ignore malformed saved Vercel tokens instead of passing invalid CLI token values', async () => {
@@ -547,7 +535,7 @@ describe('VercelService', () => {
   // -------------------------------------------------------------------------
 
   describe('injectCredentials', () => {
-    it('should write .env file with all 3 credential keys', async () => {
+    it('should write .env with a base64-safe password hash', async () => {
       const dir = makeTempDir();
 
       const result = await VercelService.injectCredentials(dir, {
@@ -560,9 +548,52 @@ describe('VercelService', () => {
 
       const envContent = readFileSync(join(dir, '.env'), 'utf-8');
       expect(envContent).toContain('DASHBOARD_USERNAME=admin');
-      expect(envContent).toContain('DASHBOARD_PASSWORD_HASH=$2b$12$hash');
+      expect(envContent).toContain(`DASHBOARD_PASSWORD_HASH_B64="${Buffer.from('$2b$12$hash').toString('base64')}"`);
+      expect(envContent).not.toContain('DASHBOARD_PASSWORD_HASH=$2b$12$hash');
       expect(envContent).toContain('JWT_SECRET=secret123');
 
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('atomically upserts credentials through the Vercel API when token-linked', async () => {
+      const dir = makeTempDir();
+      mkdirSync(join(dir, '.vercel'), { recursive: true });
+      writeFileSync(join(dir, '.vercel', 'project.json'), JSON.stringify({ projectId: 'prj_123', orgId: 'team_123' }));
+      new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
+      const values = {
+        DASHBOARD_USERNAME: 'admin',
+        DASHBOARD_PASSWORD_HASH_B64: Buffer.from('$2b$12$hash').toString('base64'),
+        JWT_SECRET: 'secret123',
+      };
+      const remoteRecords = Object.entries(values).flatMap(([key]) =>
+        ['production', 'preview', 'development'].map((target) => ({ id: `env_${key}_${target}`, key, target: [target] })),
+      );
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{"projects":[]}', { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ created: [], failed: [] }), { status: 201 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(remoteRecords), { status: 200 }));
+      for (const [key, value] of Object.entries(values)) {
+        for (const target of ['production', 'preview', 'development']) {
+          fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: `env_${key}_${target}`, key, value, target: [target] }), { status: 200 }));
+        }
+      }
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await VercelService.injectCredentials(dir, {
+        username: 'admin', passwordHash: '$2b$12$hash', jwtSecret: 'secret123',
+      });
+
+      expect(result).toBe(true);
+      const [url, init] = fetchMock.mock.calls[2];
+      expect(String(url)).toContain('/v10/projects/prj_123/env');
+      expect(String(url)).toContain('upsert=true');
+      const body = JSON.parse(String(init.body));
+      expect(body).toHaveLength(9);
+      expect(body).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key: 'DASHBOARD_PASSWORD_HASH_B64', value: Buffer.from('$2b$12$hash').toString('base64') }),
+      ]));
+      expect(mockCrossSpawn).not.toHaveBeenCalled();
       rmSync(dir, { recursive: true, force: true });
     });
 
@@ -594,11 +625,13 @@ describe('VercelService', () => {
       expect(mockCrossSpawn.mock.calls[0][2]).toEqual(expect.objectContaining({
         env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
       }));
-      expect(mockSpawn).toHaveBeenCalledWith(
-        expect.stringMatching(/^vercel(\.cmd)?$/),
+      expect(mockCrossSpawn).toHaveBeenNthCalledWith(
+        2,
+        'vercel',
         ['env', 'add', 'DASHBOARD_USERNAME', 'production'],
         expect.objectContaining({
           env: expect.objectContaining({ VERCEL_TOKEN: 'vcp_test_token_123' }),
+          stdin: 'admin',
         }),
       );
 

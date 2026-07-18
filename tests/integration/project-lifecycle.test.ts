@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { ProjectManager } from '../../src/services/project/ProjectManager.js';
 import { PreviewService } from '../../src/services/deploy/PreviewService.js';
+import { ConfigService } from '../../src/services/config/ConfigService.js';
+import { AuthService } from '../../src/services/auth/AuthService.js';
 import type { BoardConfig } from '../../src/types/board.js';
 
 function makeTempDir(): string {
@@ -40,6 +42,8 @@ function makeBoard(overrides: Partial<BoardConfig> = {}): BoardConfig {
 }
 
 describe('ProjectManager full lifecycle (integration)', () => {
+  const previewUsername = 'integration-user';
+  const previewPassword = 'integration-password';
   let projectsRoot: string;
   let pm: ProjectManager;
   let projectDir: string;
@@ -47,8 +51,13 @@ describe('ProjectManager full lifecycle (integration)', () => {
   beforeAll(async () => {
     projectsRoot = makeTempDir();
     pm = new ProjectManager(projectsRoot);
-    delete process.env.OPENBOARD_CONFIG_DIR;
     process.env.OPENBOARD_ENCRYPTION_SECRET = 'lifecycle-integration-secret';
+    const config = new ConfigService();
+    config.clear();
+    const credentials = await AuthService.prepareCredentials(previewUsername, previewPassword);
+    config.set('credentials.username', credentials.username);
+    config.setEncrypted('credentials.passwordHash', credentials.passwordHash);
+    config.setEncrypted('credentials.jwtSecret', credentials.jwtSecret);
 
     const scaffoldResult = await pm.scaffold(makeBoard());
     expect(scaffoldResult.success, `scaffold failed: ${scaffoldResult.error}`).toBe(true);
@@ -94,8 +103,22 @@ describe('ProjectManager full lifecycle (integration)', () => {
   it.skipIf(process.env.CI)('starts and stops a local dev server', async () => {
     const previewResult = await pm.preview(projectDir);
     expect(previewResult.success, `preview failed: ${previewResult.error}`).toBe(true);
-    expect(previewResult.url).toMatch(/^http:\/\/localhost:\d+/);
+    expect(previewResult.url).toMatch(/^http:\/\/(?:127\.0\.0\.1|localhost):\d+/);
     expect(pm.isPreviewRunning(projectDir)).toBe(true);
+
+    const login = await fetch(`${previewResult.url}/api/auth`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: previewUsername, password: previewPassword }),
+    });
+    expect(login.status).toBe(200);
+    const authCookie = login.headers.get('set-cookie')?.split(';')[0];
+    expect(authCookie).toMatch(/^auth_token=/);
+    const protectedData = await fetch(`${previewResult.url}/api/dashboard-data?dashboard=__all__`, {
+      headers: { cookie: authCookie! },
+    });
+    expect(protectedData.status).toBe(200);
+    expect(await protectedData.json()).toEqual(expect.objectContaining({ dashboards: expect.any(Object) }));
 
     pm.stopPreview(projectDir);
     expect(pm.isPreviewRunning(projectDir)).toBe(false);

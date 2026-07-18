@@ -85,7 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const storedUsername = process.env.DASHBOARD_USERNAME;
-  const passwordHash = process.env.DASHBOARD_PASSWORD_HASH;
+  // Base64 prevents bcrypt's '$' characters being changed by dotenv/shell
+  // expansion. Keep the raw variable as a migration fallback.
+  const passwordHash = process.env.DASHBOARD_PASSWORD_HASH_B64
+    ? Buffer.from(process.env.DASHBOARD_PASSWORD_HASH_B64, 'base64').toString('utf-8')
+    : process.env.DASHBOARD_PASSWORD_HASH;
   const jwtSecret = process.env.JWT_SECRET;
 
   if (!storedUsername || !passwordHash || !jwtSecret) {

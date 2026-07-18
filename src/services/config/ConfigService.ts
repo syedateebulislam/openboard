@@ -18,14 +18,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { LLM_PROVIDER_NAMES } from '../../config/llmCatalog.js';
 
 // ---------------------------------------------------------------------------
 // Zod Schema
 // ---------------------------------------------------------------------------
 
-const LLMProviderSchema = z.enum(['openai', 'openai-codex', 'anthropic', 'moonshot', 'gemini', 'ollama']);
+const LLMProviderSchema = z.enum(LLM_PROVIDER_NAMES as [string, ...string[]]);
 
-// Privacy modes: local (Ollama + local preview), hybrid (cloud LLM + local
+// Privacy modes: local (Ollama/LM Studio + local preview), hybrid (cloud LLM + local
 // preview), remote (cloud LLM + GitHub + Vercel). See src/config/appModes.ts.
 const AppModeSchema = z.enum(['local', 'hybrid', 'remote']);
 
@@ -40,6 +41,7 @@ const LLMConfigSchema = z.object({
   model: z.string().optional(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
+  ollamaHost: z.string().optional(),
   effort: LLMEffortSchema.optional(),
 }).optional();
 
@@ -205,7 +207,7 @@ function validateSet(key: string, value: unknown): void {
   if (key === 'llm.provider') {
     const result = LLMProviderSchema.safeParse(value);
     if (!result.success) {
-      throw new Error(`Invalid provider value: ${String(value)}. Must be one of: openai, openai-codex, anthropic, moonshot, gemini, ollama`);
+      throw new Error(`Invalid provider value: ${String(value)}. Must be one of: ${LLM_PROVIDER_NAMES.join(', ')}`);
     }
   }
   if (key === 'app.mode') {

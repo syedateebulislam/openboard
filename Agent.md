@@ -41,14 +41,14 @@ OpenBoard is configured around an **app mode** — set it first, because it deci
 
 | Mode | LLM | Output | GitHub/Vercel |
 |---|---|---|---|
-| `local` | Ollama only (on-machine) | Local preview only | Not used — refused by setup |
+| `local` | Ollama or LM Studio (on-machine) | Local preview only | Not used — refused by setup |
 | `hybrid` | Any cloud provider | Local preview only | Not used — refused by setup |
 | `remote` | Any provider | Live Vercel web app | Required |
 
 An agent can set everything up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
 
 - App mode: `openboard agent setup mode --mode local|hybrid|remote` (unset behaves as `remote`).
-- LLM provider: OpenAI API key, OpenAI Codex login, Anthropic, Moonshot, or Ollama (`local` mode: Ollama only).
+- LLM provider: OpenAI API, OpenAI Codex login, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, Ollama, or LM Studio (`local` mode: Ollama/LM Studio only).
 - GitHub token or authenticated GitHub CLI (`remote` mode only).
 - Vercel token or Vercel Git integration (`remote` mode only).
 - Dashboard login credentials.
@@ -92,6 +92,11 @@ openboard agent setup all \
 openboard agent setup all --mode local --provider ollama \
   --username admin --password "at-least-8-chars" --json
 
+# Or use LM Studio's local OpenAI-compatible server:
+openboard agent setup all --mode local --provider lmstudio \
+  --base-url "http://127.0.0.1:1234/v1" \
+  --username admin --password "at-least-8-chars" --json
+
 # Or one piece at a time:
 openboard agent setup mode --mode hybrid
 openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
@@ -105,12 +110,13 @@ Flags:
 
 | Flag | For | Meaning |
 |---|---|---|
-| `--mode` | mode | `local` (Ollama + local preview), `hybrid` (cloud LLM + local preview), `remote` (cloud LLM + GitHub + live Vercel app) |
-| `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `moonshot`, or `ollama` |
+| `--mode` | mode | `local` (Ollama/LM Studio + local preview), `hybrid` (cloud LLM + local preview), `remote` (cloud LLM + GitHub + live Vercel app) |
+| `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `gemini`, `moonshot`, `xai`, `mistral`, `openrouter`, `ollama`, or `lmstudio` |
 | `--model` | llm | Optional; a sensible default is used per provider |
-| `--api-key` | llm | API key (not needed for `ollama`; for `openai-codex` it triggers a headless `codex login --with-api-key`) |
+| `--api-key` | llm | API key (not needed for `ollama` or `lmstudio`; for `openai-codex` it triggers a headless `codex login --with-api-key`) |
 | `--codex-access-token` | llm | ChatGPT/Codex access token for a fully-headless `openai-codex` sign-in |
 | `--ollama-host` | llm | Ollama host URL |
+| `--base-url` | llm | LM Studio OpenAI-compatible URL; defaults to `http://127.0.0.1:1234/v1` |
 | `--github-token` | github | GitHub token with repo scope |
 | `--vercel-token` | vercel | Vercel API token |
 | `--username` / `--password` | dashboard | Deployed-dashboard login (password ≥ 8 chars) |

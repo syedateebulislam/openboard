@@ -10,16 +10,15 @@
  *  - anthropic: AnthropicProvider (requires apiKey)
  *  - moonshot:  MoonshotProvider (requires apiKey)
  *  - gemini:    GeminiProvider (requires Google AI Studio apiKey)
+ *  - xai:       xAI's OpenAI-compatible API (requires apiKey)
+ *  - mistral:   Mistral AI's OpenAI-compatible API (requires apiKey)
+ *  - openrouter: OpenRouter's multi-provider API (requires apiKey)
+ *  - lmstudio:  LM Studio local OpenAI-compatible server (no apiKey)
  *  - ollama:    OllamaProvider (requires running local Ollama server)
  */
 
 import type { LLMProvider, LLMConfig } from '../../types/llm.js';
-import { OpenAIProvider } from './OpenAIProvider.js';
-import { AnthropicProvider } from './AnthropicProvider.js';
-import { OllamaProvider } from './OllamaProvider.js';
-import { MoonshotProvider } from './MoonshotProvider.js';
-import { GeminiProvider } from './GeminiProvider.js';
-import { OpenAICodexProvider } from './OpenAICodexProvider.js';
+import { providerRegistry } from './ProviderRegistry.js';
 
 export class LLMService {
   /**
@@ -30,45 +29,7 @@ export class LLMService {
    * @throws If the provider name is unknown
    */
   static createProvider(config: LLMConfig): LLMProvider {
-    switch (config.provider) {
-      case 'openai':
-        if (!config.apiKey) {
-          throw new Error('OpenAI provider requires an apiKey');
-        }
-        return new OpenAIProvider(config.apiKey, config.model ?? 'gpt-4o', config.effort);
-
-      case 'openai-codex':
-        return new OpenAICodexProvider(config.model ?? 'gpt-5.5', config.effort);
-
-      case 'anthropic':
-        if (!config.apiKey) {
-          throw new Error('Anthropic provider requires an apiKey');
-        }
-        return new AnthropicProvider(config.apiKey, config.model ?? 'claude-sonnet-4-5', config.effort);
-
-      case 'ollama':
-        return new OllamaProvider(
-          config.ollamaHost ?? 'http://127.0.0.1:11434',
-          config.model ?? 'qwen2.5-coder:7b',
-        );
-
-      case 'moonshot':
-        if (!config.apiKey) {
-          throw new Error('Moonshot AI provider requires an apiKey');
-        }
-        return new MoonshotProvider(config.apiKey, config.model ?? 'moonshot-v1-8k');
-
-      case 'gemini':
-        if (!config.apiKey) {
-          throw new Error('Google Gemini provider requires an apiKey');
-        }
-        return new GeminiProvider(config.apiKey, config.model ?? 'gemini-2.5-pro');
-
-      default:
-        throw new Error(
-          `Unknown LLM provider: ${(config as { provider: string }).provider}`,
-        );
-    }
+    return providerRegistry.create(config);
   }
 }
 

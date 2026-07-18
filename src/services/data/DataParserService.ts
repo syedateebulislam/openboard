@@ -1,15 +1,25 @@
-import { parse } from 'csv-parse/sync';
-import { readFile } from 'node:fs/promises';
+import { parse as createCSVParser } from 'csv-parse';
+import { createReadStream } from 'node:fs';
+import { access, readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 
 export interface ParsedData {
   rows: Record<string, unknown>[];
   headers: string[];
   format: 'csv' | 'json' | 'xlsx';
+  sourceBytes?: number;
+  parseDurationMs?: number;
 }
 
+export interface DataParserOptions {
+  /** Safety bound for materialized output. CSV input itself is streamed. */
+  maxRows?: number;
+}
+
+const DEFAULT_MAX_ROWS = 1_000_000;
+
 export class DataParserService {
-  static async parse(filePath: string): Promise<ParsedData> {
+  static async parse(filePath: string, options: DataParserOptions = {}): Promise<ParsedData> {
     const ext = extname(filePath).toLowerCase();
 
     if (ext === '.xls') {
@@ -20,37 +30,34 @@ export class DataParserService {
       throw new Error(`Unsupported format "${ext}". Supported: .csv, .xlsx, .json`);
     }
 
-    if (ext === '.xlsx') {
-      return DataParserService.parseExcel(filePath);
-    }
-
-    let content: string;
     try {
-      content = await readFile(filePath, 'utf-8');
+      await access(filePath);
     } catch {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    const startedAt = performance.now();
+    const sourceBytes = (await stat(filePath)).size;
+    const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS;
+    let parsed: ParsedData;
+
     if (ext === '.csv') {
-      return DataParserService.parseCSV(content);
+      parsed = await DataParserService.parseCSVStream(filePath, maxRows);
+    } else if (ext === '.xlsx') {
+      parsed = await DataParserService.parseExcel(filePath, maxRows);
     } else {
-      return DataParserService.parseJSON(content);
+      parsed = DataParserService.parseJSON(await readFile(filePath, 'utf-8'), maxRows);
     }
+    return { ...parsed, sourceBytes, parseDurationMs: performance.now() - startedAt };
   }
 
   /** Parse the first sheet of an .xlsx workbook into rows. */
-  private static async parseExcel(filePath: string): Promise<ParsedData> {
-    let buffer: Buffer;
-    try {
-      buffer = await readFile(filePath);
-    } catch {
-      throw new Error(`File not found: ${filePath}`);
-    }
-
+  private static async parseExcel(filePath: string, maxRows: number): Promise<ParsedData> {
     // Lazy import — ExcelJS is only loaded when an Excel file is parsed.
     const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    // Feed ExcelJS a stream so OpenBoard does not retain a duplicate file buffer.
+    await workbook.xlsx.read(createReadStream(filePath));
     const sheet = workbook.worksheets[0];
     if (!sheet) {
       throw new Error('Excel file contains no sheets.');
@@ -65,6 +72,9 @@ export class DataParserService {
     const rows: Record<string, unknown>[] = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber === 1) return;
+      if (rows.length >= maxRows) {
+        throw new Error(`Row limit exceeded (${maxRows.toLocaleString()}). Increase maxRows explicitly to continue.`);
+      }
       const record: Record<string, unknown> = {};
       headers.forEach((header, index) => {
         if (!header) return;
@@ -101,8 +111,8 @@ export class DataParserService {
     return value;
   }
 
-  private static parseCSV(content: string): ParsedData {
-    const records = parse(content, {
+  private static async parseCSVStream(filePath: string, maxRows: number): Promise<ParsedData> {
+    const parser = createReadStream(filePath).pipe(createCSVParser({
       columns: true,
       skip_empty_lines: true,
       cast: (value, context) => {
@@ -116,13 +126,22 @@ export class DataParserService {
         return value;
       },
       relax_column_count: true,
-    }) as Record<string, unknown>[];
+    }));
+
+    const records: Record<string, unknown>[] = [];
+    for await (const record of parser) {
+      if (records.length >= maxRows) {
+        parser.destroy();
+        throw new Error(`Row limit exceeded (${maxRows.toLocaleString()}). Increase maxRows explicitly to continue.`);
+      }
+      records.push(record as Record<string, unknown>);
+    }
 
     const headers = records.length > 0 ? Object.keys(records[0]) : [];
     return { rows: records, headers, format: 'csv' };
   }
 
-  private static parseJSON(content: string): ParsedData {
+  private static parseJSON(content: string, maxRows: number): ParsedData {
     let data: unknown;
     try {
       data = JSON.parse(content);
@@ -145,6 +164,10 @@ export class DataParserService {
       }
     } else {
       rows = [];
+    }
+
+    if (rows.length > maxRows) {
+      throw new Error(`Row limit exceeded (${maxRows.toLocaleString()}). Increase maxRows explicitly to continue.`);
     }
 
     const headers = rows.length > 0 ? Object.keys(rows[0]) : [];

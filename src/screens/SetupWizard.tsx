@@ -5,7 +5,7 @@
  *  Step 1: App mode — Local only / Hybrid / All remote. Picked FIRST so the
  *          user knows from the beginning what the end result is and what
  *          leaves their machine.
- *  Step 2: LLM provider (filtered by mode: Local only ⇒ Ollama) + key + model
+ *  Step 2: LLM provider (filtered by mode: Local only ⇒ Ollama/LM Studio) + key + model
  *  Step 3: GitHub Personal Access Token   (All remote mode only)
  *  Step 4: Vercel API token               (All remote mode only)
  *  Step 5: Dashboard username + password → bcrypt hash + JWT secret
@@ -14,7 +14,7 @@
  * Calls AuthService.prepareCredentials and saves to ConfigService on completion.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useReducer } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -26,18 +26,17 @@ import { OpenAICodexProvider } from '../services/llm/OpenAICodexProvider.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { GitHubService } from '../services/deploy/GitHubService.js';
 import { VercelService } from '../services/deploy/VercelService.js';
-import type { LLMConfig, LLMEffort } from '../types/llm.js';
-import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, MODEL_CHOICES } from '../config/llmCatalog.js';
+import type { LLMConfig, LLMEffort, LLMProviderName } from '../types/llm.js';
+import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, LLM_PROVIDER_CHOICES, MODEL_CHOICES } from '../config/llmCatalog.js';
 import { APP_MODES, allowedProvidersForMode, appModeInfo, getAppMode, modeAllowsDeploy, type AppMode } from '../config/appModes.js';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { setupWizardNavigationReducer, visibleWizardSteps } from './setupWizardReducer.js';
+import type { WizardStep } from './setupWizardReducer.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-type WizardStep = 'mode' | 'llm' | 'github' | 'vercel' | 'credentials';
-type LLMProviderName = 'openai' | 'openai-codex' | 'anthropic' | 'ollama' | 'moonshot' | 'gemini';
 
 interface ValidationState {
   status: 'idle' | 'validating' | 'success' | 'error';
@@ -75,16 +74,11 @@ interface SetupWizardProps {
 // ---------------------------------------------------------------------------
 
 const LLM_PROVIDERS = [
-  { label: '(Recommended) OpenAI Codex / ChatGPT subscription (browser login)', value: 'openai-codex' },
-  { label: 'OpenAI API Key (GPT-4o, GPT-4 Turbo)', value: 'openai' },
-  { label: 'Anthropic (Claude Sonnet, Opus)', value: 'anthropic' },
-  { label: 'Moonshot AI (Kimi 2.5, Kimi models)', value: 'moonshot' },
-  { label: 'Google Gemini (Gemini 2.5 Pro / Flash — AI Pro plan)', value: 'gemini' },
-  { label: 'Ollama (Local, free)', value: 'ollama' },
+  ...LLM_PROVIDER_CHOICES,
   { label: '← Go Back', value: 'back' },
 ];
 
-/** Providers selectable in the chosen mode (Local only ⇒ Ollama), plus Back. */
+/** Providers selectable in the chosen mode (Local only ⇒ Ollama/LM Studio), plus Back. */
 function providersForMode(mode: AppMode): Array<{ label: string; value: string }> {
   const allowed = new Set<string>(allowedProvidersForMode(mode));
   return LLM_PROVIDERS.filter((item) => item.value === 'back' || allowed.has(item.value));
@@ -256,7 +250,8 @@ function Step1LLMConfig({
       
       const p = item.value as LLMProviderName;
       onProviderSelect(p);
-      if (p === 'ollama') {
+      if (p === 'ollama' || p === 'lmstudio') {
+        onOllamaHostChange(p === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434');
         setPhase('host');
       } else if (p === 'openai-codex') {
         setPhase('model');
@@ -264,7 +259,7 @@ function Step1LLMConfig({
         setPhase('key');
       }
     },
-    [onProviderSelect, onNavigate],
+    [onProviderSelect, onNavigate, onOllamaHostChange],
   );
 
   // Handle key submission → move to model
@@ -300,7 +295,7 @@ function Step1LLMConfig({
         title={`${stepLabel}: LLM Provider`}
         subtitle={
           mode === 'local'
-            ? 'Local only mode: generation runs on your machine via Ollama'
+            ? 'Local only mode: generation runs on your machine via Ollama or LM Studio'
             : 'Choose the AI provider for code generation'
         }
       />
@@ -323,6 +318,9 @@ function Step1LLMConfig({
                provider === 'anthropic' ? 'Anthropic' :
                provider === 'moonshot' ? 'Moonshot AI' :
                provider === 'gemini' ? 'Google Gemini (AI Studio)' :
+               provider === 'xai' ? 'xAI' :
+               provider === 'mistral' ? 'Mistral AI' :
+               provider === 'openrouter' ? 'OpenRouter' :
                'API'} API Key:
             </Text>
             <TextInput
@@ -338,14 +336,14 @@ function Step1LLMConfig({
 
       {phase === 'host' && (
         <Box flexDirection="column">
-          <Text color={UI_COLORS.logo}>Provider: Ollama (Local)</Text>
+          <Text color={UI_COLORS.logo}>Provider: {provider === 'lmstudio' ? 'LM Studio' : 'Ollama'} (Local)</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>Ollama Host URL:</Text>
+            <Text>{provider === 'lmstudio' ? 'LM Studio OpenAI API URL:' : 'Ollama Host URL:'}</Text>
             <TextInput
               value={ollamaHost}
               onChange={onOllamaHostChange}
               onSubmit={handleHostSubmit}
-              placeholder="http://127.0.0.1:11434"
+              placeholder={provider === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434'}
             />
           </Box>
         </Box>
@@ -660,13 +658,14 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const config = configService ?? new ConfigService();
 
   // Step state — mode first, so the end result is clear from the beginning.
-  const [step, setStep] = useState<WizardStep>('mode');
-  const [mode, setMode] = useState<AppMode>(() => getAppMode(config));
+  const [navigation, dispatchNavigation] = useReducer(setupWizardNavigationReducer, {
+    step: 'mode',
+    mode: getAppMode(config),
+  });
+  const { step, mode } = navigation;
 
   // Which steps this wizard run walks through, given the chosen mode.
-  const visibleSteps: WizardStep[] = modeAllowsDeploy(mode)
-    ? ['mode', 'llm', 'github', 'vercel', 'credentials']
-    : ['mode', 'llm', 'credentials'];
+  const visibleSteps = visibleWizardSteps(mode);
   const stepNumber = visibleSteps.indexOf(step) + 1;
   const stepLabelFor = (s: WizardStep) => `Step ${visibleSteps.indexOf(s) + 1}`;
 
@@ -680,7 +679,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   // Form data
   const [llmProvider, setLLMProvider] = useState<LLMProviderName>('openai');
   const [llmApiKey, setLLMApiKey] = useState('');
-  const [llmModel, setLLMModel] = useState('gpt-4o');
+  const [llmModel, setLLMModel] = useState(DEFAULT_MODELS.openai);
   const [llmEffort, setLLMEffort] = useState<LLMEffort>(DEFAULT_EFFORT);
   const [ollamaHost, setOllamaHost] = useState('http://127.0.0.1:11434');
   const [githubToken, setGithubToken] = useState('');
@@ -696,14 +695,13 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   // (chat commands, pipeline, agent CLI) reads the same contract.
   // -------------------------------------------------------------------------
   const handleModeSelect = useCallback((selected: AppMode) => {
-    setMode(selected);
     config.set('app.mode', selected);
     if (selected === 'local') {
       // Local only: generation must stay on-machine.
       setLLMProvider('ollama');
       setLLMModel(DEFAULT_MODELS.ollama);
     }
-    setStep('llm');
+    dispatchNavigation({ type: 'select_mode', mode: selected });
   }, [config]);
 
   // Validation states
@@ -719,7 +717,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
     const modelToUse = llmModel.trim() || DEFAULT_MODELS[llmProvider];
 
     // Validate required fields
-    if (llmProvider !== 'ollama' && llmProvider !== 'openai-codex' && !llmApiKey.trim()) {
+    if (llmProvider !== 'ollama' && llmProvider !== 'lmstudio' && llmProvider !== 'openai-codex' && !llmApiKey.trim()) {
       setStep1Validation({ 
         status: 'error', 
         message: 'API key is required. Please enter your API key before validating.' 
@@ -751,7 +749,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
           config.set('llm.model', modelToUse);
           config.set('llm.effort', llmEffort);
           setStep1Validation({ status: 'success', message: 'Codex login validated!' });
-          setTimeout(() => setStep(modeAllowsDeploy(mode) ? 'github' : 'credentials'), 800);
+          setTimeout(() => dispatchNavigation({ type: 'llm_complete' }), 800);
         } else {
           setStep1Validation({
             status: 'error',
@@ -766,6 +764,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         apiKey: llmApiKey.trim() || undefined,
         model: modelToUse,
         ollamaHost: ollamaHost.trim() || undefined,
+        baseUrl: llmProvider === 'lmstudio' ? ollamaHost.trim() || undefined : undefined,
       };
       const provider = LLMService.createProvider(llmConfig);
       const result = await provider.validate();
@@ -780,20 +779,22 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         }
         if (llmProvider === 'ollama') {
           config.set('llm.ollamaHost', ollamaHost.trim());
+        } else if (llmProvider === 'lmstudio') {
+          config.set('llm.baseUrl', ollamaHost.trim());
         }
 
         setStep1Validation({ status: 'success', message: 'Connection validated!' });
         // Brief pause then advance
-        setTimeout(() => setStep(modeAllowsDeploy(mode) ? 'github' : 'credentials'), 800);
+        setTimeout(() => dispatchNavigation({ type: 'llm_complete' }), 800);
       } else {
         // Provide user-friendly error messages
         let errorMsg = result.error ?? 'Invalid credentials';
         
         // For debugging: always show raw error for Moonshot
         if (llmProvider === 'moonshot') {
-          errorMsg = `Moonshot error:\n${errorMsg}\n\n(If this doesn't help, check platform.moonshot.cn/console/api-keys)`;
+          errorMsg = `Moonshot error:\n${errorMsg}\n\n(If this doesn't help, check platform.kimi.ai/console/api-keys)`;
         } else if (llmProvider === 'gemini') {
-          errorMsg = `Gemini error:\n${errorMsg}\n\n(Get an API key at aistudio.google.com/apikey. Gemini 2.5 Pro needs the Google AI Pro plan or a billing-enabled key.)`;
+          errorMsg = `Gemini error:\n${errorMsg}\n\n(Get a Gemini API key at aistudio.google.com/apikey and enable billing if the selected model requires it.)`;
         } else if (errorMsg.includes('credit balance is too low') || errorMsg.includes('Plans & Billing')) {
           errorMsg = `❌ No credits available!\n\nYour Anthropic account needs credits to use the API.\n\nFix this:\n  1. Go to: console.anthropic.com/settings/plans\n  2. Add billing or purchase credits ($5-10 minimum)\n  3. Try again after credits are added\n\nOr: Use OpenAI or Ollama (free, local) instead.`;
         } else if (errorMsg.includes('authentication_error') || errorMsg.includes('invalid x-api-key')) {
@@ -843,7 +844,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         } else {
           setStep2Validation({ status: 'success', message: `Token saved for ${data.login ?? 'GitHub user'}. Install gh CLI manually for automatic repo creation.` });
         }
-        setTimeout(() => setStep('vercel'), 800);
+        setTimeout(() => dispatchNavigation({ type: 'github_complete' }), 800);
       } else {
         const body = await response.json() as { message?: string };
         setStep2Validation({ status: 'error', message: body.message ?? 'Invalid GitHub token' });
@@ -855,7 +856,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
 
   const handleStep2Skip = useCallback(() => {
     setGithubSkipped(true);
-    setStep('vercel');
+    dispatchNavigation({ type: 'github_complete' });
   }, []);
 
   // -------------------------------------------------------------------------
@@ -874,7 +875,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       if (validation.success) {
         config.setEncrypted('vercel.token', vercelToken.trim());
         setStep3Validation({ status: 'success', message: 'Vercel token validated!' });
-        setTimeout(() => setStep('credentials'), 800);
+        setTimeout(() => dispatchNavigation({ type: 'vercel_complete' }), 800);
       } else {
         setStep3Validation({
           status: 'error',
@@ -888,7 +889,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
 
   const handleStep3Skip = useCallback(() => {
     setVercelSkipped(true);
-    setStep('credentials');
+    dispatchNavigation({ type: 'vercel_complete' });
   }, []);
 
   // -------------------------------------------------------------------------
