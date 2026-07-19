@@ -10,14 +10,14 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 import { ChatMessageComponent } from '../components/ChatMessage.js';
 import { LoadingRemark } from '../components/LoadingRemark.js';
 import { PipelineProgress } from '../components/PipelineProgress.js';
 import { PipelineReporter, PHASE_ORDER } from '../services/project/pipelinePhases.js';
 import type { PipelinePhase, PipelineEventSink } from '../services/project/pipelinePhases.js';
 import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
+import { DashboardManifestService } from '../services/project/DashboardManifestService.js';
 import { RunStateService } from '../services/project/RunStateService.js';
 import { parseCommand, chatCommandsForMode, commandsTextForMode, helpTextForMode, formatUnknownCommandMessage } from '../utils/commandParser.js';
 import { blockedDeployMessage, describeAppMode, getAppMode, modeAllowsDeploy } from '../config/appModes.js';
@@ -63,6 +63,29 @@ function newMsg(
     timestamp: Date.now(),
     isStreaming,
   };
+}
+
+/**
+ * Regenerate the product-owned dashboard manifest (tabs + routing) from the
+ * board registry. App.tsx renders tabs exclusively from
+ * generated/dashboardManifest.tsx, so the TUI must sync it before building —
+ * otherwise dashboards generated in chat never receive a tab. Must run after
+ * syncMasterTab so a fresh MasterDashboard.tsx is picked up as the Overview tab.
+ */
+async function syncDashboardManifest(
+  projectDir: string,
+  onProgress: (line: string) => void,
+): Promise<void> {
+  try {
+    const boards = new BoardRegistryService().listBoards();
+    const result = await new DashboardManifestService().sync(projectDir, boards);
+    onProgress(`Synced dashboard manifest (${boards.length} dashboard(s)).`);
+    if (result.missingBoards.length > 0) {
+      onProgress(`Warning: regenerate missing component(s): ${result.missingBoards.join(', ')}`);
+    }
+  } catch (error: any) {
+    onProgress(`Warning: dashboard manifest sync skipped: ${error.message}`);
+  }
 }
 
 // Default models come from the shared catalog (src/config/llmCatalog.ts).
@@ -522,6 +545,7 @@ export function ChatScreen({
         // Keep the master Overview tab in sync with the registered dashboards
         // (no-op when unchanged; failures are non-fatal inside syncMasterTab).
         await new DashboardUpdateService().syncMasterTab(projectDir, reporter);
+        await syncDashboardManifest(projectDir, onProgress);
 
         onProgress('Building project...');
         const buildResult = await projectManager.build(projectDir, onProgress);
@@ -599,21 +623,10 @@ Existing registered dashboards:
 ${boards.map((b) => `- ${b.title} (${b.name}, ${b.type})`).join('\n')}
 
 For the current board "${board.title}":
-- Add or update it as its own dashboard tab in App.tsx.
-- Preserve the OpenBoard header shell exactly: <HeaderLinks /> on the left, the clickable app-brand button with <h1 className="app-title">OpenBoard</h1>, and the greeting/ThemeToggle/Logout on the right.
-- Preserve existing dashboard tabs, imports, auth wrapper, LoginPage, AuthProvider, user display, and logout behavior.
-- Preserve the master 'Overview' tab (id 'master') as the first tab if present — do not create or modify components/MasterDashboard.tsx unless the user explicitly asks about the master/overview tab. Do not re-add a Welcome tab while dashboards exist.
-- Do not rename the app/header to "${board.title}". Use "${board.title}" only as a tab label and content heading.
+- Return ONLY this board's dashboard component(s) (e.g. components/${board.title.replace(/[^A-Za-z0-9]/g, '')}Dashboard.tsx) and any helper files they need.
+- Do NOT return App.tsx, generated/dashboardManifest.tsx, tab/navigation code, authentication files, or components/MasterDashboard.tsx — OpenBoard owns the app shell and registers dashboard tabs automatically at build time.
+- Do not rename the app/header to "${board.title}". Use "${board.title}" only as a content heading.
 - Prefer dashboard-specific component names and files so additions do not overwrite other dashboards.`;
-        }
-
-        const activeProjectDir = getActiveProjectDir();
-        if (activeProjectDir) {
-          const appPath = join(activeProjectDir, 'src', 'App.tsx');
-          if (existsSync(appPath)) {
-            const currentApp = readFileSync(appPath, 'utf-8').slice(0, 12000);
-            boardContext += `\n\nCURRENT App.tsx (preserve existing tabs and extend this):\n${currentApp}`;
-          }
         }
       } catch {
         // Registry/current app context is helpful but not required for generation.
@@ -719,7 +732,7 @@ For the current board "${board.title}":
           for await (const chunk of llmProvider.stream({
             messages: contextMessages,
             temperature: 0.7,
-            maxTokens: 4096,
+            maxTokens: 8192,
           })) {
             if (chunk.text) receivedContent = true;
             fullContent += chunk.text;
@@ -733,7 +746,7 @@ For the current board "${board.title}":
             fullContent = await llmProvider.complete({
               messages: contextMessages,
               temperature: 0.7,
-              maxTokens: 4096,
+              maxTokens: 8192,
             });
             receivedContent = true;
             updateStreamingMsg(streamMsg.id, fullContent, true);
@@ -770,6 +783,12 @@ For the current board "${board.title}":
           addMsg(
             newMsg('system', `📁 Written ${writtenFiles.length} file(s): ${writtenFiles.join(', ')}\nRun "/preview" to see changes.`),
           );
+        } else if (/\/\/CODE_START|---\s*FILE:|```/.test(fullContent)) {
+          // The response looked like code but no complete file block could be
+          // extracted (usually a truncated response or missing end markers).
+          addMsg(
+            newMsg('system', '⚠ The response contained code but no complete file blocks were extracted, so no files were written. This usually means the response was truncated or skipped the FILE markers — try asking again.'),
+          );
         }
         return writtenFiles;
       } catch (err: any) {
@@ -793,7 +812,7 @@ For the current board "${board.title}":
     if (!llmProvider || !board.dataSummary || !getActiveProjectDir()) return;
 
     autoGenTriggered.current = true;
-    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoard master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. Include at least 2-3 charts and some metric/stat cards. Preserve any existing dashboard tabs in App.tsx and add this dashboard as a separate tab. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".`;
+    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoard master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. Include at least 2-3 charts and some metric/stat cards. Return only this dashboard's component files — OpenBoard registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".`;
 
     addMsg(newMsg('system', 'Auto-generating initial dashboard from your data...'));
     setIsLoading(true);
@@ -863,6 +882,7 @@ For the current board "${board.title}":
               // Keep the master Overview tab in sync with the registered
               // dashboards (no-op when unchanged; failures are non-fatal).
               await new DashboardUpdateService().syncMasterTab(projectDir, reporter);
+              await syncDashboardManifest(projectDir, onProgress);
 
               // Step 1: Build the project
               onProgress('Building project...');
