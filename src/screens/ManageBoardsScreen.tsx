@@ -34,7 +34,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
   const [pendingRemoveAll, setPendingRemoveAll] = useState(false);
 
   const items: MenuItem[] = [
-    { label: '✚ Add new dashboard to UI', value: 'add' },
+    { label: '✚ Add new dashboard', value: 'add' },
     ...(pendingRemoveAll
       ? [
           { label: `! Confirm: remove ALL ${boards.length} dashboard(s)`, value: 'confirm-remove-all' } as MenuItem,
@@ -114,7 +114,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
     }
     if (item.value === 'remove-all') {
       setPendingRemoveAll(true);
-      setMessage(`Confirm removal of ALL ${boards.length} dashboard(s). The app will be reset to the empty OpenBoard shell and redeployed.`);
+      setMessage(`Confirm removal of ALL ${boards.length} dashboard(s). This cannot be undone — your app will be reset to an empty starter app.`);
       return;
     }
     if (item.value === 'regen-all') {
@@ -150,7 +150,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
           setMessage(
             result.deployUrl
               ? `Removed all dashboards. Deployed empty shell: ${result.deployUrl}`
-              : 'Removed all dashboards. The app now shows the empty OpenBoard shell.',
+              : 'Removed all dashboards. Your app is now an empty starter app.',
           );
         } else {
           setMessage(`Could not remove all dashboards: ${result.error ?? 'Unknown error'}`);
@@ -229,7 +229,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
     <Box flexDirection="column" padding={2}>
       <Text bold color={UI_COLORS.logo}>Existing Dashboards</Text>
       <Text color={UI_COLORS.subtitle}>
-        Add data sources to the master UI, or open an existing dashboard chat.
+        Add a data source to create your first dashboard, or open an existing dashboard chat.
       </Text>
       {boards.length === 0 && (
         <Box marginTop={1}>
@@ -255,7 +255,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
       </Box>
       <Box marginTop={1}>
         <Text color={UI_COLORS.subtitle}>
-          Removing a dashboard updates the registry and asks the configured LLM to remove its tab from the generated app.
+          Removing a dashboard deletes its tab and data from your app.
         </Text>
       </Box>
     </Box>

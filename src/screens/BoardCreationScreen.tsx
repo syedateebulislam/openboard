@@ -77,8 +77,12 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   // Analysis results
   const [analysis, setAnalysis] = useState<DataAnalysis | null>(null);
 
-  // Error
+  // Error, plus the step ESC should return to so typed input is not lost.
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorReturnStep, setErrorReturnStep] = useState<CreationStep>('select-preset');
+
+  // Checked once at entry so users learn about missing setup before doing work.
+  const [llmReady] = useState(() => hasConfiguredLLM());
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -114,6 +118,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         createBoardConfig(trimmed); // validates name
       } catch (e) {
         setErrorMessage(e instanceof Error ? e.message : String(e));
+        setErrorReturnStep('enter-name');
         setStep('error');
         return;
       }
@@ -130,6 +135,9 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         setStep('show-summary');
       } catch (e) {
         setErrorMessage(e instanceof Error ? e.message : String(e));
+        // Data problems are almost always the path — send ESC back there
+        // with the typed path preserved instead of restarting the flow.
+        setErrorReturnStep('enter-file');
         setStep('error');
       }
     },
@@ -142,11 +150,12 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
       if (step === 'enter-file') setStep('select-preset');
       else if (step === 'enter-name') setStep('enter-file');
       else if (step === 'show-summary') setStep('enter-name');
-      else if (step === 'error') setStep('select-preset');
+      else if (step === 'error') setStep(errorReturnStep);
     }
     if (key.return && step === 'show-summary' && selectedPreset) {
       if (!hasConfiguredLLM()) {
-        setErrorMessage('No LLM provider is configured. Open Settings, configure an LLM provider, then create this dashboard again.');
+        setErrorMessage('No LLM provider is configured. Run Setup from the main menu, then press Enter here again.');
+        setErrorReturnStep('show-summary');
         setStep('error');
         return;
       }
@@ -182,7 +191,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         ╔══════════════════════════════════════╗
       </Text>
       <Text bold color={UI_COLORS.logo}>
-        ║        Create New Board              ║
+        ║        Create New Dashboard          ║
       </Text>
       <Text bold color={UI_COLORS.border}>
         ╚══════════════════════════════════════╝
@@ -225,8 +234,15 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         {renderHeader()}
         {renderStepIndicator()}
         <Text bold color={UI_COLORS.logo}>
-          Step 1/4: Select a board preset
+          Step 1/4: Select a dashboard preset
         </Text>
+        {!llmReady && (
+          <Box marginTop={1}>
+            <Text color="yellow">
+              ⚠ No LLM provider is configured yet — generation will need one. Run Setup from the main menu first.
+            </Text>
+          </Box>
+        )}
         <Box marginTop={1}>
           <SelectInput items={presetItems()} onSelect={handlePresetSelect} />
         </Box>
@@ -284,14 +300,14 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         {renderHeader()}
         {renderStepIndicator()}
         <Text bold color={UI_COLORS.logo}>
-          Step 3/4: Name your board
+          Step 3/4: Name your dashboard
         </Text>
         <Box marginTop={1}>
           <Text color={UI_COLORS.logo}>File: </Text>
           <Text>{filePath}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text color={UI_COLORS.logo}>{'Board name › '}</Text>
+          <Text color={UI_COLORS.logo}>{'Dashboard name › '}</Text>
           <TextInput
             value={boardName}
             onChange={setBoardName}
@@ -337,7 +353,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
 
         <Box marginTop={1} flexDirection="column">
           <Text bold color={UI_COLORS.logo}>
-            Board Config
+            Dashboard Config
           </Text>
           <Text>
             {'  '}Name: <Text color="white">{cfg.name}</Text>

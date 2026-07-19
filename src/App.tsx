@@ -119,7 +119,7 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
     const notes: string[] = [`Mode set to: ${describeAppMode(selected)}`];
     const provider = config.get('llm.provider') as string | undefined;
     if (provider && !providerAllowedInMode(provider, selected)) {
-      notes.push(`Your LLM provider "${provider}" is not available in this mode — update it under Settings > Update LLM provider (Ollama runs locally).`);
+      notes.push(`Your LLM provider "${provider}" is not available in this mode — update it under Settings > Update LLM provider (Ollama and LM Studio run locally).`);
     }
     if (modeAllowsDeploy(selected) && !config.has('vercel.token')) {
       notes.push('All remote mode needs GitHub/Vercel tokens — add them in Settings.');
@@ -571,7 +571,15 @@ const defaultBoard: BoardConfig = {
 };
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>('welcome');
+  // First run: with no LLM configured every dashboard path dead-ends, so land
+  // new users in the setup wizard instead of the menu.
+  const [screen, setScreen] = useState<Screen>(() => {
+    try {
+      return new ConfigService().get('llm.provider') ? 'welcome' : 'setup';
+    } catch {
+      return 'setup';
+    }
+  });
   const [currentBoard, setCurrentBoard] = useState<BoardConfig>(defaultBoard);
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
   const [allBoardsMode, setAllBoardsMode] = useState(false);
