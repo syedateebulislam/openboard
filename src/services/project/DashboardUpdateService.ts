@@ -505,7 +505,7 @@ Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
 3. Return one primary exported dashboard component plus only its required helper files.
-4. Do not return App.tsx, navigation, authentication, or components/MasterDashboard.tsx; OpenBoard owns those files.
+4. Do not return App.tsx, navigation, authentication, generated/dashboardManifest.tsx, or components/MasterDashboard.tsx; OpenBoard owns those files.
 5. Return all changed files using the required //CODE_START format.`;
 
       const writtenFiles = await this.generateAndWriteFiles(board, prompt, reporter, run);
@@ -1306,9 +1306,11 @@ Requirements:
     }
 
     const extracted = extractFiles(response);
-    const files = extracted.filter((file) => file.path !== 'App.tsx');
+    const files = extracted.filter(
+      (file) => file.path !== 'App.tsx' && !file.path.startsWith('generated/'),
+    );
     if (files.length !== extracted.length) {
-      reporter.log('Ignored LLM App.tsx output; OpenBoard owns shell and tab composition.');
+      reporter.log('Ignored LLM App.tsx/generated output; OpenBoard owns shell and tab composition.');
     }
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir || files.length === 0) return [];
