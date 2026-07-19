@@ -20,7 +20,7 @@ import { DashboardUpdateService } from '../services/project/DashboardUpdateServi
 import { DashboardManifestService } from '../services/project/DashboardManifestService.js';
 import { RunStateService } from '../services/project/RunStateService.js';
 import { parseCommand, chatCommandsForMode, commandsTextForMode, helpTextForMode, formatUnknownCommandMessage } from '../utils/commandParser.js';
-import { blockedDeployMessage, describeAppMode, getAppMode, modeAllowsDeploy } from '../config/appModes.js';
+import { appModeInfo, blockedDeployMessage, describeAppMode, getAppMode, modeAllowsDeploy } from '../config/appModes.js';
 import type { ChatMessage, BoardConfig } from '../types/board.js';
 import type { LLMProvider, LLMMessage } from '../types/llm.js';
 import { LLMService } from '../services/llm/LLMService.js';
@@ -31,7 +31,7 @@ import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer } from '../services/data/DataAnalyzer.js';
 import { SYSTEM_PROMPT } from '../services/llm/prompts/systemPrompt.js';
 import { extractFiles } from '../utils/codeExtractor.js';
-import { describeLLMError, isLLMQuotaError } from '../utils/errorCodes.js';
+import { describeLLMError, isErrorShapedContent } from '../utils/errorCodes.js';
 import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
@@ -79,12 +79,12 @@ async function syncDashboardManifest(
   try {
     const boards = new BoardRegistryService().listBoards();
     const result = await new DashboardManifestService().sync(projectDir, boards);
-    onProgress(`Synced dashboard manifest (${boards.length} dashboard(s)).`);
+    onProgress(`Updated dashboard tabs (${boards.length} dashboard(s)).`);
     if (result.missingBoards.length > 0) {
-      onProgress(`Warning: regenerate missing component(s): ${result.missingBoards.join(', ')}`);
+      onProgress(`Warning: ${result.missingBoards.join(', ')} has no generated dashboard yet — open its chat and ask for one.`);
     }
   } catch (error: any) {
-    onProgress(`Warning: dashboard manifest sync skipped: ${error.message}`);
+    onProgress(`Warning: dashboard tab update skipped: ${error.message}`);
   }
 }
 
@@ -361,6 +361,10 @@ export function ChatScreen({
     return new PipelineReporter(onProgress, pipelineEventSink);
   }, [pipelineEventSink]);
 
+  // Phases of the operation currently driving the progress bar, so a plain
+  // /build shows "[1/1]" instead of "[5/8]" against the full create pipeline.
+  const opPhasesRef = useRef<PipelinePhase[] | null>(null);
+
   const getActiveProjectDir = useCallback((): string => {
     if (board.outputDir) return board.outputDir;
     const sharedDir = new BoardRegistryService().getSharedProjectDir();
@@ -515,6 +519,7 @@ export function ChatScreen({
       const logId = startLogMsg(label);
       const reporter = makePipelineReporter(createProgressCallback(logId));
       const onProgress = reporter.progress;
+      opPhasesRef.current = ['build', 'push', 'deploy', 'done'];
 
       try {
         reporter.phase('build');
@@ -537,9 +542,9 @@ export function ChatScreen({
 
         try {
           const synced = await new TemplateService().syncShellFiles(projectDir);
-          onProgress(`Synced ${synced.length} shell file(s) from template.`);
+          onProgress(`Refreshed ${synced.length} app frame file(s).`);
         } catch (error: any) {
-          onProgress(`Warning: shell sync skipped: ${error.message}`);
+          onProgress(`Warning: app frame refresh skipped: ${error.message}`);
         }
 
         // Keep the master Overview tab in sync with the registered dashboards
@@ -676,7 +681,7 @@ For the current board "${board.title}":
           file.path !== 'components/MasterDashboard.tsx',
       );
       if (files.length !== extracted.length) {
-        addMsg(newMsg('system', 'Ignored App.tsx/manifest/MasterDashboard output from the response — OpenBoard owns the app shell, tab manifest, and Overview tab.'));
+        addMsg(newMsg('system', 'Skipped App.tsx/layout files from the response — OpenBoard manages the app layout, tabs, and Overview automatically.'));
       }
       if (files.length === 0) return [];
 
@@ -767,6 +772,15 @@ For the current board "${board.title}":
           clearInterval(liveTicker);
         }
 
+        // A provider or proxy can return an error as a "successful" completion
+        // (e.g. a gateway echoing an upstream failure). Don't present that as
+        // the model's reply or mine it for files — surface it as an error.
+        if (isErrorShapedContent(fullContent)) {
+          updateStreamingMsg(streamMsg.id, 'Generation failed — see the error below.', true);
+          addMsg(newMsg('error', describeLLMError(fullContent, llmProvider?.name)));
+          return [];
+        }
+
         // Extract and write any code files from the response
         const writtenFiles = await writeExtractedFiles(fullContent);
         if (writtenFiles.length > 0) {
@@ -805,9 +819,9 @@ For the current board "${board.title}":
         return writtenFiles;
       } catch (err: any) {
         const rawMessage = err.message || 'Unknown LLM error';
-        const friendly = describeLLMError(rawMessage, llmProvider?.name);
-        updateStreamingMsg(streamMsg.id, isLLMQuotaError(rawMessage) ? friendly : `Error: ${rawMessage}`, true);
-        addMsg(newMsg('error', isLLMQuotaError(rawMessage) ? friendly : `LLM error: ${rawMessage}`));
+        // One friendly error message; the assistant bubble only notes the failure.
+        updateStreamingMsg(streamMsg.id, 'Generation failed — see the error below.', true);
+        addMsg(newMsg('error', describeLLMError(rawMessage, llmProvider?.name)));
         return [];
       } finally {
         streamingMsgRef.current = null;
@@ -870,6 +884,7 @@ For the current board "${board.title}":
             const logId = startLogMsg('Confirmed. Starting full deploy pipeline...');
             const reporter = makePipelineReporter(createProgressCallback(logId));
             const onProgress = reporter.progress;
+            opPhasesRef.current = ['build', 'push', 'deploy', 'done'];
 
             try {
               reporter.phase('build');
@@ -886,9 +901,9 @@ For the current board "${board.title}":
 
               try {
                 const synced = await new TemplateService().syncShellFiles(projectDir);
-                onProgress(`Synced ${synced.length} shell file(s) from template.`);
+                onProgress(`Refreshed ${synced.length} app frame file(s).`);
               } catch (error: any) {
-                onProgress(`Warning: shell sync skipped: ${error.message}`);
+                onProgress(`Warning: app frame refresh skipped: ${error.message}`);
               }
 
               // Keep the master Overview tab in sync with the registered
@@ -960,6 +975,7 @@ For the current board "${board.title}":
               } else {
                 const repoInfo = result.repoUrl ? ` -> ${result.repoUrl}` : '';
                 onProgress(`Pushed to GitHub (commit: ${result.commitHash?.slice(0, 7)})${repoInfo}`);
+                onProgress('Run /deploy to publish the live app.');
               }
 
               finishLog(logId);
@@ -1151,6 +1167,7 @@ For the current board "${board.title}":
         const onProgress = reporter.progress;
 
         try {
+          opPhasesRef.current = ['build', 'done'];
           reporter.phase('build');
           // Refresh the Overview tab and product-owned manifest so dashboards
           // generated in chat are registered before the build.
@@ -1158,6 +1175,7 @@ For the current board "${board.title}":
           await syncDashboardManifest(projectDir, onProgress);
           const result = await projectCommands.build(projectDir, onProgress);
           if (!result.success) onProgress(result.error ?? 'Build failed.');
+          else onProgress('Build successful. Run /preview to view it locally.');
 
           setPipeline(null);
           finishLog(logId);
@@ -1413,8 +1431,8 @@ Requirements:
         alignItems="center"
       >
         <Text bold color={UI_COLORS.logo}>{headerTitle}</Text>
-        <Text color={UI_COLORS.subtitle}>{headerLLMInfo}</Text>
-        <Text color={UI_COLORS.subtitle}>Internal LLM chat for dashboard creation/modification</Text>
+        <Text color={UI_COLORS.subtitle}>{headerLLMInfo} · Mode: {appModeInfo(getAppMode()).label}</Text>
+        <Text color={UI_COLORS.subtitle}>Chat to create or modify this dashboard</Text>
       </Box>
 
       {/* LLM config warning */}
@@ -1447,9 +1465,12 @@ Requirements:
           pct={pipeline.pct}
           phaseStartedAt={pipeline.phaseStartedAt}
           typicalMs={typicalDurations[pipeline.phase]}
+          phases={opPhasesRef.current ?? undefined}
         />
       ) : (
-        <LoadingRemark />
+        // Single liveness indicator: once the assistant bubble streams (or
+        // shows its elapsed-time ticker), the rotating remark stands down.
+        !messages.some((m) => m.isStreaming) && <LoadingRemark />
       ))}
 
       {commandSuggestions.length > 0 && (

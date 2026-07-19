@@ -4,7 +4,8 @@ import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
 import { bannerVersionLine } from '../version.js';
-import { describeAppMode, getAppMode } from '../config/appModes.js';
+import { describeAppMode, getAppMode, isValidAppMode } from '../config/appModes.js';
+import { ConfigService } from '../services/config/ConfigService.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
@@ -12,20 +13,26 @@ interface Props {
 
 type MenuValue = Screen | 'exit';
 
-const menuItems = [
-  { label: 'LLM Setup', value: 'setup' as MenuValue },
-  { label: 'Dashboards', value: 'manage-boards' as MenuValue },
-  { label: 'Settings', value: 'settings' as MenuValue },
-  { label: 'Exit', value: 'exit' as MenuValue },
-];
-
 export function WelcomeScreen({ onNavigate }: Props) {
+  // Until setup runs, don't advertise the default mode as if it were chosen.
+  let configured = false;
   let modeLine: string | undefined;
   try {
-    modeLine = describeAppMode(getAppMode());
+    const config = new ConfigService();
+    configured = Boolean(config.get('llm.provider'));
+    modeLine = isValidAppMode(config.get('app.mode'))
+      ? describeAppMode(getAppMode(config))
+      : 'not configured yet — run Setup to choose one';
   } catch {
     modeLine = undefined;
   }
+
+  const menuItems = [
+    { label: configured ? 'Setup' : 'Get started — set up OpenBoard', value: 'setup' as MenuValue },
+    { label: 'Dashboards', value: 'manage-boards' as MenuValue },
+    { label: 'Settings', value: 'settings' as MenuValue },
+    { label: 'Exit', value: 'exit' as MenuValue },
+  ];
 
   const handleSelect = (item: typeof menuItems[0]) => {
     if (item.value === 'exit') {

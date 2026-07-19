@@ -156,10 +156,10 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
 
 interface StepModeProps {
   onModeSelect: (mode: AppMode) => void;
-  onNavigate?: (screen: Screen) => void;
+  onBack?: () => void;
 }
 
-function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
+function StepModeSelect({ onModeSelect, onBack }: StepModeProps) {
   // Detail for the highlighted option renders below the list, so each mode is
   // described exactly once instead of a legend + a duplicate select list.
   const [highlighted, setHighlighted] = useState<AppMode>(APP_MODES[0].id);
@@ -186,7 +186,7 @@ function StepModeSelect({ onModeSelect, onNavigate }: StepModeProps) {
         }}
         onSelect={(item) => {
           if (item.value === 'back') {
-            if (onNavigate) onNavigate('welcome');
+            onBack?.();
             return;
           }
           onModeSelect(item.value as AppMode);
@@ -218,7 +218,7 @@ interface Step1Props {
   onEffortChange: (e: LLMEffort) => void;
   onOllamaHostChange: (h: string) => void;
   onSubmit: () => void;
-  onNavigate?: (screen: Screen) => void;
+  onBack?: () => void;
 }
 
 function Step1LLMConfig({
@@ -235,7 +235,7 @@ function Step1LLMConfig({
   onEffortChange,
   onOllamaHostChange,
   onSubmit,
-  onNavigate,
+  onBack,
 }: Step1Props) {
   const [phase, setPhase] = useState<'provider' | 'key' | 'model' | 'effort' | 'host'>('provider');
 
@@ -244,7 +244,7 @@ function Step1LLMConfig({
     (item: { value: string }) => {
       // Handle "Go Back" option
       if (item.value === 'back') {
-        if (onNavigate) onNavigate('welcome');
+        onBack?.();
         return;
       }
       
@@ -259,7 +259,7 @@ function Step1LLMConfig({
         setPhase('key');
       }
     },
-    [onProviderSelect, onNavigate, onOllamaHostChange],
+    [onProviderSelect, onBack, onOllamaHostChange],
   );
 
   // Handle key submission → move to model
@@ -401,10 +401,10 @@ interface Step2Props {
   onTokenChange: (t: string) => void;
   onSubmit: () => void;
   onSkip: () => void;
-  onNavigate?: (screen: Screen) => void;
+  onBack?: () => void;
 }
 
-function Step2GitHub({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step2Props) {
+function Step2GitHub({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onBack }: Step2Props) {
   const [mode, setMode] = useState<'menu' | 'input'>('menu');
 
   const menuItems = [
@@ -418,12 +418,12 @@ function Step2GitHub({ stepLabel, token, validation, onTokenChange, onSubmit, on
       if (item.value === 'skip') {
         onSkip();
       } else if (item.value === 'back') {
-        if (onNavigate) onNavigate('welcome');
+        onBack?.();
       } else {
         setMode('input');
       }
     },
-    [onSkip, onNavigate],
+    [onSkip, onBack],
   );
 
   return (
@@ -471,10 +471,10 @@ interface Step3Props {
   onTokenChange: (t: string) => void;
   onSubmit: () => void;
   onSkip: () => void;
-  onNavigate?: (screen: Screen) => void;
+  onBack?: () => void;
 }
 
-function Step3Vercel({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onNavigate }: Step3Props) {
+function Step3Vercel({ stepLabel, token, validation, onTokenChange, onSubmit, onSkip, onBack }: Step3Props) {
   const [mode, setMode] = useState<'menu' | 'input'>('menu');
 
   const menuItems = [
@@ -488,12 +488,12 @@ function Step3Vercel({ stepLabel, token, validation, onTokenChange, onSubmit, on
       if (item.value === 'skip') {
         onSkip();
       } else if (item.value === 'back') {
-        if (onNavigate) onNavigate('welcome');
+        onBack?.();
       } else {
         setMode('input');
       }
     },
-    [onSkip, onNavigate],
+    [onSkip, onBack],
   );
 
   return (
@@ -669,10 +669,21 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const stepNumber = visibleSteps.indexOf(step) + 1;
   const stepLabelFor = (s: WizardStep) => `Step ${visibleSteps.indexOf(s) + 1}`;
 
-  // ESC key handler - go back to welcome screen
+  // Step back one wizard screen; only the first step exits to the menu, so a
+  // wrong choice can be revised without restarting the whole wizard.
+  const goBack = useCallback(() => {
+    const index = visibleSteps.indexOf(step);
+    if (index <= 0) {
+      onNavigate?.('welcome');
+    } else {
+      dispatchNavigation({ type: 'go', step: visibleSteps[index - 1] });
+    }
+  }, [visibleSteps, step, onNavigate]);
+
+  // ESC = back one step (exit to menu from the first step)
   useInput((_input, key) => {
-    if (key.escape && onNavigate) {
-      onNavigate('welcome');
+    if (key.escape) {
+      goBack();
     }
   });
 
@@ -967,7 +978,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       {/* Step content */}
       <Box borderStyle="round" borderColor={UI_COLORS.border} padding={1} flexDirection="column">
         {step === 'mode' && (
-          <StepModeSelect onModeSelect={handleModeSelect} onNavigate={onNavigate} />
+          <StepModeSelect onModeSelect={handleModeSelect} onBack={goBack} />
         )}
 
         {step === 'llm' && (
@@ -988,7 +999,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
             onEffortChange={setLLMEffort}
             onOllamaHostChange={setOllamaHost}
             onSubmit={handleStep1Submit}
-            onNavigate={onNavigate}
+            onBack={goBack}
           />
         )}
 
@@ -1000,7 +1011,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
             onTokenChange={setGithubToken}
             onSubmit={handleStep2Submit}
             onSkip={handleStep2Skip}
-            onNavigate={onNavigate}
+            onBack={goBack}
           />
         )}
 
@@ -1012,7 +1023,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
             onTokenChange={setVercelToken}
             onSubmit={handleStep3Submit}
             onSkip={handleStep3Skip}
-            onNavigate={onNavigate}
+            onBack={goBack}
           />
         )}
 
