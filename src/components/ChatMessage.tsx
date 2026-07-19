@@ -1,21 +1,16 @@
 /**
  * ChatMessage — Renders a chat message in the TUI.
  * Supports user/assistant/system/error message types with distinct colors.
- *
- * Phase 4: Exports both ChatMessageComponent (typed with ChatMessage interface)
- * and the legacy ChatMessage component for backward compatibility.
  */
 import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import type { ChatMessage as ChatMessageType } from '../types/board.js';
-import { UI_COLORS } from '../theme.js';
 
-// ─── Phase 4: ChatMessageComponent (uses ChatMessage interface) ──────────────
-
+// System/status messages must not look like failures — reserve red for errors.
 const ROLE_CONFIG = {
   user:      { label: 'You', color: '#90EE90' },
   assistant: { label: 'LLM', color: '#FFD166' },
-  system:    { label: 'Sys', color: '#FF4D4F' },
+  system:    { label: 'Sys', color: '#6EC5E9' },
   error:     { label: 'Err', color: 'red'   as const },
 };
 
@@ -66,38 +61,4 @@ export const ChatMessageComponent = memo(ChatMessageInner, (prev, next) => {
   );
 });
 
-// ─── Legacy ChatMessage Component ────────────────────────────────────────────
-
-type MessageRole = 'user' | 'assistant' | 'system' | 'error';
-
-interface ChatMessageProps {
-  role: MessageRole;
-  content: string;
-  timestamp?: Date;
-}
-
-const LEGACY_ROLE_CONFIG: Record<MessageRole, { prefix: string; color: Parameters<typeof Text>[0]['color']; bgLabel: string }> = {
-  user:      { prefix: 'You', color: '#90EE90', bgLabel: '>' },
-  assistant: { prefix: 'LLM', color: '#FFD166', bgLabel: '>' },
-  system:    { prefix: 'Sys', color: '#FF4D4F', bgLabel: '>' },
-  error:     { prefix: 'Err', color: 'red',    bgLabel: '>' },
-};
-
-export function ChatMessage({ role, content, timestamp }: ChatMessageProps) {
-  const { prefix, color, bgLabel } = LEGACY_ROLE_CONFIG[role];
-  const timeStr = timestamp ? `[${timestamp.toLocaleTimeString()}] ` : '';
-
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={color} bold>{bgLabel} {prefix}</Text>
-        {timeStr && <Text color={UI_COLORS.subtitle}>  {timeStr}</Text>}
-      </Box>
-      <Box paddingLeft={2}>
-        <Text wrap="wrap">{content}</Text>
-      </Box>
-    </Box>
-  );
-}
-
-export default ChatMessage;
+export default ChatMessageComponent;

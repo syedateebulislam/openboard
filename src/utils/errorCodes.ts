@@ -44,13 +44,45 @@ export function isLLMQuotaError(error: string | undefined | null): boolean {
   return Boolean(error) && QUOTA_PATTERN.test(error!);
 }
 
+const AUTH_PATTERN = /invalid[ _-]?(?:x-)?api[ _-]?key|incorrect api key|authentication[ _-]?error|unauthorized|401/i;
+const BAD_REQUEST_PATTERN = /does not support|unsupported (?:value|parameter)|400/i;
+const CONNECTION_PATTERN = /ECONNREFUSED|connection refused|fetch failed|network error|ENOTFOUND|EAI_AGAIN/i;
+const TIMEOUT_PATTERN = /timed? ?out|ETIMEDOUT|deadline exceeded/i;
+
 /**
- * A clear, actionable message for the user when an LLM call fails because the
- * provider quota/credits ran out. Falls back to the raw message otherwise.
+ * Content that *looks like* an error even though the provider returned it as a
+ * successful completion — e.g. a local stub/proxy echoing an upstream failure,
+ * or a gateway putting exception text in the assistant message body.
+ */
+export function isErrorShapedContent(text: string | undefined | null): boolean {
+  if (!text) return false;
+  const head = text.trim().slice(0, 300);
+  return /^\[[\w.-]+\] upstream error:|^(?:[\w.]+\.)?[A-Z]\w*(?:Exception|Error):|^Error:\s|"type"\s*:\s*"error"/.test(head);
+}
+
+/**
+ * Strip machine noise (exception class names, upstream-error wrappers) so the
+ * remaining text explains the failure in the provider's own words.
+ */
+function stripErrorNoise(raw: string): string {
+  let text = raw.trim();
+  text = text.replace(/^\[[\w.-]+\] upstream error:\s*/i, '');
+  // Peel leading exception-class prefixes like `com.openai.errors.BadRequestException:`
+  for (let i = 0; i < 3; i++) {
+    text = text.replace(/^(?:[\w$]+\.)*[A-Z][\w$]*(?:Exception|Error):\s*/, '').replace(/^Error:\s*/, '');
+  }
+  const firstLine = text.split('\n')[0]?.trim();
+  return firstLine || raw.trim();
+}
+
+/**
+ * One funnel for user-facing LLM failure text. Always returns something a
+ * person can act on — raw provider/exception text never reaches the user.
  */
 export function describeLLMError(error: string | undefined | null, providerName?: string): string {
   const raw = (error ?? '').trim() || 'Unknown LLM error';
   const provider = providerName ? ` (${providerName})` : '';
+  const cleaned = stripErrorNoise(raw);
   if (isLLMQuotaError(raw)) {
     return (
       `Your LLM quota or credits appear to be exhausted${provider}. ` +
@@ -58,7 +90,19 @@ export function describeLLMError(error: string | undefined | null, providerName?
       `Check your plan usage/billing, wait for the limit to reset, or switch providers with /config — then try again.`
     );
   }
-  return raw;
+  if (AUTH_PATTERN.test(raw)) {
+    return `The LLM provider${provider} rejected your API key. Re-enter it in Settings (or the setup wizard) and try again. Details: ${cleaned}`;
+  }
+  if (CONNECTION_PATTERN.test(raw)) {
+    return `Could not reach the LLM provider${provider}. If you use a local server (Ollama/LM Studio), make sure it is running, then try again. Details: ${cleaned}`;
+  }
+  if (TIMEOUT_PATTERN.test(raw)) {
+    return `The LLM request${provider} timed out. Large models can be slow — try again, or switch to a faster model with /model. Details: ${cleaned}`;
+  }
+  if (BAD_REQUEST_PATTERN.test(raw)) {
+    return `The LLM provider${provider} rejected the request settings. The selected model may not support them — try a different model with /model. Details: ${cleaned}`;
+  }
+  return `Generation failed${provider}: ${cleaned}`;
 }
 
 // Order matters: first match wins, so more specific patterns come first.

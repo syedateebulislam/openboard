@@ -27,9 +27,15 @@ interface Props {
   phaseStartedAt: number;
   /** Typical duration of this phase from run history (ms). */
   typicalMs?: number;
+  /**
+   * Phases of the CURRENT operation. A plain /build must read "[1/1] Building
+   * project", not "[5/8]" against the full create pipeline. Defaults to the
+   * full pipeline for operations that really run every phase.
+   */
+  phases?: PipelinePhase[];
 }
 
-export function PipelineProgress({ phase, pct, phaseStartedAt, typicalMs }: Props) {
+export function PipelineProgress({ phase, pct, phaseStartedAt, typicalMs, phases }: Props) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -38,8 +44,10 @@ export function PipelineProgress({ phase, pct, phaseStartedAt, typicalMs }: Prop
   }, []);
 
   const elapsedSec = Math.max(0, Math.floor((now - phaseStartedAt) / 1000));
-  const phaseNumber = Math.min(PHASE_ORDER.indexOf(phase) + 1, PHASE_ORDER.length - 1);
-  const phaseTotal = PHASE_ORDER.length - 1; // 'done' is not a working phase
+  const order = phases && phases.includes(phase) ? phases : PHASE_ORDER;
+  const working = order.filter((p) => p !== 'done');
+  const phaseNumber = Math.min(order.indexOf(phase) + 1, working.length);
+  const phaseTotal = working.length;
   const typicalText = typicalMs ? ` (usually ~${Math.round(typicalMs / 1000)}s)` : '';
 
   return (

@@ -68,13 +68,26 @@ describe('classifyAgentError', () => {
     expect(isLLMQuotaError(message)).toBe(true);
   });
 
-  it('describeLLMError surfaces an actionable quota message, else the raw error', () => {
+  it('describeLLMError surfaces an actionable quota message, else a cleaned fallback', () => {
     const quota = describeLLMError('insufficient_quota', 'openai-codex');
     expect(quota).toMatch(/quota or credits/i);
     expect(quota).toContain('openai-codex');
     expect(quota).toMatch(/\/config/);
-    expect(describeLLMError('Build failed: vite error')).toBe('Build failed: vite error');
+    expect(describeLLMError('Build failed: vite error')).toBe('Generation failed: Build failed: vite error');
     expect(isLLMQuotaError('Build failed: vite error')).toBe(false);
+  });
+
+  it('describeLLMError humanizes auth, connection, and model-constraint failures', () => {
+    expect(describeLLMError('401: Incorrect API key provided: sk-xxx', 'lmstudio'))
+      .toMatch(/rejected your API key/i);
+    expect(describeLLMError('fetch failed: ECONNREFUSED 127.0.0.1:1234', 'lmstudio'))
+      .toMatch(/make sure it is running/i);
+    expect(describeLLMError("400: Unsupported value: 'temperature' does not support 0.7 with this model."))
+      .toMatch(/try a different model/i);
+    // Exception-class noise is stripped from the fallback text.
+    const cleaned = describeLLMError('com.openai.errors.InternalException: something odd');
+    expect(cleaned).not.toContain('com.openai.errors');
+    expect(cleaned).toContain('something odd');
   });
 });
 
