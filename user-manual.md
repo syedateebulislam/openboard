@@ -106,7 +106,7 @@ to Local only requires either the Ollama or LM Studio provider.
 1. Open Dashboards.
 2. Select Add new dashboard.
 3. Choose a preset: Health, Finance, Grocery, Travel, Food, Shopping, Subscriptions, Utilities, Invoices, or Custom.
-4. Enter a CSV/XLSX/JSON file path.
+4. Enter a CSV/XLSX/JSON file path (or type `gmail` to use your synced Gmail inbox, once Gmail is connected in Settings).
 5. Enter the dashboard name.
 6. Confirm after data analysis.
 7. OpenBoard enters the internal LLM chat.
@@ -170,6 +170,7 @@ Commands must start with `/`.
 | `/build` | Build generated app |
 | `/update` | Regenerate from latest linked data using saved prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
+| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links your inbox as this board's data |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
@@ -245,16 +246,29 @@ Settings supports:
 - Update LLM provider
 - Re-enter GitHub token
 - Re-enter Vercel token
+- Gmail integration (connect account, sync options, disconnect)
 - Reset dashboard login
 - Run full setup wizard
 
 Use Settings when tokens cannot be decrypted or external auth fails.
+
+### Gmail Integration
+
+Connect your Gmail inbox as a live data source:
+
+1. Create a Google Cloud OAuth client of type **Desktop app** and copy its client ID + secret.
+2. Settings → Gmail integration → enter the OAuth client, then **Connect Google account**. Your browser opens Google's consent page (read-only scope); approve and return to the terminal.
+3. While the TUI is open, OpenBoard syncs new mail in the background (default every 5 minutes; configurable per query and interval). Closing the terminal stops the sync — it restarts automatically on the next launch. The Welcome screen shows a `✉ Gmail: … cached · last sync …` line.
+4. Use the inbox as data: type `gmail` as the file path when creating a dashboard, or `/mail use` in chat. `/update` refreshes charts from the newest mail.
+
+If the status shows **re-auth needed** (Google expired or revoked the token), open Settings → Gmail integration and reconnect. Disconnecting removes the stored tokens; the local cache file stays until you delete `~/.openboard/mail/`.
 
 ## Files OpenBoard Uses
 
 ```text
 ~/.openboard/config.json
 ~/.openboard/prompt-history/<dashboard-id>.json
+~/.openboard/mail/messages.json      (synced Gmail cache, when connected)
 projects/openboard-app-workspace-<id>/
 ```
 
