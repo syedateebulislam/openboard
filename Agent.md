@@ -333,7 +333,7 @@ Success shape:
   "verified": true,
   "runId": "run-2026-06-10-ab12cd34",
   "tokenUsage": { "promptTokens": 5200, "completionTokens": 3100, "estimated": false },
-  "writtenFiles": ["App.tsx", "components/UberRidesDashboard.tsx"]
+  "writtenFiles": ["components/UberRidesDashboard.tsx"]
 }
 ```
 
