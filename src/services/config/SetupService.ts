@@ -50,6 +50,14 @@ export interface SetupStatus {
   github: { username?: string } | null;
   vercel: boolean;
   dashboardAuth: boolean;
+  gmail: { email?: string; connected: boolean } | null;
+}
+
+export interface ConfigureGmailInput {
+  clientId?: string;
+  clientSecret?: string;
+  query?: string;
+  syncIntervalMinutes?: number;
 }
 
 export interface ConfigureLLMInput {
@@ -294,6 +302,37 @@ export class SetupService {
     return { configured: true, detail: `Dashboard login saved for "${user}".` };
   }
 
+  /**
+   * Save Gmail OAuth client credentials and sync options. The browser consent
+   * step is interactive-only, so headless setup stops at saved credentials and
+   * points at the TUI to finish connecting.
+   */
+  configureGmail(input: ConfigureGmailInput): SetupPartResult {
+    const clientId = input.clientId?.trim();
+    const clientSecret = input.clientSecret?.trim();
+    if (!clientId || !clientSecret) {
+      return {
+        configured: false,
+        error: 'Missing Gmail OAuth client (--gmail-client-id/--gmail-client-secret or OPENBOARD_GMAIL_CLIENT_ID/SECRET).',
+        errorCode: 'E_VALIDATION',
+      };
+    }
+    if (input.syncIntervalMinutes !== undefined
+      && (!Number.isInteger(input.syncIntervalMinutes) || input.syncIntervalMinutes < 1)) {
+      return { configured: false, error: 'Invalid --gmail-sync-interval: whole minutes, minimum 1.', errorCode: 'E_VALIDATION' };
+    }
+
+    this.config.set('gmail.clientId', clientId);
+    this.config.setEncrypted('gmail.clientSecret', clientSecret);
+    if (input.query?.trim()) this.config.set('gmail.query', input.query.trim());
+    if (input.syncIntervalMinutes !== undefined) this.config.set('gmail.syncIntervalMinutes', input.syncIntervalMinutes);
+
+    return {
+      configured: true,
+      detail: 'Gmail OAuth client saved. Browser consent is interactive — run `openboard` and finish in Settings › Gmail integration.',
+    };
+  }
+
   status(): SetupStatus {
     const provider = this.config.get('llm.provider') as string | undefined;
     const githubUser = this.config.get('github.username') as string | undefined;
@@ -313,6 +352,12 @@ export class SetupService {
       github: hasGithub ? { username: githubUser } : null,
       vercel: this.config.has('vercel.token'),
       dashboardAuth: Boolean(this.config.get('credentials.username')) && this.config.has('credentials.passwordHash'),
+      gmail: this.config.has('gmail.clientId')
+        ? {
+            email: this.config.get('gmail.email') as string | undefined,
+            connected: this.config.has('gmail.refreshToken') && this.config.get('gmail.needsReauth') !== true,
+          }
+        : null,
     };
   }
 }
