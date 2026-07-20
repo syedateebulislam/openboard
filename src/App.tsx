@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
@@ -16,6 +16,8 @@ import { VercelService } from './services/deploy/VercelService.js';
 import { AuthService } from './services/auth/AuthService.js';
 import type { LLMConfig, LLMProviderName } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
+import type { MailSchedulerStatus } from './types/mail.js';
+import { startMailScheduler } from './services/mail/mailScheduler.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -584,6 +586,12 @@ export function App() {
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
   const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
+  const [mailStatus, setMailStatus] = useState<MailSchedulerStatus | null>(null);
+
+  // In-process Gmail sync loop: lives for the whole TUI session, dies with the
+  // terminal. startMailScheduler no-ops when Gmail is not connected and
+  // returns its own disposer, so it doubles as the effect cleanup.
+  useEffect(() => startMailScheduler(setMailStatus), []);
 
   const navigate = (s: Screen) => setScreen(s);
 
@@ -621,8 +629,8 @@ export function App() {
   }, []);
 
   switch (screen) {
-    case 'welcome': 
-      return <WelcomeScreen onNavigate={navigate} />;
+    case 'welcome':
+      return <WelcomeScreen onNavigate={navigate} mailStatus={mailStatus} />;
     
     case 'setup': 
       return <SetupWizard onComplete={handleSetupComplete} onNavigate={navigate} />;
@@ -679,7 +687,7 @@ export function App() {
     case 'deploy':
       return <DeployPlaceholder onNavigate={navigate} />;
     
-    default: 
-      return <WelcomeScreen onNavigate={navigate} />;
+    default:
+      return <WelcomeScreen onNavigate={navigate} mailStatus={mailStatus} />;
   }
 }
