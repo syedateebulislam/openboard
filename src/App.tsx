@@ -7,6 +7,7 @@ import { SetupWizard } from './screens/SetupWizard.js';
 import { BoardCreationScreen } from './screens/BoardCreationScreen.js';
 import { ChatScreen } from './screens/ChatScreen.js';
 import { ManageBoardsScreen } from './screens/ManageBoardsScreen.js';
+import { GmailSettingsScreen } from './screens/GmailSettingsScreen.js';
 import { ProjectManager } from './services/project/ProjectManager.js';
 import { ConfigService } from './services/config/ConfigService.js';
 import { LLMService } from './services/llm/LLMService.js';
@@ -44,7 +45,8 @@ export type Screen =
   | 'settings-vercel'
   | 'settings-github'
   | 'settings-llm'
-  | 'settings-dashboard-auth';
+  | 'settings-dashboard-auth'
+  | 'settings-gmail';
 
 // Placeholder components with "Go Back" option
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
@@ -66,6 +68,9 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
           { label: 'Re-enter Vercel token', value: 'vercel' },
         ]
       : []),
+    // Gmail is a local data input (not a deploy output), so it stays visible
+    // in every app mode without weakening the local/hybrid privacy contract.
+    { label: 'Gmail integration', value: 'gmail' },
     { label: 'Reset dashboard login', value: 'dashboard-auth' },
     { label: 'Run full setup wizard', value: 'setup' },
     { label: '← Go Back', value: 'back' },
@@ -83,6 +88,7 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
             else if (item.value === 'llm') onNavigate('settings-llm');
             else if (item.value === 'github') onNavigate('settings-github');
             else if (item.value === 'vercel') onNavigate('settings-vercel');
+            else if (item.value === 'gmail') onNavigate('settings-gmail');
             else if (item.value === 'dashboard-auth') onNavigate('settings-dashboard-auth');
             else if (item.value === 'setup') onNavigate('setup');
             else onNavigate('welcome');
@@ -587,11 +593,13 @@ export function App() {
   const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
   const [mailStatus, setMailStatus] = useState<MailSchedulerStatus | null>(null);
+  const [mailConfigVersion, setMailConfigVersion] = useState(0);
 
   // In-process Gmail sync loop: lives for the whole TUI session, dies with the
   // terminal. startMailScheduler no-ops when Gmail is not connected and
   // returns its own disposer, so it doubles as the effect cleanup.
-  useEffect(() => startMailScheduler(setMailStatus), []);
+  // mailConfigVersion re-arms it after connect/disconnect in Gmail settings.
+  useEffect(() => startMailScheduler(setMailStatus), [mailConfigVersion]);
 
   const navigate = (s: Screen) => setScreen(s);
 
@@ -683,6 +691,14 @@ export function App() {
 
     case 'settings-dashboard-auth':
       return <DashboardAuthSettings onNavigate={navigate} />;
+
+    case 'settings-gmail':
+      return (
+        <GmailSettingsScreen
+          onNavigate={navigate}
+          onGmailConfigured={() => setMailConfigVersion((n) => n + 1)}
+        />
+      );
     
     case 'deploy':
       return <DeployPlaceholder onNavigate={navigate} />;
