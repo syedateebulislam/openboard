@@ -39,6 +39,9 @@ import { UI_COLORS } from '../theme.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
+import { GmailAuthService } from '../services/mail/GmailAuthService.js';
+import { MailCacheService } from '../services/mail/MailCacheService.js';
+import { MailSyncService } from '../services/mail/MailSyncService.js';
 
 const projectManager = new ProjectManager();
 const projectCommands = new ProjectCommandHandlers(projectManager);
@@ -1115,6 +1118,84 @@ For the current board "${board.title}":
           finishLog(logId);
           setIsLoading(false);
         }
+        return;
+      }
+
+      // ── /mail — Gmail sync status / manual sync / link inbox as data ───────
+      if (cmd.type === 'mail') {
+        const sub = cmd.args[0]?.toLowerCase();
+        const auth = new GmailAuthService();
+        const cache = new MailCacheService();
+
+        if (sub === undefined) {
+          const authStatus = auth.status();
+          if (!authStatus.connected && !authStatus.needsReauth) {
+            addMsg(newMsg('system', 'Gmail is not connected. Open Settings › Gmail integration (/config) to set it up.'));
+            return;
+          }
+          const state = cache.readSyncState();
+          const lines = [
+            `Gmail: ${authStatus.needsReauth ? 're-auth needed — reconnect in Settings › Gmail integration' : `connected as ${authStatus.email ?? 'unknown'}`}`,
+            `Cached messages: ${state.totalCached ?? cache.readMessages().length}`,
+            `Last sync: ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : 'never'}${state.lastSyncCount !== undefined ? ` (${state.lastSyncCount} fetched)` : ''}`,
+            `Cache file: ${cache.cachePath}`,
+          ];
+          if (state.lastError) lines.push(`Last error: ${state.lastError}`);
+          lines.push('', 'Usage: /mail sync fetches now · /mail use links the inbox as this board\'s data source');
+          addMsg(newMsg('system', lines.join('\n')));
+          return;
+        }
+
+        if (sub === 'sync') {
+          if (!auth.isConfigured()) {
+            addMsg(newMsg('error', 'Gmail is not connected. Open Settings › Gmail integration (/config) first.'));
+            return;
+          }
+          setIsLoading(true);
+          const logId = startLogMsg('Syncing Gmail…');
+          const onProgress = createProgressCallback(logId);
+          try {
+            const result = await new MailSyncService({ auth }).sync();
+            onProgress(result.ok
+              ? `Fetched ${result.fetched} message(s) — ${result.totalCached} cached at ${cache.cachePath}`
+              : `Sync failed: ${result.error}`);
+          } finally {
+            finishLog(logId);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        if (sub === 'use') {
+          if (!existsSync(cache.cachePath)) {
+            addMsg(newMsg('error', 'No Gmail cache yet. Connect Gmail in Settings and run /mail sync first.'));
+            return;
+          }
+          setIsLoading(true);
+          const logId = startLogMsg('Linking Gmail inbox as this dashboard\'s data source…');
+          const onProgress = createProgressCallback(logId);
+          try {
+            const parsed = await DataParserService.parse(cache.cachePath);
+            const analysis = DataAnalyzer.analyze(parsed);
+            const summary = DataAnalyzer.generateSummary(analysis);
+            // board is shared with App state; updating in place keeps later
+            // commands (/data, /update) reading the new source this session.
+            board.dataFiles = [cache.cachePath];
+            board.dataSummary = summary;
+            new BoardRegistryService().upsertBoard(board);
+            onProgress(`Linked ${cache.cachePath}`);
+            onProgress(`Rows: ${analysis.rowCount} · Columns: ${analysis.columnCount}`);
+            onProgress('The background sync keeps this file fresh — run /update to regenerate charts from new mail.');
+          } catch (error: any) {
+            onProgress(`Could not link Gmail cache: ${error.message}`);
+          } finally {
+            finishLog(logId);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        addMsg(newMsg('error', `Unknown /mail option "${cmd.args[0]}". Use /mail, /mail sync, or /mail use.`));
         return;
       }
 
