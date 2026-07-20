@@ -4,7 +4,7 @@ This manual is for humans using the OpenBoard terminal UI.
 
 ## What OpenBoard Does
 
-OpenBoard turns CSV/JSON data into a deployed analytics app. It creates one shared React app called the OpenBoard workspace. Each dashboard you add becomes a tab in that app.
+OpenBoard turns CSV/Excel/JSON data into a deployed analytics app. It creates one shared React app called the OpenBoard workspace. Each dashboard you add becomes a tab in that app; tab composition is managed by OpenBoard itself, so one change can never break another dashboard's tab.
 
 The workflow is:
 
@@ -46,12 +46,19 @@ The TUI opens with:
 
 Menu options:
 
-- LLM Setup
+- Setup (shown as "Get started — set up OpenBoard" until you configure an LLM)
 - Dashboards
 - Settings
 - Exit
 
+Until setup has run, the mode line reads "not configured yet — run Setup to choose one".
+
 ## First-Time Setup
+
+On a fresh install `openboard` opens the setup wizard automatically — you don't
+have to find it in the menu. Inside the wizard, **ESC or "← Go Back" steps back
+one screen** (from the first screen it returns to the menu), so a wrong choice
+never means restarting.
 
 The setup wizard asks for your **mode first**, so you know from the beginning
 what you will get at the end — and what leaves your machine:
@@ -97,19 +104,23 @@ to Local only requires either the Ollama or LM Studio provider.
 ## Create A Dashboard
 
 1. Open Dashboards.
-2. Select Add new dashboard to UI.
-3. Choose preset: Health, Finance, Grocery, or Custom.
-4. Enter a CSV/JSON file path.
-5. Enter dashboard name.
+2. Select Add new dashboard.
+3. Choose a preset: Health, Finance, Grocery, Travel, Food, Shopping, Subscriptions, Utilities, Invoices, or Custom.
+4. Enter a CSV/XLSX/JSON file path.
+5. Enter the dashboard name.
 6. Confirm after data analysis.
 7. OpenBoard enters the internal LLM chat.
+
+If no LLM is configured yet, step 1 shows a warning up front pointing to Setup.
+If the data file can't be read or the name is invalid, ESC returns you to that
+field with your input preserved — you never restart from the preset step.
 
 For a newly configured dashboard, the chat header shows:
 
 ```text
-New Dashboard (<configured LLM>)
-Internal LLM chat for dashboard creation
-<static remark>
+New Dashboard
+LLM - <provider> · <model> · effort: <level> · Mode: <app mode>
+Chat to create or modify this dashboard
 ```
 
 OpenBoard auto-generates the first dashboard from your data only on this first creation flow.
@@ -121,13 +132,8 @@ OpenBoard auto-generates the first dashboard from your data only on this first c
 
 Modifying an existing dashboard does not regenerate the UI from scratch. It opens the internal chat so you can ask for changes.
 
-The chat header shows:
-
-```text
-<dashboard title> (<configured LLM>)
-Internal LLM chat for dashboard creation
-<static remark>
-```
+The chat header shows the dashboard title with the same LLM/model/effort/mode
+line as above.
 
 ## Internal Chat
 
@@ -135,10 +141,14 @@ Chat roles:
 
 | Label | Meaning |
 |---|---|
-| `You` | Your message |
-| `LLM` | Model response |
-| `Sys` | OpenBoard system/status message |
-| `Err` | Error |
+| `You` | Your message (green) |
+| `LLM` | Model response (yellow) |
+| `Sys` | OpenBoard system/status message (cyan — informational, never an error) |
+| `Err` | Error (red — the only red messages) |
+
+Errors are always shown in plain, actionable language — a bad API key,
+unreachable local server, unsupported model setting, or exhausted quota each get
+a specific hint. Raw provider error text never appears as a model reply.
 
 The first system message is:
 
@@ -146,7 +156,7 @@ The first system message is:
 Sys: Type a message to generate components or use slash commands (/help for list)
 ```
 
-While the LLM is working, OpenBoard shows a compact spinner and a sarcastic loading line. The loading line changes every 10 seconds.
+While waiting for the first response token, OpenBoard shows a compact spinner and a playful loading line (rotates every 10 seconds). Once the model starts streaming — or a build/deploy pipeline starts — a single elapsed-time/progress indicator takes over. Pipeline steps are numbered against the running operation (a plain `/build` shows `[1/1] Building project`).
 
 ## Chat Commands
 
@@ -163,6 +173,7 @@ Commands must start with `/`.
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
+| `/model` | Show or switch the LLM model and effort |
 | `/status` | Show dashboard/project status |
 | `/config` | Open settings |
 | `/commands` | Show command palette |
@@ -211,20 +222,21 @@ OpenBoard reads the linked data file, uses saved prompt history, asks the LLM to
 
 The Dashboards menu lets you:
 
-- Add new dashboard to UI
+- Add new dashboard
 - Open existing dashboard chat
+- Modify all / Regenerate all / Remove all (bulk actions)
 - Remove dashboard
 - Refresh list
 
 Removing a dashboard runs a full cleanup so the deployed app matches the registry:
 
-1. Asks the configured LLM to remove its tab/imports/content from `src/App.tsx`.
+1. Deterministically removes its tab from OpenBoard's dashboard manifest (no LLM involved).
 2. Deletes the dashboard's orphaned component files that no remaining dashboard uses.
 3. Deletes the dashboard's protected API data (`api/_data/<slug>.json` and its entry in the shared data module).
 4. Removes it from the OpenBoard registry and removes its local prompt-history file.
-5. Rebuilds, pushes, and deploys so the live app no longer shows the dashboard.
+5. Refreshes the master Overview tab, then rebuilds (and pushes/deploys in All remote mode).
 
-If code cleanup fails, the dashboard is left registered so the live app is never left half-removed. Removal needs the configured LLM (for the App.tsx edit) and the same GitHub/Vercel auth as deploy.
+If code cleanup fails, the dashboard is left registered so the live app is never left half-removed. Removing the last dashboard restores the empty starter app.
 
 ## Settings
 

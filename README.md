@@ -57,7 +57,7 @@ openboard
 
 ## Setup
 
-OpenBoard needs these configured once:
+On a fresh install (no LLM configured), `openboard` opens the setup wizard automatically; afterwards it starts at the main menu. OpenBoard needs these configured once:
 
 - App mode: Local only / Hybrid / All remote (asked first — see [Modes](#modes--pick-your-privacy-level-first)).
 - LLM provider: OpenAI API, OpenAI Codex via ChatGPT subscription, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, local Ollama, or local LM Studio.
@@ -93,7 +93,7 @@ OpenBoard uses one master generated React app.
 - Modify a dashboard: Dashboards -> Modify: `<dashboard title>`.
 - Remove a dashboard: Dashboards -> Remove: `<dashboard title>`.
 
-Removing a dashboard updates OpenBoard's registry and triggers an LLM cleanup pass to remove the dashboard tab/components from the generated `App.tsx`. Removing the last dashboard deterministically restores the blank Welcome shell (no LLM call).
+Dashboard tabs are **product-owned and deterministic**: OpenBoard regenerates `src/generated/dashboardManifest.tsx` (tab list, imports, and routing) from its registry before every build, preview, and deploy — one model response can never drop or overwrite another dashboard's tab. Removing a dashboard deterministically drops its tab from the manifest, deletes its orphaned components and protected data, and rebuilds; removing the last dashboard restores the blank Welcome shell (no LLM call).
 
 ### Master Overview tab
 
@@ -131,7 +131,7 @@ Internal chat commands start with `/`.
 | `/commands` | Show command palette |
 | `/help` | Show command help |
 
-When typing `/`, the TUI shows matching command suggestions with color coding. The chat labels are fixed-width: `You`, `LLM`, `Sys`, and `Err`.
+When typing `/`, the TUI shows matching command suggestions with color coding. The chat labels are fixed-width: `You`, `LLM`, `Sys` (cyan, informational), and `Err` (red — reserved for real failures). Provider failures are summarized in plain, actionable language (invalid key, unreachable local server, unsupported model settings, quota) instead of raw provider error text, and successful `/build`/`/push` runs end with the suggested next command. The chat header shows the configured LLM, model, effort, and app mode.
 
 ## Agent Automation
 
@@ -195,7 +195,7 @@ The generated app uses:
 - AuthProvider/LoginPage from the template
 - Vercel environment variables for dashboard credentials
 
-Shell-owned files (App.css, header components, api handlers, hooks) are re-synced from the template on every deploy, so template fixes reach existing projects; the LLM owns `App.tsx` and the dashboard components.
+Shell-owned files (`App.tsx`, App.css, header components, api handlers, hooks) are re-synced from the template on every deploy, so template fixes reach existing projects. Tab composition lives in the product-owned `src/generated/dashboardManifest.tsx`; the LLM owns only the per-dashboard components (`components/*.tsx`) — `App.tsx`, the manifest, and `MasterDashboard.tsx` in model responses are ignored.
 
 ## Data Privacy & Security
 
