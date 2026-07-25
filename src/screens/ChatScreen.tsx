@@ -19,17 +19,19 @@ import type { PipelinePhase, PipelineEventSink } from '../services/project/pipel
 import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
 import { DashboardManifestService } from '../services/project/DashboardManifestService.js';
 import { RunStateService } from '../services/project/RunStateService.js';
+import type { RunRecord } from '../services/project/RunStateService.js';
 import { parseCommand, chatCommandsForMode, commandsTextForMode, helpTextForMode, formatUnknownCommandMessage } from '../utils/commandParser.js';
 import { appModeInfo, blockedDeployMessage, describeAppMode, getAppMode, modeAllowsDeploy } from '../config/appModes.js';
 import type { ChatMessage, BoardConfig } from '../types/board.js';
 import type { LLMProvider, LLMMessage } from '../types/llm.js';
 import { LLMService } from '../services/llm/LLMService.js';
+import { fetchInstalledModels } from '../services/llm/localModelDiscovery.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { ProjectManager } from '../services/project/ProjectManager.js';
 import { TemplateService } from '../services/template/TemplateService.js';
 import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer } from '../services/data/DataAnalyzer.js';
-import { SYSTEM_PROMPT } from '../services/llm/prompts/systemPrompt.js';
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_LOW } from '../services/llm/prompts/systemPrompt.js';
 import { extractFiles } from '../utils/codeExtractor.js';
 import { describeLLMError, isErrorShapedContent } from '../utils/errorCodes.js';
 import type { Screen } from '../App.js';
@@ -39,6 +41,9 @@ import { UI_COLORS } from '../theme.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
+import { GmailAuthService } from '../services/mail/GmailAuthService.js';
+import { MailCacheService } from '../services/mail/MailCacheService.js';
+import { MailSyncService } from '../services/mail/MailSyncService.js';
 
 const projectManager = new ProjectManager();
 const projectCommands = new ProjectCommandHandlers(projectManager);
@@ -104,6 +109,7 @@ interface Props {
 interface SendToLLMOptions {
   recordPrompt?: boolean;
   promptSource?: 'initial' | 'manual' | 'update';
+  signal?: AbortSignal;
   dataSummary?: string;
 }
 
@@ -187,6 +193,10 @@ export function ChatScreen({
   const streamingMsgRef = useRef<string | null>(null);
   const logMsgRef = useRef<string | null>(null);
   const lastOperationLogRef = useRef<string>('');
+  // What /stop can cancel right now, and which persisted run (if any) it should
+  // mark 'cancelled' so /resume has a "leftover task" to pick back up.
+  const activeAbortRef = useRef<AbortController | null>(null);
+  const activeRunRef = useRef<RunRecord | null>(null);
   const autoGenTriggered = useRef(false);
   const headerTitle = allBoards ? 'All Dashboards' : autoGenerateInitial ? 'New Dashboard' : board.title;
   const headerLLMInfo = llmProvider && llmMeta
@@ -372,7 +382,7 @@ export function ChatScreen({
   }, [board.outputDir]);
 
   // All-boards mode: apply one prompt to every dashboard and deploy once.
-  const runModifyAll = useCallback(async (text: string): Promise<void> => {
+  const runModifyAll = useCallback(async (text: string, signal?: AbortSignal): Promise<void> => {
     const projectDir = getActiveProjectDir();
     if (!projectDir) {
       addMsg(newMsg('error', 'No generated app workspace found. Create a dashboard first.'));
@@ -383,14 +393,14 @@ export function ChatScreen({
     const onProgress = createProgressCallback(logId);
     try {
       const service = new DashboardUpdateService(undefined, undefined, undefined, undefined, pipelineEventSink);
-      const result = await service.updateAllWithPrompt(text, onProgress);
+      const result = await service.updateAllWithPrompt(text, onProgress, undefined, signal);
       if (result.success) {
         onProgress(result.deployUrl ? `Modified all dashboards. Deployed: ${result.deployUrl}` : 'Modified all dashboards.');
       } else {
         onProgress(`Modify-all failed: ${describeLLMError(result.error, llmProvider?.name)}`);
       }
     } catch (error: any) {
-      onProgress(`Modify-all error: ${error.message}`);
+      onProgress(error?.name === 'AbortError' ? '⏹ Stopped by user.' : `Modify-all error: ${error.message}`);
     } finally {
       setPipeline(null);
       finishLog(logId);
@@ -514,7 +524,13 @@ export function ChatScreen({
   }, [board.id, board.title]);
 
   const runBuildPushDeploy = useCallback(
-    async (projectDir: string, label: string): Promise<void> => {
+    async (
+      projectDir: string,
+      label: string,
+      cancelOptions: { signal?: AbortSignal; run?: RunRecord } = {},
+    ): Promise<void> => {
+      const { signal, run } = cancelOptions;
+      const runs = new RunStateService();
       setIsLoading(true);
       const logId = startLogMsg(label);
       const reporter = makePipelineReporter(createProgressCallback(logId));
@@ -523,19 +539,22 @@ export function ChatScreen({
 
       try {
         reporter.phase('build');
+        if (run) runs.markPhase(run, 'build');
         onProgress('Running pre-deploy checks...');
         const preDeploy = projectManager.preDeployChecks(projectDir, onProgress);
         if (!preDeploy.success) {
           onProgress(`Pre-deploy checks failed: ${preDeploy.error}`);
+          if (run) runs.fail(run, preDeploy.error ?? 'Pre-deploy checks failed');
           return;
         }
 
         const info = projectManager.getProjectInfo(projectDir);
         if (info && !info.hasNodeModules) {
           onProgress('Installing dependencies...');
-          const installResult = await projectManager.install(projectDir, onProgress);
+          const installResult = await projectManager.install(projectDir, onProgress, signal);
           if (!installResult.success) {
             onProgress(`Install failed: ${installResult.error}`);
+            if (run) runs.fail(run, installResult.error ?? 'Install failed');
             return;
           }
         }
@@ -553,9 +572,10 @@ export function ChatScreen({
         await syncDashboardManifest(projectDir, onProgress);
 
         onProgress('Building project...');
-        const buildResult = await projectManager.build(projectDir, onProgress);
+        const buildResult = await projectManager.build(projectDir, onProgress, signal);
         if (!buildResult.success) {
           onProgress(`Build failed: ${buildResult.error}`);
+          if (run) runs.fail(run, buildResult.error ?? 'Build failed');
           return;
         }
         onProgress('Build successful');
@@ -565,15 +585,18 @@ export function ChatScreen({
           onProgress(`Mode is ${mode} — GitHub push and Vercel deploy are skipped by design.`);
           onProgress('Run /preview to view the updated dashboard locally.');
           reporter.phase('done');
+          if (run) runs.complete(run, { projectDir });
           return;
         }
 
         reporter.phase('push');
+        if (run) runs.markPhase(run, 'push');
         onProgress('Pushing to GitHub...');
         const pushResult = await projectManager.commitAndPush(
           projectDir,
           `Update: ${new Date().toISOString()}`,
           onProgress,
+          signal,
         );
 
         if (!pushResult.success) {
@@ -585,12 +608,19 @@ export function ChatScreen({
         }
 
         reporter.phase('deploy');
+        if (run) runs.markPhase(run, 'deploy');
         onProgress('Deploying to Vercel...');
-        const deployResult = await projectManager.deploy(projectDir, onProgress);
+        const deployResult = await projectManager.deploy(projectDir, onProgress, signal);
         reportDeployResult(deployResult, pushResult.success && pushResult.pushed === true, onProgress);
         reporter.phase('done');
+        if (run) runs.complete(run, { projectDir, deployUrl: deployResult.url });
       } catch (error: any) {
-        onProgress(`Pipeline error: ${error.message}`);
+        if (error?.name === 'AbortError') {
+          onProgress('⏹ Stopped by user.');
+        } else {
+          onProgress(`Pipeline error: ${error.message}`);
+          if (run) runs.fail(run, error.message);
+        }
       } finally {
         setPipeline(null);
         finishLog(logId);
@@ -629,7 +659,7 @@ ${boards.map((b) => `- ${b.title} (${b.name}, ${b.type})`).join('\n')}
 
 For the current board "${board.title}":
 - Return ONLY this board's dashboard component(s) (e.g. components/${board.title.replace(/[^A-Za-z0-9]/g, '')}Dashboard.tsx) and any helper files they need.
-- Do NOT return App.tsx, generated/dashboardManifest.tsx, tab/navigation code, authentication files, or components/MasterDashboard.tsx — OpenBoard owns the app shell and registers dashboard tabs automatically at build time.
+- Do NOT return App.tsx, generated/dashboardManifest.tsx, tab/navigation code, authentication files, components/MasterDashboard.tsx, or components/ErrorBoundary.tsx — OpenBoard owns the app shell and registers dashboard tabs automatically at build time.
 - Do not rename the app/header to "${board.title}". Use "${board.title}" only as a content heading.
 - Prefer dashboard-specific component names and files so additions do not overwrite other dashboards.`;
         }
@@ -639,7 +669,7 @@ For the current board "${board.title}":
 
       contextMessages.push({
         role: 'system',
-        content: SYSTEM_PROMPT + boardContext,
+        content: (board.uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT) + boardContext,
       });
 
       // Include recent chat history for context continuity
@@ -678,7 +708,8 @@ For the current board "${board.title}":
         (file) =>
           file.path !== 'App.tsx' &&
           !file.path.startsWith('generated/') &&
-          file.path !== 'components/MasterDashboard.tsx',
+          file.path !== 'components/MasterDashboard.tsx' &&
+          file.path !== 'components/ErrorBoundary.tsx',
       );
       if (files.length !== extracted.length) {
         addMsg(newMsg('system', 'Skipped App.tsx/layout files from the response — OpenBoard manages the app layout, tabs, and Overview automatically.'));
@@ -724,6 +755,10 @@ For the current board "${board.title}":
       const streamMsg = newMsg('assistant', '', true);
       addMsg(streamMsg);
       streamingMsgRef.current = streamMsg.id;
+      // A local model's *total* context (prompt + completion) is often small —
+      // trimming the system prompt alone isn't enough if the completion budget
+      // still assumes a large-context provider.
+      const maxTokens = board.uiQuality === 'low' ? 4096 : 8192;
 
       try {
         let fullContent = '';
@@ -749,7 +784,8 @@ For the current board "${board.title}":
           for await (const chunk of llmProvider.stream({
             messages: contextMessages,
             temperature: 0.7,
-            maxTokens: 8192,
+            maxTokens,
+            signal: options.signal,
           })) {
             if (chunk.text) receivedContent = true;
             fullContent += chunk.text;
@@ -763,7 +799,8 @@ For the current board "${board.title}":
             fullContent = await llmProvider.complete({
               messages: contextMessages,
               temperature: 0.7,
-              maxTokens: 8192,
+              maxTokens,
+              signal: options.signal,
             });
             receivedContent = true;
             updateStreamingMsg(streamMsg.id, fullContent, true);
@@ -818,6 +855,10 @@ For the current board "${board.title}":
         }
         return writtenFiles;
       } catch (err: any) {
+        if (err?.name === 'AbortError') {
+          updateStreamingMsg(streamMsg.id, '⏹ Stopped by user.', true);
+          return [];
+        }
         const rawMessage = err.message || 'Unknown LLM error';
         // One friendly error message; the assistant bubble only notes the failure.
         updateStreamingMsg(streamMsg.id, 'Generation failed — see the error below.', true);
@@ -838,7 +879,10 @@ For the current board "${board.title}":
     if (!llmProvider || !board.dataSummary || !getActiveProjectDir()) return;
 
     autoGenTriggered.current = true;
-    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoard master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. Include at least 2-3 charts and some metric/stat cards. Return only this dashboard's component files — OpenBoard registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".`;
+    const featureClause = board.uiQuality === 'low'
+      ? 'Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.'
+      : 'Include at least 2-3 charts and some metric/stat cards.';
+    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoard master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. ${featureClause} Return only this dashboard's component files — OpenBoard registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".`;
 
     addMsg(newMsg('system', 'Auto-generating initial dashboard from your data...'));
     setIsLoading(true);
@@ -861,15 +905,21 @@ For the current board "${board.title}":
 
   const handleSubmit = useCallback(
     async (text: string) => {
-      if (!text.trim() || isLoading) return;
+      if (!text.trim()) return;
+      // /stop must be able to interrupt whatever is already in flight, so it
+      // alone is exempt from the isLoading gate below.
+      if (isLoading && !/^\/stop$/i.test(text.trim())) return;
       setInput('');
       setScrollOffset(0); // sending snaps the chat back to the latest message
 
       const userMsg = newMsg('user', text);
       addMsg(userMsg);
 
-      // Handle pending confirmation for destructive actions
-      if (pendingConfirm) {
+      // Handle pending confirmation for destructive actions. /stop is exempt —
+      // otherwise it's swallowed here as "not yes" (shows "Cancelled." while a
+      // confirmed deploy/push pipeline keeps running in the background) and
+      // never reaches the actual cmd.type === 'stop' handler below.
+      if (pendingConfirm && !/^\/stop$/i.test(text.trim())) {
         const confirmed = text.toLowerCase() === 'yes' || text.toLowerCase() === 'y';
         if (confirmed) {
           const projectDir = getActiveProjectDir();
@@ -881,6 +931,8 @@ For the current board "${board.title}":
 
           if (pendingConfirm === 'deploy') {
             setIsLoading(true);
+            const deployController = new AbortController();
+            activeAbortRef.current = deployController;
             const logId = startLogMsg('Confirmed. Starting full deploy pipeline...');
             const reporter = makePipelineReporter(createProgressCallback(logId));
             const onProgress = reporter.progress;
@@ -913,7 +965,7 @@ For the current board "${board.title}":
 
               // Step 1: Build the project
               onProgress('Building project...');
-              const buildResult = await projectManager.build(projectDir, onProgress);
+              const buildResult = await projectManager.build(projectDir, onProgress, deployController.signal);
 
               if (!buildResult.success) {
                 onProgress(`Build failed: ${buildResult.error}`);
@@ -932,6 +984,7 @@ For the current board "${board.title}":
                 projectDir,
                 `Deploy: ${new Date().toISOString()}`,
                 onProgress,
+                deployController.signal,
               );
 
               if (!pushResult.success) {
@@ -945,7 +998,7 @@ For the current board "${board.title}":
               // Step 3: Deploy to Vercel
               reporter.phase('deploy');
               onProgress('Deploying to Vercel...');
-              const deployResult = await projectManager.deploy(projectDir, onProgress);
+              const deployResult = await projectManager.deploy(projectDir, onProgress, deployController.signal);
               reportDeployResult(deployResult, pushResult.success && pushResult.pushed === true, onProgress);
 
               reporter.phase('done');
@@ -953,13 +1006,17 @@ For the current board "${board.title}":
               finishLog(logId);
               setIsLoading(false);
             } catch (error: any) {
-              onProgress(`Deploy pipeline error: ${error.message}`);
+              onProgress(error?.name === 'AbortError' ? '⏹ Stopped by user.' : `Deploy pipeline error: ${error.message}`);
               setPipeline(null);
               finishLog(logId);
               setIsLoading(false);
+            } finally {
+              if (activeAbortRef.current === deployController) activeAbortRef.current = null;
             }
           } else if (pendingConfirm === 'push') {
             setIsLoading(true);
+            const pushController = new AbortController();
+            activeAbortRef.current = pushController;
             const logId = startLogMsg('Confirmed. Committing and pushing to GitHub...');
             const onProgress = createProgressCallback(logId);
 
@@ -968,6 +1025,7 @@ For the current board "${board.title}":
                 projectDir,
                 `Update: ${new Date().toISOString()}`,
                 onProgress,
+                pushController.signal,
               );
 
               if (!result.success) {
@@ -981,9 +1039,11 @@ For the current board "${board.title}":
               finishLog(logId);
               setIsLoading(false);
             } catch (error: any) {
-              onProgress(`Error: ${error.message}`);
+              onProgress(error?.name === 'AbortError' ? '⏹ Stopped by user.' : `Error: ${error.message}`);
               finishLog(logId);
               setIsLoading(false);
+            } finally {
+              if (activeAbortRef.current === pushController) activeAbortRef.current = null;
             }
           }
         } else {
@@ -1018,12 +1078,34 @@ For the current board "${board.title}":
         if (cmd.args.length === 0) {
           const currentModel = llmMeta?.model ?? getDefaultModel(provider);
           const currentEffort = llmMeta?.effort ?? DEFAULT_EFFORT;
-          const models = (MODEL_CHOICES[provider] ?? [])
-            .map((c) => `  - ${c.value}${c.value === currentModel ? '  (current)' : ''}`)
-            .join('\n') || '  (enter any model name for this provider)';
+
+          let modelsHeading = 'Available models:';
+          let models: string;
+          if (provider === 'ollama' || provider === 'lmstudio') {
+            const host = provider === 'ollama'
+              ? (config.get('llm.ollamaHost') as string | undefined) ?? 'http://127.0.0.1:11434'
+              : (config.get('llm.baseUrl') as string | undefined) ?? 'http://127.0.0.1:1234/v1';
+            const result = await fetchInstalledModels(provider, host);
+            if (result.status === 'ok') {
+              modelsHeading = `Installed models (live from ${provider === 'ollama' ? 'Ollama' : 'LM Studio'}):`;
+              models = result.models
+                .map((m) => `  - ${m.value}${m.value === currentModel ? '  (current)' : ''}`)
+                .join('\n');
+            } else {
+              modelsHeading = `${result.message}\n\nSuggested models (not verified installed):`;
+              models = (MODEL_CHOICES[provider] ?? [])
+                .map((c) => `  - ${c.value}${c.value === currentModel ? '  (current)' : ''}`)
+                .join('\n');
+            }
+          } else {
+            models = (MODEL_CHOICES[provider] ?? [])
+              .map((c) => `  - ${c.value}${c.value === currentModel ? '  (current)' : ''}`)
+              .join('\n') || '  (enter any model name for this provider)';
+          }
+
           addMsg(newMsg(
             'system',
-            `Provider: ${provider}\nModel: ${currentModel}\nEffort: ${currentEffort}\n\nAvailable models:\n${models}\n\nEffort levels: ${LLM_EFFORTS.join(', ')}\n\nUsage:\n  /model <model>            switch model\n  /model <model> <effort>   switch model + effort\n  /model effort <effort>    switch effort only`,
+            `Provider: ${provider}\nModel: ${currentModel}\nEffort: ${currentEffort}\n\n${modelsHeading}\n${models}\n\nEffort levels: ${LLM_EFFORTS.join(', ')}\n\nUsage:\n  /model <model>            switch model\n  /model <model> <effort>   switch model + effort\n  /model effort <effort>    switch effort only`,
           ));
           return;
         }
@@ -1056,9 +1138,16 @@ For the current board "${board.title}":
           initLLMFromConfig();
           const finalModel = newModel ?? llmMeta?.model ?? getDefaultModel(provider);
           const finalEffort = newEffort ?? llmMeta?.effort ?? DEFAULT_EFFORT;
-          const knownModels = MODEL_CHOICES[provider] ?? [];
-          const unknownNote = newModel && knownModels.length > 0 && !knownModels.some((c) => c.value === newModel)
-            ? `\nNote: "${newModel}" is not in the known ${provider} model list — make sure it exists.`
+          let knownModelValues = (MODEL_CHOICES[provider] ?? []).map((c) => c.value);
+          if (newModel && (provider === 'ollama' || provider === 'lmstudio')) {
+            const host = provider === 'ollama'
+              ? (config.get('llm.ollamaHost') as string | undefined) ?? 'http://127.0.0.1:11434'
+              : (config.get('llm.baseUrl') as string | undefined) ?? 'http://127.0.0.1:1234/v1';
+            const result = await fetchInstalledModels(provider, host);
+            if (result.status === 'ok') knownModelValues = result.models.map((m) => m.value);
+          }
+          const unknownNote = newModel && knownModelValues.length > 0 && !knownModelValues.includes(newModel)
+            ? `\nNote: "${newModel}" was not found in the ${provider === 'ollama' || provider === 'lmstudio' ? 'live model list' : `known ${provider} model list`} — make sure it exists.`
             : '';
           addMsg(newMsg('system', `LLM updated: ${provider} · ${finalModel} · effort: ${finalEffort}. Takes effect on the next LLM call.${unknownNote}`));
         } catch (error: any) {
@@ -1118,6 +1207,84 @@ For the current board "${board.title}":
         return;
       }
 
+      // ── /mail — Gmail sync status / manual sync / link inbox as data ───────
+      if (cmd.type === 'mail') {
+        const sub = cmd.args[0]?.toLowerCase();
+        const auth = new GmailAuthService();
+        const cache = new MailCacheService();
+
+        if (sub === undefined) {
+          const authStatus = auth.status();
+          if (!authStatus.connected && !authStatus.needsReauth) {
+            addMsg(newMsg('system', 'Gmail is not connected. Open Settings › Gmail integration (/config) to set it up.'));
+            return;
+          }
+          const state = cache.readSyncState();
+          const lines = [
+            `Gmail: ${authStatus.needsReauth ? 're-auth needed — reconnect in Settings › Gmail integration' : `connected as ${authStatus.email ?? 'unknown'}`}`,
+            `Cached messages: ${state.totalCached ?? cache.readMessages().length}`,
+            `Last sync: ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : 'never'}${state.lastSyncCount !== undefined ? ` (${state.lastSyncCount} fetched)` : ''}`,
+            `Cache file: ${cache.cachePath}`,
+          ];
+          if (state.lastError) lines.push(`Last error: ${state.lastError}`);
+          lines.push('', 'Usage: /mail sync fetches now · /mail use links the inbox as this board\'s data source');
+          addMsg(newMsg('system', lines.join('\n')));
+          return;
+        }
+
+        if (sub === 'sync') {
+          if (!auth.isConfigured()) {
+            addMsg(newMsg('error', 'Gmail is not connected. Open Settings › Gmail integration (/config) first.'));
+            return;
+          }
+          setIsLoading(true);
+          const logId = startLogMsg('Syncing Gmail…');
+          const onProgress = createProgressCallback(logId);
+          try {
+            const result = await new MailSyncService({ auth }).sync();
+            onProgress(result.ok
+              ? `Fetched ${result.fetched} message(s) — ${result.totalCached} cached at ${cache.cachePath}`
+              : `Sync failed: ${result.error}`);
+          } finally {
+            finishLog(logId);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        if (sub === 'use') {
+          if (!existsSync(cache.cachePath)) {
+            addMsg(newMsg('error', 'No Gmail cache yet. Connect Gmail in Settings and run /mail sync first.'));
+            return;
+          }
+          setIsLoading(true);
+          const logId = startLogMsg('Linking Gmail inbox as this dashboard\'s data source…');
+          const onProgress = createProgressCallback(logId);
+          try {
+            const parsed = await DataParserService.parse(cache.cachePath);
+            const analysis = DataAnalyzer.analyze(parsed);
+            const summary = DataAnalyzer.generateSummary(analysis);
+            // board is shared with App state; updating in place keeps later
+            // commands (/data, /update) reading the new source this session.
+            board.dataFiles = [cache.cachePath];
+            board.dataSummary = summary;
+            new BoardRegistryService().upsertBoard(board);
+            onProgress(`Linked ${cache.cachePath}`);
+            onProgress(`Rows: ${analysis.rowCount} · Columns: ${analysis.columnCount}`);
+            onProgress('The background sync keeps this file fresh — run /update to regenerate charts from new mail.');
+          } catch (error: any) {
+            onProgress(`Could not link Gmail cache: ${error.message}`);
+          } finally {
+            finishLog(logId);
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        addMsg(newMsg('error', `Unknown /mail option "${cmd.args[0]}". Use /mail, /mail sync, or /mail use.`));
+        return;
+      }
+
       // ── /status ────────────────────────────────────────────────────────────
       if (cmd.type === 'status') {
         const providerInfo = llmProvider
@@ -1154,6 +1321,78 @@ For the current board "${board.title}":
         return;
       }
 
+      // ── stop ───────────────────────────────────────────────────────────────
+      if (cmd.type === 'stop') {
+        if (!isLoading || !activeAbortRef.current) {
+          addMsg(newMsg('system', 'Nothing is currently running.'));
+          return;
+        }
+        activeAbortRef.current.abort();
+        activeAbortRef.current = null;
+        if (streamingMsgRef.current) {
+          updateStreamingMsg(streamingMsgRef.current, '⏹ Stopped by user.', true);
+        }
+        if (logMsgRef.current) {
+          appendLog(logMsgRef.current, '⏹ Stopped by user.');
+        }
+        if (activeRunRef.current) {
+          new RunStateService().cancel(activeRunRef.current, 'Stopped by user');
+          activeRunRef.current = null;
+          addMsg(newMsg('system', `Stopped. Run /resume to pick "${board.title}" back up later.`));
+        } else {
+          addMsg(newMsg('system', 'Stopped.'));
+        }
+        return;
+      }
+
+      // ── resume ─────────────────────────────────────────────────────────────
+      if (cmd.type === 'resume') {
+        const runsService = new RunStateService();
+        const allRuns = runsService.list(50);
+        const candidate = allRuns
+          .filter((r) => r.boardId === board.id && r.status !== 'succeeded')
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+
+        if (!candidate) {
+          const elsewhere = allRuns.find((r) => r.boardId && r.boardId !== board.id && r.status !== 'succeeded');
+          addMsg(newMsg(
+            'system',
+            elsewhere
+              ? `No stopped or failed task found for "${board.title}". "${elsewhere.boardName ?? elsewhere.boardId}" has one — switch to that dashboard and run /resume there.`
+              : 'No stopped or failed task found for this dashboard.',
+          ));
+          return;
+        }
+
+        setIsLoading(true);
+        const controller = new AbortController();
+        activeAbortRef.current = controller;
+        activeRunRef.current = candidate;
+        const logId = startLogMsg(`Resuming "${board.title}" (${candidate.status} at ${candidate.currentPhase ?? 'start'})...`);
+        const onProgress = createProgressCallback(logId);
+
+        try {
+          const result = await new DashboardUpdateService().resume(candidate.runId, onProgress, controller.signal);
+          if (result.success) {
+            onProgress(`Resumed successfully.${result.deployUrl ? ` Deployed: ${result.deployUrl}` : ''}`);
+          } else {
+            onProgress(`Resume failed: ${result.error ?? 'Unknown error'}`);
+          }
+        } catch (error: any) {
+          if (error?.name === 'AbortError') {
+            onProgress('⏹ Stopped by user.');
+          } else {
+            onProgress(`Resume error: ${error.message}`);
+          }
+        } finally {
+          finishLog(logId);
+          setIsLoading(false);
+          if (activeAbortRef.current === controller) activeAbortRef.current = null;
+          activeRunRef.current = null;
+        }
+        return;
+      }
+
       // ── build ──────────────────────────────────────────────────────────────
       if (cmd.type === 'build') {
         const projectDir = getActiveProjectDir();
@@ -1162,6 +1401,8 @@ For the current board "${board.title}":
           return;
         }
         setIsLoading(true);
+        const buildController = new AbortController();
+        activeAbortRef.current = buildController;
         const logId = startLogMsg(`Building project in ${projectDir}...`);
         const reporter = makePipelineReporter(createProgressCallback(logId));
         const onProgress = reporter.progress;
@@ -1173,7 +1414,7 @@ For the current board "${board.title}":
           // generated in chat are registered before the build.
           await new DashboardUpdateService().syncMasterTab(projectDir, reporter);
           await syncDashboardManifest(projectDir, onProgress);
-          const result = await projectCommands.build(projectDir, onProgress);
+          const result = await projectCommands.build(projectDir, onProgress, buildController.signal);
           if (!result.success) onProgress(result.error ?? 'Build failed.');
           else onProgress('Build successful. Run /preview to view it locally.');
 
@@ -1181,10 +1422,12 @@ For the current board "${board.title}":
           finishLog(logId);
           setIsLoading(false);
         } catch (error: any) {
-          onProgress(`Build error: ${error.message}`);
+          onProgress(error?.name === 'AbortError' ? '⏹ Stopped by user.' : `Build error: ${error.message}`);
           setPipeline(null);
           finishLog(logId);
           setIsLoading(false);
+        } finally {
+          if (activeAbortRef.current === buildController) activeAbortRef.current = null;
         }
         return;
       }
@@ -1210,6 +1453,9 @@ For the current board "${board.title}":
         }
 
         setIsLoading(true);
+        const updateController = new AbortController();
+        activeAbortRef.current = updateController;
+        const runs = new RunStateService();
         const logId = startLogMsg(`Updating "${board.title}" from latest data source...`);
         const reporter = makePipelineReporter(createProgressCallback(logId));
         const onProgress = reporter.progress;
@@ -1258,29 +1504,57 @@ Requirements:
 4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
-7. Return all changed files using the required //CODE_START format.`;
+7. Return all changed files using the required //CODE_START format.${board.uiQuality === 'low' ? '\n8. Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.' : ''}`;
+
+          const run = runs.createRun('update', { dashboard: board.name, prompt: updatePrompt, dataFile });
+          run.boardId = board.id;
+          run.boardName = board.name;
+          run.boardTitle = board.title;
+          run.projectDir = projectDir;
+          runs.save(run);
+          activeRunRef.current = run;
 
           finishLog(logId);
           reporter.phase('generate');
+          runs.markPhase(run, 'generate');
           const writtenFiles = await sendToLLM(updatePrompt, {
             recordPrompt: false,
             promptSource: 'update',
             dataSummary: latestSummary,
+            signal: updateController.signal,
           });
           setPipeline(null);
 
           if (writtenFiles.length === 0) {
-            addMsg(newMsg('error', 'Update did not write any files. Build/push/deploy skipped.'));
+            // A /stop mid-generation also yields an empty writtenFiles list —
+            // don't clobber the 'cancelled' record /stop already wrote.
+            if (!updateController.signal.aborted) {
+              addMsg(newMsg('error', 'Update did not write any files. Build/push/deploy skipped.'));
+              runs.fail(run, 'Update did not write any files.');
+            }
             setIsLoading(false);
             return;
           }
 
-          await runBuildPushDeploy(projectDir, `Building, pushing, and deploying "${board.title}" after data update...`);
+          run.writtenFiles = writtenFiles;
+          runs.save(run);
+          await runBuildPushDeploy(
+            projectDir,
+            `Building, pushing, and deploying "${board.title}" after data update...`,
+            { signal: updateController.signal, run },
+          );
         } catch (error: any) {
-          onProgress(`Update failed: ${error.message}`);
+          if (error?.name === 'AbortError') {
+            onProgress('⏹ Stopped by user.');
+          } else {
+            onProgress(`Update failed: ${error.message}`);
+          }
           setPipeline(null);
           finishLog(logId);
           setIsLoading(false);
+        } finally {
+          if (activeAbortRef.current === updateController) activeAbortRef.current = null;
+          activeRunRef.current = null;
         }
         return;
       }
@@ -1356,14 +1630,45 @@ Requirements:
       // ── LLM message ────────────────────────────────────────────────────────
       if (cmd.type === 'message') {
         setIsLoading(true);
+        const msgController = new AbortController();
+        activeAbortRef.current = msgController;
+
         if (allBoards) {
-          await runModifyAll(text);
+          await runModifyAll(text, msgController.signal);
+          if (activeAbortRef.current === msgController) activeAbortRef.current = null;
           return;
         }
-        await sendToLLM(text);
+
+        // Track this as a resumable run (skip the very first auto-generated
+        // message — there's no existing dashboard/prompt-history shape yet).
+        let run: RunRecord | undefined;
+        if (!autoGenerateInitial) {
+          const runs = new RunStateService();
+          run = runs.createRun('update', { dashboard: board.name, prompt: text, dataFile: board.dataFiles[0] });
+          run.boardId = board.id;
+          run.boardName = board.name;
+          run.boardTitle = board.title;
+          run.projectDir = getActiveProjectDir();
+          runs.save(run);
+          activeRunRef.current = run;
+        }
+
+        const writtenFiles = await sendToLLM(text, { signal: msgController.signal });
+        if (run) {
+          const runs = new RunStateService();
+          if (writtenFiles.length > 0) {
+            runs.complete(run, { writtenFiles });
+          } else if (!msgController.signal.aborted) {
+            // Conversational turn, not a generation task — nothing to resume,
+            // so discard the speculative run record rather than marking it failed.
+            runs.remove(run.runId);
+          }
+        }
+        if (activeAbortRef.current === msgController) activeAbortRef.current = null;
+        activeRunRef.current = null;
       }
     },
-    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll],
+    [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll, autoGenerateInitial, updateStreamingMsg, appendLog],
   );
 
   // ESC: go back to welcome screen · PgUp/PgDn: scroll chat history

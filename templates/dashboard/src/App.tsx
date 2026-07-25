@@ -7,6 +7,7 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { DashboardTabs } from './components/DashboardTabs'
 import type { DashboardTabItem } from './components/DashboardTabs'
 import { HeaderLinks } from './components/HeaderLinks'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { dashboardTabs, renderDashboard } from './generated/dashboardManifest'
 
 function DashboardContent() {
@@ -58,7 +59,11 @@ function DashboardContent() {
             <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
               Your OpenBoard master UI is ready. Add dashboards as tabs from OpenBoard.
             </p>
-          </div> : renderDashboard(activeTab)}
+          </div> : (
+            <ErrorBoundary key={activeTab} tabLabel={tabs.find((tab) => tab.id === activeTab)?.label}>
+              {renderDashboard(activeTab)}
+            </ErrorBoundary>
+          )}
         </div>
       </main>
     </div>

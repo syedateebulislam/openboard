@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type { PipelinePhase } from './pipelinePhases.js';
 
 export type RunAction = 'create' | 'update' | 'refresh' | 'remove' | 'rollback';
-export type RunStatus = 'running' | 'failed' | 'succeeded';
+export type RunStatus = 'running' | 'failed' | 'succeeded' | 'cancelled';
 
 export interface RunPhaseRecord {
   completedAt: string;
@@ -100,6 +100,16 @@ export class RunStateService {
     }
   }
 
+  /** Discard a run that turned out not to need tracking (e.g. a chat turn that wrote no files). */
+  remove(runId: string): void {
+    try {
+      const path = this.runPath(runId);
+      if (existsSync(path)) unlinkSync(path);
+    } catch {
+      // best-effort
+    }
+  }
+
   list(limit = 20): RunRecord[] {
     if (!existsSync(this.runsDir)) return [];
     const records: RunRecord[] = [];
@@ -151,6 +161,14 @@ export class RunStateService {
     record.status = 'failed';
     record.error = error;
     record.errorCode = errorCode;
+    this.save(record);
+  }
+
+  /** Mark a run as stopped by the user (e.g. /stop) — the "leftover task" record /resume looks for. */
+  cancel(record: RunRecord, note?: string, fields: Partial<RunRecord> = {}): void {
+    Object.assign(record, fields);
+    record.status = 'cancelled';
+    record.error = note ?? 'Stopped by user';
     this.save(record);
   }
 

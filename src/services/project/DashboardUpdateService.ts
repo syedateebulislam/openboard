@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
+import { normalizeUserPath } from '../../utils/pathNormalizer.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
 import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
@@ -8,7 +9,7 @@ import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
 import { LLMService } from '../llm/LLMService.js';
-import { SYSTEM_PROMPT } from '../llm/prompts/systemPrompt.js';
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_LOW } from '../llm/prompts/systemPrompt.js';
 import { TemplateService } from '../template/TemplateService.js';
 import { BuildService } from '../build/BuildService.js';
 import { DeployVerificationService } from '../deploy/DeployVerificationService.js';
@@ -68,6 +69,8 @@ export interface CreateDashboardOptions {
   idempotencyKey?: string;
   /** Parse + analyze and return the plan without LLM/deploy. */
   dryRun?: boolean;
+  /** UI generation complexity. 'low' is for local/small-context models. Defaults to 'high'. */
+  quality?: BoardConfig['uiQuality'];
 }
 
 export interface PromptUpdateOptions {
@@ -249,7 +252,7 @@ export class DashboardUpdateService {
     let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
 
     try {
-      const dataFile = resolve(options.dataFile);
+      const dataFile = resolve(normalizeUserPath(options.dataFile));
       const title = options.title?.trim() || titleFromDataFile(dataFile);
       const typeProvided = options.type !== undefined;
       const type = options.type ?? 'custom';
@@ -291,6 +294,7 @@ export class DashboardUpdateService {
         components: [],
         createdAt: new Date().toISOString(),
         dataSummary,
+        uiQuality: options.quality,
       };
 
       reporter.log(`Preparing OpenBoard workspace for "${board.title}"...`);
@@ -368,6 +372,7 @@ export class DashboardUpdateService {
   async updateByPrompt(
     options: PromptUpdateOptions,
     onProgress?: UpdateProgress,
+    signal?: AbortSignal,
   ): Promise<DashboardUpdateResult> {
     const board = this.findBoard(options.dashboard);
     if (!board) {
@@ -377,7 +382,7 @@ export class DashboardUpdateService {
         errorCode: 'E_DASHBOARD_NOT_FOUND',
       };
     }
-    return this.updateBoardWithPrompt(board, options.prompt, options.dataFile, onProgress, options.dryRun);
+    return this.updateBoardWithPrompt(board, options.prompt, options.dataFile, onProgress, options.dryRun, signal);
   }
 
   async updateBySelector(selector: string, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
@@ -654,6 +659,7 @@ Requirements:
     dataFileOverride?: string,
     onProgress?: UpdateProgress,
     dryRun?: boolean,
+    signal?: AbortSignal,
   ): Promise<DashboardUpdateResult> {
     const run = dryRun
       ? undefined
@@ -666,7 +672,7 @@ Requirements:
       if (!projectDir) {
         return this.failure(run, { board }, 'No generated app workspace found.');
       }
-      const dataFile = dataFileOverride ? resolve(dataFileOverride) : board.dataFiles[0];
+      const dataFile = dataFileOverride ? resolve(normalizeUserPath(dataFileOverride)) : board.dataFiles[0];
       if (!dataFile) {
         return this.failure(run, { board }, 'No data source is linked to this dashboard.');
       }
@@ -718,6 +724,7 @@ Requirements:
         userPrompt,
         reporter,
         run,
+        signal,
       );
       if (run) {
         run.writtenFiles = writtenFiles;
@@ -732,6 +739,7 @@ Requirements:
         `Update ${updatedBoard.name}: ${new Date().toISOString()}`,
         reporter,
         run,
+        signal,
       );
     } catch (error: any) {
       return this.failure(run, { board }, error.message);
@@ -756,6 +764,7 @@ Requirements:
     userPrompt: string,
     reporter: PipelineReporter,
     run: RunRecord | undefined,
+    signal?: AbortSignal,
   ): Promise<{ board: BoardConfig; writtenFiles: string[] }> {
     const updatedInputBoard: BoardConfig = {
       ...board,
@@ -766,7 +775,7 @@ Requirements:
     await this.writeProtectedData(updatedInputBoard, parsed, dataSummary, reporter.progress);
 
     const prompt = this.buildPromptUpdatePrompt(updatedInputBoard, dataSummary, userPrompt);
-    const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, reporter, run);
+    const writtenFiles = await this.generateAndWriteFiles(updatedInputBoard, prompt, reporter, run, signal);
     if (writtenFiles.length === 0) {
       throw new Error('LLM did not return any writable files.');
     }
@@ -799,6 +808,7 @@ Requirements:
     userPrompt: string,
     onProgress?: UpdateProgress,
     dataFileOverride?: string,
+    signal?: AbortSignal,
   ): Promise<DashboardUpdateResult> {
     const reporter = this.makeReporter(onProgress);
     let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
@@ -824,9 +834,13 @@ Requirements:
       let modified = 0;
       reporter.log(`Applying to ${boards.length} dashboard(s): "${userPrompt}"`);
       for (let i = 0; i < boards.length; i++) {
+        if (signal?.aborted) {
+          failures.push('Stopped by user before all dashboards were modified.');
+          break;
+        }
         const board = boards[i];
         const label = `${board.title} (${i + 1}/${boards.length})`;
-        const dataFile = dataFileOverride ? resolve(dataFileOverride) : board.dataFiles[0];
+        const dataFile = dataFileOverride ? resolve(normalizeUserPath(dataFileOverride)) : board.dataFiles[0];
         if (!dataFile) {
           reporter.log(`Skipping ${label}: no linked data source.`);
           failures.push(`${board.title}: no linked data source`);
@@ -848,6 +862,7 @@ Requirements:
             userPrompt,
             reporter,
             undefined,
+            signal,
           );
           allWritten.push(...result.writtenFiles);
           lastBoard = result.board;
@@ -878,6 +893,7 @@ Requirements:
         `Modify all dashboards: ${new Date().toISOString()}`,
         reporter,
         undefined,
+        signal,
       );
     } catch (error: any) {
       return this.failure(undefined, {}, error.message);
@@ -927,7 +943,7 @@ Requirements:
         for (const rawPath of board.components) {
           const normalized = rawPath.replace(/\\/g, '/');
           if (!/^components\/.+\.tsx$/.test(normalized)) continue;     // dashboard components only
-          if (/AuthProvider|LoginPage|ThemeToggle|BrandLogo/.test(normalized)) continue; // never the shell
+          if (/AuthProvider|LoginPage|ThemeToggle|BrandLogo|ErrorBoundary/.test(normalized)) continue; // never the shell
           try {
             await this.templateService.deleteGeneratedFile(projectDir, normalized);
             removedFiles.push(normalized);
@@ -973,7 +989,7 @@ Requirements:
    * build → push → deploy → verify tail re-runs — no LLM cost. Otherwise the
    * original action is replayed from scratch with its stored options.
    */
-  async resume(runId: string, onProgress?: UpdateProgress): Promise<DashboardUpdateResult> {
+  async resume(runId: string, onProgress?: UpdateProgress, signal?: AbortSignal): Promise<DashboardUpdateResult> {
     const run = this.runs.get(runId);
     if (!run) {
       return { success: false, error: `Run not found: ${runId}`, errorCode: 'E_RUN_NOT_FOUND' };
@@ -1007,6 +1023,7 @@ Requirements:
           `Resume ${board.name}: ${new Date().toISOString()}`,
           reporter,
           run,
+          signal,
         );
       } catch (error: any) {
         return this.failure(run, { board }, error.message);
@@ -1030,7 +1047,7 @@ Requirements:
           dashboard: String(opts.dashboard ?? ''),
           prompt: String(opts.prompt ?? ''),
           dataFile: opts.dataFile,
-        }, onProgress);
+        }, onProgress, signal);
       case 'refresh':
         return this.updateBySelector(String(opts.dashboard ?? ''), onProgress);
       default:
@@ -1195,7 +1212,7 @@ Requirements:
 3. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 4. Do NOT embed raw source rows or sensitive data in component files or frontend data files.
 5. Use the actual fields and patterns from the data analysis to create useful metrics/charts.
-6. Return all changed files using the required //CODE_START format.`;
+6. Return all changed files using the required //CODE_START format.${board.uiQuality === 'low' ? '\n7. Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.' : ''}`;
   }
 
   private buildPromptUpdatePrompt(board: BoardConfig, dataSummary: string, userPrompt: string): string {
@@ -1228,7 +1245,7 @@ Requirements:
 4. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 5. Do NOT embed raw source rows or sensitive data in component files or frontend data files.
 6. Keep the dashboard aligned with the latest data analysis.
-7. Return all changed files using the required //CODE_START format.`;
+7. Return all changed files using the required //CODE_START format.${board.uiQuality === 'low' ? '\n8. Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.' : ''}`;
   }
 
   /** Progress note that reaches both the line callback and the event sink. */
@@ -1276,19 +1293,24 @@ Requirements:
     prompt: string,
     reporter: PipelineReporter,
     run?: RunRecord,
+    signal?: AbortSignal,
   ): Promise<string[]> {
     const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
+    const systemPrompt = board.uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT;
+    // A local model's *total* context (prompt + completion) is often small —
+    // trimming the system prompt alone isn't enough if the completion budget
+    // still assumes a large-context provider.
+    const maxTokens = board.uiQuality === 'low' ? 4096 : 8192;
     reporter.phase('generate');
     reporter.log('Generating dashboard code with configured LLM...');
     let usageReported = false;
     const response = await llm.complete({
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt },
       ],
       temperature: 0.2,
-      // Dashboard components can be large; 4096 truncates them on API providers.
-      maxTokens: 8192,
+      maxTokens,
       // Stream liveness so non-interactive agent runners don't treat a long
       // generation as a wedged process and kill it mid-run.
       onProgress: reporter.progress,
@@ -1296,10 +1318,11 @@ Requirements:
         usageReported = true;
         if (run) this.runs.addTokenUsage(run, { ...usage, estimated: false });
       },
+      signal,
     });
     if (!usageReported && run) {
       this.runs.addTokenUsage(run, {
-        promptTokens: estimateTokens(SYSTEM_PROMPT.length + prompt.length),
+        promptTokens: estimateTokens(systemPrompt.length + prompt.length),
         completionTokens: estimateTokens(response.length),
         estimated: true,
       });
@@ -1361,8 +1384,10 @@ Requirements:
     buildError: string | undefined,
     reporter: PipelineReporter,
     run?: RunRecord,
+    uiQuality?: BoardConfig['uiQuality'],
   ): Promise<{ success: boolean; error?: string }> {
     let lastError = buildError ?? 'Unknown build error';
+    let anyAttemptProducedFiles = false;
 
     for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
       reporter.log(`Build failed — attempting LLM repair (attempt ${attempt}/${MAX_REPAIR_ATTEMPTS})...`);
@@ -1410,11 +1435,11 @@ Requirements:
         const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
         const response = await llm.complete({
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT },
             { role: 'user', content: repairPrompt },
           ],
           temperature: 0.1,
-          maxTokens: 8192,
+          maxTokens: uiQuality === 'low' ? 4096 : 8192,
           onProgress: reporter.progress,
           onUsage: (usage) => {
             if (run) this.runs.addTokenUsage(run, { ...usage, estimated: false });
@@ -1426,6 +1451,7 @@ Requirements:
           reporter.log('Repair attempt returned no files; keeping previous error.');
           continue;
         }
+        anyAttemptProducedFiles = true;
 
         let repaired = 0;
         for (const file of files) {
@@ -1451,6 +1477,12 @@ Requirements:
       }
     }
 
+    if (!anyAttemptProducedFiles) {
+      return {
+        success: false,
+        error: `${lastError}\n\nAll ${MAX_REPAIR_ATTEMPTS} automatic repair attempt(s) returned no code at all. This usually means the configured LLM spent its entire response budget on internal reasoning without producing an answer — common with local "thinking" models under token pressure. Try a smaller/non-reasoning local model, increase the model's max output tokens in your local server settings, or fix the build manually.`,
+      };
+    }
     return { success: false, error: lastError };
   }
 
@@ -1460,6 +1492,7 @@ Requirements:
     commitMessage: string,
     reporter: PipelineReporter,
     run?: RunRecord,
+    signal?: AbortSignal,
   ): Promise<DashboardUpdateResult> {
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir) {
@@ -1471,9 +1504,9 @@ Requirements:
       syncManifest: (dir, boards) => this.manifest.sync(dir, boards),
       syncShell: (dir) => this.templateService.syncShellFiles(dir),
       hasDependencies: (dir) => this.projectManager.getProjectInfo(dir)?.hasNodeModules ?? true,
-      install: (dir, progress) => this.projectManager.install(dir, progress),
-      build: (dir, progress) => this.projectManager.build(dir, progress),
-      repair: (dir, files, error) => this.repairAndRebuild(dir, files, error, reporter, run),
+      install: (dir, progress) => this.projectManager.install(dir, progress, signal),
+      build: (dir, progress) => this.projectManager.build(dir, progress, signal),
+      repair: (dir, files, error) => this.repairAndRebuild(dir, files, error, reporter, run, board.uiQuality),
     });
     const buildResult = await buildPipeline.execute(projectDir, writtenFiles, reporter);
     if (!buildResult.success) {
@@ -1499,7 +1532,7 @@ Requirements:
 
     reporter.phase('push');
     reporter.log('Pushing to GitHub...');
-    const pushResult = await this.projectManager.commitAndPush(projectDir, commitMessage, reporter.progress);
+    const pushResult = await this.projectManager.commitAndPush(projectDir, commitMessage, reporter.progress, signal);
     const pushedToGitHub = pushResult.success && pushResult.pushed === true;
     if (!pushResult.success) {
       reporter.log(`GitHub push skipped/failed: ${pushResult.error || 'Unknown error'}`);
@@ -1508,7 +1541,7 @@ Requirements:
 
     reporter.phase('deploy');
     reporter.log('Deploying to Vercel...');
-    const deployResult = await this.projectManager.deploy(projectDir, reporter.progress);
+    const deployResult = await this.projectManager.deploy(projectDir, reporter.progress, signal);
     if (!deployResult.success) {
       if (pushedToGitHub && isVercelAuthError(deployResult.error)) {
         reporter.log('Pushed to GitHub. Vercel Git integration should deploy this commit automatically.');
@@ -1613,7 +1646,7 @@ Requirements:
     for (const rawPath of board.components) {
       const normalized = rawPath.replace(/\\/g, '/');
       if (!/^components\/.+\.tsx$/.test(normalized)) continue;       // dashboard components only
-      if (/AuthProvider|LoginPage/.test(normalized)) continue;       // never the auth shell
+      if (/AuthProvider|LoginPage|ErrorBoundary/.test(normalized)) continue; // never the shell
       if (keepPaths.has(normalized)) continue;                       // still owned by another board
 
       try {

@@ -91,7 +91,7 @@ export class MoonshotProvider implements LLMProvider {
         messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens ?? 4096,
-      });
+      }, { signal: options.signal });
       if (options.onUsage && response.usage) {
         options.onUsage({
           promptTokens: response.usage.prompt_tokens,
@@ -128,7 +128,7 @@ export class MoonshotProvider implements LLMProvider {
       messages: options.messages as OpenAI.Chat.ChatCompletionMessageParam[],
       stream: true,
       temperature: options.temperature ?? 0.7,
-    });
+    }, { signal: options.signal });
 
     for await (const chunk of stream) {
       const text = chunk.choices[0]?.delta?.content ?? '';

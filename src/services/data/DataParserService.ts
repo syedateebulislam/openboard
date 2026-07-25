@@ -2,6 +2,7 @@ import { parse as createCSVParser } from 'csv-parse';
 import { createReadStream } from 'node:fs';
 import { access, readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { normalizeUserPath } from '../../utils/pathNormalizer.js';
 
 export interface ParsedData {
   rows: Record<string, unknown>[];
@@ -19,7 +20,8 @@ export interface DataParserOptions {
 const DEFAULT_MAX_ROWS = 1_000_000;
 
 export class DataParserService {
-  static async parse(filePath: string, options: DataParserOptions = {}): Promise<ParsedData> {
+  static async parse(rawFilePath: string, options: DataParserOptions = {}): Promise<ParsedData> {
+    const filePath = normalizeUserPath(rawFilePath);
     const ext = extname(filePath).toLowerCase();
 
     if (ext === '.xls') {

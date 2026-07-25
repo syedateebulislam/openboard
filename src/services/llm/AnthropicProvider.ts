@@ -111,7 +111,7 @@ export class AnthropicProvider implements LLMProvider {
           : {}),
         system,
         messages: msgs as Anthropic.MessageParam[],
-      });
+      }, { signal: options.signal });
       if (options.onUsage && response.usage) {
         options.onUsage({
           promptTokens: response.usage.input_tokens,
@@ -146,7 +146,7 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: options.maxTokens ?? 4096,
       system,
       messages: msgs as Anthropic.MessageParam[],
-    });
+    }, { signal: options.signal });
 
     for await (const event of stream) {
       if (

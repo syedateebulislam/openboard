@@ -229,6 +229,46 @@ describe('RunStateService', () => {
     expect(summary.failed).toBe(2);
     expect(summary.failuresByPhase.build).toBe(2);
   });
+
+  it('marks a run cancelled (the /stop "leftover task" record for /resume)', () => {
+    const run = runs.createRun('update', { dashboard: 'sales', prompt: 'add a chart' });
+    runs.markPhase(run, 'generate');
+    runs.cancel(run, 'Stopped by user');
+
+    const reloaded = runs.get(run.runId)!;
+    expect(reloaded.status).toBe('cancelled');
+    expect(reloaded.error).toBe('Stopped by user');
+    // markPhase left currentPhase at 'generate' — /resume needs to see where it stopped.
+    expect(reloaded.currentPhase).toBe('generate');
+  });
+
+  it('defaults the cancel note when none is given', () => {
+    const run = runs.createRun('update', {});
+    runs.cancel(run);
+    expect(runs.get(run.runId)!.error).toBe('Stopped by user');
+  });
+
+  it('removes a run record from disk (discarding a speculative, non-actionable run)', () => {
+    const run = runs.createRun('update', { dashboard: 'sales', prompt: 'hello' });
+    expect(runs.get(run.runId)).toBeDefined();
+
+    runs.remove(run.runId);
+    expect(runs.get(run.runId)).toBeUndefined();
+  });
+
+  it('lists cancelled runs alongside failed/succeeded ones for /resume candidate lookup', () => {
+    const cancelled = runs.createRun('update', { dashboard: 'sales' });
+    cancelled.boardId = 'board-1';
+    runs.cancel(cancelled, 'Stopped by user');
+
+    const succeeded = runs.createRun('update', { dashboard: 'sales' });
+    succeeded.boardId = 'board-1';
+    runs.complete(succeeded, {});
+
+    const candidates = runs.list(10).filter((r) => r.boardId === 'board-1' && r.status !== 'succeeded');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].runId).toBe(cancelled.runId);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -39,6 +39,7 @@ function runVercelCommand(
   cwd: string,
   timeoutMs = 180_000,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   // Auth travels exclusively via the VERCEL_TOKEN env var (getVercelEnv).
   // Never pass `--token <secret>` argv: process arguments are visible to
@@ -47,6 +48,7 @@ function runVercelCommand(
     cwd,
     timeoutMs,
     onProgress,
+    signal,
     env: getVercelEnv(),
   });
 }
@@ -539,6 +541,7 @@ export class VercelService {
     projectDir: string,
     production = false,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<VercelResult> {
     try {
       const isInstalled = await VercelService.checkVercelInstalled();
@@ -555,7 +558,7 @@ export class VercelService {
         args.push('--prod');
       }
 
-      const { code, stderr, stdout } = await runVercelCommand(args, projectDir, 180_000, onProgress);
+      const { code, stderr, stdout } = await runVercelCommand(args, projectDir, 180_000, onProgress, signal);
 
       if (code !== 0) {
         const error = stderr || stdout;
@@ -568,7 +571,7 @@ export class VercelService {
             return { success: false, error: `Vercel relink failed: ${linked.error}` };
           }
 
-          const retry = await runVercelCommand(args, projectDir, 180_000, onProgress);
+          const retry = await runVercelCommand(args, projectDir, 180_000, onProgress, signal);
           if (retry.code !== 0) {
             return { success: false, error: normalizeAuthError(retry.stderr || retry.stdout) };
           }
@@ -589,12 +592,12 @@ export class VercelService {
     }
   }
 
-  static async deployProduction(projectDir: string, onProgress?: ProgressCallback): Promise<VercelResult> {
-    return VercelService.deploy(projectDir, true, onProgress);
+  static async deployProduction(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<VercelResult> {
+    return VercelService.deploy(projectDir, true, onProgress, signal);
   }
 
-  static async deployPreview(projectDir: string, onProgress?: ProgressCallback): Promise<VercelResult> {
-    return VercelService.deploy(projectDir, false, onProgress);
+  static async deployPreview(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<VercelResult> {
+    return VercelService.deploy(projectDir, false, onProgress, signal);
   }
 
   static async getProjectInfo(projectDir: string): Promise<{

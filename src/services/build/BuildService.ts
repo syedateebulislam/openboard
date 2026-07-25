@@ -27,6 +27,7 @@ function runCommand(
   cwd: string,
   timeoutMs = 120_000,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   // Validate command allowlist
   const allowedCommands = ['npm', 'npx'];
@@ -43,20 +44,20 @@ function runCommand(
     }
   }
 
-  return crossSpawn(cmd, args, { cwd, timeoutMs, onProgress });
+  return crossSpawn(cmd, args, { cwd, timeoutMs, onProgress, signal });
 }
 
 export class BuildService {
-  static async install(projectDir: string, onProgress?: ProgressCallback): Promise<BuildResult> {
+  static async install(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<BuildResult> {
     // Cold-cache installs on slow machines/CI runners routinely exceed 2
     // minutes; npm itself reports real failures well before this ceiling.
-    const { code, stderr } = await runCommand('npm', ['install'], projectDir, 600_000, onProgress);
+    const { code, stderr } = await runCommand('npm', ['install'], projectDir, 600_000, onProgress, signal);
     if (code !== 0) return { success: false, error: stderr };
     return { success: true };
   }
 
-  static async typeCheck(projectDir: string, onProgress?: ProgressCallback): Promise<TypeCheckResult> {
-    const { stdout, stderr, code } = await runCommand('npx', ['tsc', '--noEmit'], projectDir, 120_000, onProgress);
+  static async typeCheck(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<TypeCheckResult> {
+    const { stdout, stderr, code } = await runCommand('npx', ['tsc', '--noEmit'], projectDir, 120_000, onProgress, signal);
     if (code === 0) return { success: true, errors: [] };
 
     const output = stdout + stderr;
@@ -81,20 +82,20 @@ export class BuildService {
     return errors;
   }
 
-  static async build(projectDir: string, onProgress?: ProgressCallback): Promise<BuildResult> {
-    const { code, stderr } = await runCommand('npx', ['vite', 'build'], projectDir, 300_000, onProgress);
+  static async build(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<BuildResult> {
+    const { code, stderr } = await runCommand('npx', ['vite', 'build'], projectDir, 300_000, onProgress, signal);
     if (code !== 0) return { success: false, error: stderr };
     return { success: true, outputDir: 'dist' };
   }
 
   static async fullBuild(
     projectDir: string,
-    options: { timeout?: number; onProgress?: ProgressCallback } = {},
+    options: { timeout?: number; onProgress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<BuildResult> {
-    const installResult = await BuildService.install(projectDir, options.onProgress);
+    const installResult = await BuildService.install(projectDir, options.onProgress, options.signal);
     if (!installResult.success) return installResult;
 
-    const typeResult = await BuildService.typeCheck(projectDir, options.onProgress);
+    const typeResult = await BuildService.typeCheck(projectDir, options.onProgress, options.signal);
     if (!typeResult.success) {
       return {
         success: false,
@@ -104,7 +105,7 @@ export class BuildService {
       };
     }
 
-    return BuildService.build(projectDir, options.onProgress);
+    return BuildService.build(projectDir, options.onProgress, options.signal);
   }
 
   static buildRetryPrompt(originalPrompt: string, errors: TypeCheckError[]): string {

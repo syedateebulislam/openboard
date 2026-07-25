@@ -37,6 +37,7 @@ import { DashboardUpdateService } from '../../src/services/project/DashboardUpda
 import { RunStateService } from '../../src/services/project/RunStateService.js';
 import { TemplateService as RealTemplateService } from '../../src/services/template/TemplateService.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_LOW } from '../../src/services/llm/prompts/systemPrompt.js';
 
 function makeTempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), `openboard-${prefix}-`));
@@ -305,6 +306,105 @@ describe('Bulk dashboard operations', () => {
 
       expect(failing.success).toBe(false);
       expect(failing.error).toContain('EIO: disk full');
+    });
+  });
+
+  // ── repairAndRebuild diagnostics ─────────────────────────────────────────────
+  // Regression coverage for a real failure seen with local "thinking" models:
+  // the repair LLM call burns its whole token budget on reasoning and returns
+  // no code at all, so every repair attempt was a silent no-op that just
+  // re-surfaced the original build error with no explanation.
+
+  describe('repairAndRebuild diagnostics', () => {
+    it('reports a clear diagnosis when every repair attempt returns no code', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv] })];
+      const registry = fakeRegistry(boards, workspace);
+      const projectManager = fakeProjectManager();
+      projectManager.build.mockResolvedValue({ success: false, error: 'Build failed: bad import' });
+      // First call is the main generation (valid code); repair-prompt calls
+      // simulate a local reasoning model that returns nothing.
+      completeMock.mockImplementation(async (opts: { messages: Array<{ role: string; content: string }> }) => {
+        const userText = opts.messages.find((m) => m.role === 'user')?.content ?? '';
+        return userText.startsWith('The generated dashboard code failed to build') ? '' : VALID_CODE;
+      });
+      const { service } = makeService({ registry, projectManager, runsDir });
+
+      const result = await service.updateByPrompt({ dashboard: 'a', prompt: 'add a chart', dataFile: csv });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('returned no code at all');
+      expect(result.error).toContain('Build failed: bad import');
+      // Main generation + master-tab sync + 2 repair attempts (MAX_REPAIR_ATTEMPTS), each repair empty.
+      expect(completeMock).toHaveBeenCalledTimes(4);
+      // A repair attempt that returns 0 files never reaches the rebuild step.
+      expect(projectManager.build).toHaveBeenCalledTimes(1);
+    }, 20_000);
+
+    it('succeeds once a repair attempt actually returns code', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv] })];
+      const registry = fakeRegistry(boards, workspace);
+      const projectManager = fakeProjectManager();
+      let buildCalls = 0;
+      projectManager.build.mockImplementation(async () => {
+        buildCalls += 1;
+        return buildCalls === 1
+          ? { success: false, error: 'Build failed: bad import' }
+          : { success: true };
+      });
+      completeMock.mockImplementation(async (opts: { messages: Array<{ role: string; content: string }> }) => {
+        const userText = opts.messages.find((m) => m.role === 'user')?.content ?? '';
+        return userText.startsWith('The generated dashboard code failed to build') ? VALID_CODE : VALID_CODE;
+      });
+      const { service } = makeService({ registry, projectManager, runsDir });
+
+      const result = await service.updateByPrompt({ dashboard: 'a', prompt: 'add a chart', dataFile: csv });
+
+      expect(result.success).toBe(true);
+      expect(projectManager.build).toHaveBeenCalledTimes(2);
+    }, 20_000);
+  });
+
+  // ── uiQuality prompt selection ───────────────────────────────────────────────
+  // A low-quality board must get the shorter SYSTEM_PROMPT_LOW and a smaller
+  // maxTokens budget, since local/small-context models can't reliably finish
+  // the full SYSTEM_PROMPT (see the repairAndRebuild diagnostics above).
+
+  describe('uiQuality prompt selection', () => {
+    it('uses SYSTEM_PROMPT and the full token budget for a high-quality (default) board', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv] })];
+      const registry = fakeRegistry(boards, workspace);
+      const { service } = makeService({ registry, runsDir });
+
+      await service.updateByPrompt({ dashboard: 'a', prompt: 'add a chart', dataFile: csv });
+
+      const boardCall = completeMock.mock.calls.find(
+        ([opts]) => opts.messages.some((m: { content: string }) => m.content.includes('add a chart')),
+      );
+      expect(boardCall![0].messages[0].content).toBe(SYSTEM_PROMPT);
+      expect(boardCall![0].maxTokens).toBe(8192);
+    });
+
+    it('uses SYSTEM_PROMPT_LOW and a smaller token budget for a low-quality board', async () => {
+      const csv = join(workspace, 'data.csv');
+      writeFileSync(csv, 'date,amount\n2026-01-01,10\n', 'utf-8');
+      const boards = [makeBoard({ name: 'a', title: 'A', dataFiles: [csv], uiQuality: 'low' })];
+      const registry = fakeRegistry(boards, workspace);
+      const { service } = makeService({ registry, runsDir });
+
+      await service.updateByPrompt({ dashboard: 'a', prompt: 'add a chart', dataFile: csv });
+
+      const boardCall = completeMock.mock.calls.find(
+        ([opts]) => opts.messages.some((m: { content: string }) => m.content.includes('add a chart')),
+      );
+      expect(boardCall![0].messages[0].content).toBe(SYSTEM_PROMPT_LOW);
+      expect(boardCall![0].messages[0].content).not.toBe(SYSTEM_PROMPT);
+      expect(boardCall![0].maxTokens).toBe(4096);
     });
   });
 

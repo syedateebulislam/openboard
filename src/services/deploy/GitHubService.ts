@@ -17,8 +17,9 @@ function runGitCommand(
   timeoutMs = 30_000,
   onProgress?: ProgressCallback,
   useShell?: boolean,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  return crossSpawn('git', args, { cwd, timeoutMs, onProgress, useShell });
+  return crossSpawn('git', args, { cwd, timeoutMs, onProgress, useShell, signal });
 }
 
 function isValidCommitEmail(email: string | undefined): email is string {
@@ -223,13 +224,13 @@ export class GitHubService {
     }
   }
 
-  static async commit(projectDir: string, message: string, onProgress?: ProgressCallback): Promise<GitHubResult> {
+  static async commit(projectDir: string, message: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<GitHubResult> {
     try {
       // Keep raw dashboard data out of Git before staging anything.
       await GitHubService.ensureProtectedDataExcluded(projectDir);
 
       // Add all files
-      let result = await runGitCommand(['add', '.'], projectDir, 30_000, onProgress);
+      let result = await runGitCommand(['add', '.'], projectDir, 30_000, onProgress, undefined, signal);
       if (result.code !== 0) return { success: false, error: result.stderr };
 
       // Check if there are changes to commit
@@ -244,7 +245,7 @@ export class GitHubService {
       if (!authorResult.success) return authorResult;
 
       // Commit — shell: false on ALL platforms to prevent arg splitting on special chars
-      result = await runGitCommand(['commit', '-m', message], projectDir, 30_000, onProgress, false);
+      result = await runGitCommand(['commit', '-m', message], projectDir, 30_000, onProgress, false, signal);
       if (result.code !== 0) return { success: false, error: result.stderr };
 
       // Get commit hash
@@ -285,7 +286,7 @@ export class GitHubService {
 
   // The branch parameter is kept for API compatibility but the push always
   // targets the repo's current branch.
-  static async push(projectDir: string, _branch = 'main', onProgress?: ProgressCallback): Promise<GitHubResult> {
+  static async push(projectDir: string, _branch = 'main', onProgress?: ProgressCallback, signal?: AbortSignal): Promise<GitHubResult> {
     try {
       const branchResult = await runGitCommand(['branch', '--show-current'], projectDir);
       const currentBranch = branchResult.stdout.trim() || 'main';
@@ -295,6 +296,8 @@ export class GitHubService {
         projectDir,
         60_000,
         onProgress,
+        undefined,
+        signal,
       );
 
       if (code !== 0) {
@@ -312,12 +315,13 @@ export class GitHubService {
     commitMessage: string,
     branch = 'main',
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<GitHubResult> {
-    const commitResult = await GitHubService.commit(projectDir, commitMessage, onProgress);
+    const commitResult = await GitHubService.commit(projectDir, commitMessage, onProgress, signal);
     if (!commitResult.success) return commitResult;
 
     // Ensure a GitHub remote exists before pushing
-    const remoteResult = await GitHubService.ensureRemote(projectDir, onProgress);
+    const remoteResult = await GitHubService.ensureRemote(projectDir, onProgress, signal);
     if (!remoteResult.success) {
       return {
         success: false,
@@ -336,7 +340,7 @@ export class GitHubService {
       };
     }
 
-    const pushResult = await GitHubService.push(projectDir, branch, onProgress);
+    const pushResult = await GitHubService.push(projectDir, branch, onProgress, signal);
     return {
       success: pushResult.success,
       error: pushResult.error,
@@ -508,6 +512,7 @@ export class GitHubService {
     projectDir: string,
     visibility: 'public' | 'private' = 'private',
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<GitHubResult> {
     try {
       const { installed, authenticated } = await GitHubService.ensureGhCli(onProgress);
@@ -530,7 +535,7 @@ export class GitHubService {
       const { code, stderr, stdout } = await crossSpawn(
         'gh',
         ['repo', 'create', repoName, `--${visibility}`, '--source=.', '--remote=origin', '--push'],
-        { cwd: projectDir, timeoutMs: 60_000, onProgress },
+        { cwd: projectDir, timeoutMs: 60_000, onProgress, signal },
       );
 
       if (code !== 0) {
@@ -553,6 +558,7 @@ export class GitHubService {
   static async ensureRemote(
     projectDir: string,
     onProgress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<GitHubResult> {
     const existingRemote = await GitHubService.getRemoteUrl(projectDir);
     if (existingRemote) {
@@ -561,7 +567,7 @@ export class GitHubService {
 
     // No remote — try to create one via gh CLI
     onProgress?.('No GitHub remote found. Creating repository...');
-    return GitHubService.createRepo(projectDir, 'private', onProgress);
+    return GitHubService.createRepo(projectDir, 'private', onProgress, signal);
   }
 
   static async getRemoteUrl(projectDir: string): Promise<string | null> {

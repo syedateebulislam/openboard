@@ -12,14 +12,14 @@ export interface ProjectCommandResult {
 export class ProjectCommandHandlers {
   constructor(private readonly projects: ProjectManager) {}
 
-  async build(projectDir: string, progress: CommandProgress): Promise<ProjectCommandResult> {
+  async build(projectDir: string, progress: CommandProgress, signal?: AbortSignal): Promise<ProjectCommandResult> {
     const info = this.projects.getProjectInfo(projectDir);
     if (info && !info.hasNodeModules) {
       progress('Installing dependencies...');
-      const installed = await this.projects.install(projectDir, progress);
+      const installed = await this.projects.install(projectDir, progress, signal);
       if (!installed.success) return { success: false, error: `Install failed: ${installed.error}` };
     }
-    const built = await this.projects.build(projectDir, progress);
+    const built = await this.projects.build(projectDir, progress, signal);
     if (!built.success) return { success: false, error: `Build failed: ${built.error}` };
     progress(`Build complete. Output: ${built.outputDir}`);
     return { success: true };

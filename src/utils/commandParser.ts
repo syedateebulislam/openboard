@@ -7,6 +7,8 @@
  *   /preview                                     - Open local dev server
  *   /build                                       - Run TypeScript check + Vite build
  *   /update                                      - Regenerate from latest data + saved prompt history, then deploy
+ *   /stop                                        - Cancel the current in-flight operation (generation, build, push, or deploy)
+ *   /resume                                      - Resume this dashboard's last stopped or failed task
  *   /config                                      - Navigate to settings screen
  *   /status                                      - Show board info + deploy URL
  *   /commands                                    - Show command palette
@@ -14,6 +16,7 @@
  *   /history                                     - Show dashboard prompt history
  *   /logs                                        - Show latest operation log
  *   /data                                        - Show linked data source summary
+ *   /mail [sync|use]                             - Gmail sync status / fetch now / link inbox as data
  *   /help                                        - Show available commands
  *   /unknown                                     - Show command suggestions
  *   <anything else>                              - Routed to LLM as a message
@@ -25,6 +28,8 @@ export type Command =
   | { type: 'preview' }
   | { type: 'build' }
   | { type: 'update' }
+  | { type: 'stop' }
+  | { type: 'resume' }
   | { type: 'config' }
   | { type: 'status' }
   | { type: 'commands' }
@@ -32,6 +37,7 @@ export type Command =
   | { type: 'history' }
   | { type: 'logs' }
   | { type: 'data' }
+  | { type: 'mail'; args: string[] }
   | { type: 'model'; args: string[] }
   | { type: 'help' }
   | { type: 'unknown'; text: string; suggestions: string[] }
@@ -55,7 +61,10 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/preview', category: 'local', color: 'cyan', description: 'Start or restart local preview' },
   { command: '/build', category: 'local', color: 'cyan', description: 'Run the generated app build' },
   { command: '/update', category: 'data', color: 'magenta', description: 'Refresh from latest data and saved prompt history' },
+  { command: '/stop', category: 'local', color: 'cyan', description: 'Cancel the current in-flight operation (generation, build, push, or deploy)' },
+  { command: '/resume', category: 'local', color: 'cyan', description: "Resume this dashboard's last stopped or failed task" },
   { command: '/data', category: 'data', color: 'magenta', description: 'Show linked data file summary' },
+  { command: '/mail', category: 'data', color: 'magenta', description: 'Gmail sync status; /mail sync fetches now, /mail use links the inbox as data' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
   { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoard readiness' },
@@ -106,6 +115,8 @@ export function parseCommand(input: string): Command {
   if (/^\/preview$/i.test(trimmed)) return { type: 'preview' };
   if (/^\/build$/i.test(trimmed)) return { type: 'build' };
   if (/^\/update$/i.test(trimmed)) return { type: 'update' };
+  if (/^\/stop$/i.test(trimmed)) return { type: 'stop' };
+  if (/^\/resume$/i.test(trimmed)) return { type: 'resume' };
   if (/^\/data$/i.test(trimmed)) return { type: 'data' };
   if (/^\/history$/i.test(trimmed)) return { type: 'history' };
   if (/^\/logs$/i.test(trimmed)) return { type: 'logs' };
@@ -116,6 +127,9 @@ export function parseCommand(input: string): Command {
   if (/^\/help$/i.test(trimmed)) return { type: 'help' };
   if (/^\/model(\s|$)/i.test(trimmed)) {
     return { type: 'model', args: input.trim().split(/\s+/).slice(1) };
+  }
+  if (/^\/mail(\s|$)/i.test(trimmed)) {
+    return { type: 'mail', args: input.trim().split(/\s+/).slice(1) };
   }
 
   if (trimmed.startsWith('/')) {
@@ -174,7 +188,10 @@ export const HELP_TEXT = `Available commands:
   /preview      - Start or restart local preview server
   /build        - Run TypeScript check + Vite build
   /update       - Regenerate from latest data using saved prompt history, then build + push + deploy
+  /stop         - Cancel the current in-flight operation (generation, build, push, or deploy)
+  /resume       - Resume this dashboard's last stopped or failed task
   /data         - Show linked data source summary
+  /mail         - Show Gmail sync status; /mail sync fetches now; /mail use links the inbox as this board's data
   /history      - Show this dashboard's prompt history
   /logs         - Show latest operation log
   /doctor       - Check LLM/GitHub/Vercel/project readiness
