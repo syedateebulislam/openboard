@@ -22,7 +22,7 @@ interface ComponentTarget {
   isDefault: boolean;
 }
 
-const SHELL_COMPONENT = /(?:AuthProvider|BrandLogo|DashboardHeader|DashboardTabs|HeaderLinks|InsightCard|LoginPage|MasterDashboard|ThemeToggle)\.tsx$/i;
+const SHELL_COMPONENT = /(?:AuthProvider|BrandLogo|DashboardHeader|DashboardTabs|ErrorBoundary|HeaderLinks|InsightCard|LoginPage|MasterDashboard|ThemeToggle)\.tsx$/i;
 
 function dashboardGroup(type: BoardConfig['type']): string {
   const groups: Partial<Record<BoardConfig['type'], string>> = {

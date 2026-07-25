@@ -45,4 +45,29 @@ describe('crossSpawn process lifecycle', () => {
     expect(result.stdout.length).toBeLessThanOrEqual(128);
     expect(result.stdout.endsWith('TAIL')).toBe(true);
   });
+
+  it('rejects immediately with an AbortError when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      crossSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], {
+        cwd: process.cwd(),
+        timeoutMs: 5_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('kills the child process and rejects with AbortError when aborted mid-flight — this is what /stop relies on', async () => {
+    const controller = new AbortController();
+    const promise = crossSpawn(process.execPath, [
+      '-e',
+      "setTimeout(() => process.stdout.write('should not print'), 5000)",
+    ], { cwd: process.cwd(), timeoutMs: 10_000, signal: controller.signal });
+
+    setTimeout(() => controller.abort(), 50);
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

@@ -45,6 +45,8 @@ export interface LLMCompletionOptions {
    * (Codex CLI) skip it and callers fall back to a chars/4 estimate.
    */
   onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
+  /** Abort in-flight generation (e.g. a user-triggered /stop). */
+  signal?: AbortSignal;
 }
 
 export interface LLMValidationResult {

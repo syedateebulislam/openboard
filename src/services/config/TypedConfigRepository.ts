@@ -2,6 +2,12 @@ import { defaultModelFor, normalizeEffort } from '../../config/llmCatalog.js';
 import { getAppMode, providerAllowedInMode } from '../../config/appModes.js';
 import type { AppMode } from '../../config/appModes.js';
 import type { LLMConfig, LLMProviderName } from '../../types/llm.js';
+import {
+  GMAIL_DEFAULT_MAX_RESULTS,
+  GMAIL_DEFAULT_QUERY,
+  GMAIL_DEFAULT_SYNC_INTERVAL_MINUTES,
+  type GmailSettings,
+} from '../../types/mail.js';
 import { ConfigService } from './ConfigService.js';
 
 export interface OpenBoardRuntimeConfig {
@@ -51,6 +57,24 @@ export class TypedConfigRepository {
       );
     }
     return llm;
+  }
+
+  getGmailSettings(): GmailSettings {
+    const interval = this.store.get('gmail.syncIntervalMinutes');
+    const maxResults = this.store.get('gmail.maxResults');
+    return {
+      clientId: this.store.get('gmail.clientId') as string | undefined,
+      clientSecret: this.store.getSecret('gmail.clientSecret'),
+      email: this.store.get('gmail.email') as string | undefined,
+      query: (this.store.get('gmail.query') as string | undefined) || GMAIL_DEFAULT_QUERY,
+      syncIntervalMinutes: typeof interval === 'number' && interval >= 1
+        ? Math.floor(interval)
+        : GMAIL_DEFAULT_SYNC_INTERVAL_MINUTES,
+      maxResults: typeof maxResults === 'number' && maxResults >= 1
+        ? Math.min(Math.floor(maxResults), 500)
+        : GMAIL_DEFAULT_MAX_RESULTS,
+      needsReauth: this.store.get('gmail.needsReauth') === true,
+    };
   }
 
   saveLLMConfig(config: LLMConfig & { provider: LLMProviderName }): void {

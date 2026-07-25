@@ -81,6 +81,7 @@ function runWithStdin(
   stdin: string,
   timeoutMs: number,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const start = Date.now();
   const heartbeat = onProgress ? setInterval(() => {
@@ -92,6 +93,7 @@ function runWithStdin(
     timeoutMs,
     env: { CODEX_HOME: codexHome() },
     stdin,
+    signal,
     onProgress: onProgress ? (line) => onProgress(`  codex: ${line.slice(0, 180)}`) : undefined,
   }).finally(() => {
     if (heartbeat) clearInterval(heartbeat);
@@ -296,6 +298,7 @@ export class OpenAICodexProvider implements LLMProvider {
       prompt,
       10 * 60_000,
       options.onProgress,
+      options.signal,
     );
 
     try {

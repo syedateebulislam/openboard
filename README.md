@@ -110,6 +110,17 @@ Every generated tab includes by default (until you ask the chat to change it):
 
 The generated app header shows the OpenBoard website/GitHub/npm icon links on the left and the clickable OpenBoard brand in the center.
 
+## Gmail Integration
+
+OpenBoard can use your Gmail inbox as a live dashboard data source:
+
+- **Connect once**: Settings → Gmail integration. You supply a Google Cloud OAuth *Desktop app* client (ID + secret); OpenBoard runs the browser consent flow on a localhost loopback with the read-only `gmail.readonly` scope. The client secret and refresh token are stored encrypted; the access token never touches disk.
+- **Background sync while the TUI is open**: an in-process scheduler fetches new mail on an interval (default 5 min, configurable) and keeps a local cache at `~/.openboard/mail/messages.json` — flat rows (`date`, `from`, `fromDomain`, `subject`, `category`, `unread`, `sizeKb`, …) that parse like any `.json` data file. The scheduler starts when the CLI launches and stops when you close the terminal; there is no daemon.
+- **Use it as data**: type `gmail` as the data file path when creating a dashboard, or run `/mail use` in an existing dashboard's chat. `/update` then regenerates charts from the freshest cache.
+- **Headless**: `openboard agent setup gmail --gmail-client-id ... --gmail-client-secret ...` saves credentials (browser consent still happens in the TUI once), and `openboard agent mail sync|status [--json]` syncs/inspects without the TUI.
+
+Privacy: mail is cached only on your machine and is read-only. It leaves the machine only if you deploy a mail-backed dashboard in remote mode. If Google revokes the token (e.g. testing-mode OAuth apps expire refresh tokens after 7 days), OpenBoard shows a "re-auth needed" status instead of failing loops — reconnect from Settings.
+
 ## Internal Chat Commands
 
 Internal chat commands start with `/`.
@@ -122,6 +133,7 @@ Internal chat commands start with `/`.
 | `/build` | Run the generated app build |
 | `/update` | Regenerate from latest linked data using prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
+| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links the synced inbox as the board's data source |
 | `/history` | Show prompt history for the dashboard |
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
@@ -173,6 +185,8 @@ openboard rollback --dashboard <id-or-name-or-title>
 openboard agent create --data <file.csv|.xlsx|.json> --name <title> [--type custom] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent setup llm --provider <name> [--model <model>] [--effort low|medium|high|max]
+openboard agent setup gmail --gmail-client-id <id> --gmail-client-secret <secret> [--gmail-query "in:inbox"] [--gmail-sync-interval 5]
+openboard agent mail <sync|status> [--json]
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help

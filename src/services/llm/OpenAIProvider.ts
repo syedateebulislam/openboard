@@ -100,7 +100,7 @@ export class OpenAIProvider implements LLMProvider {
               temperature: options.temperature ?? 0.7,
               max_tokens: options.maxTokens ?? 4096,
             }),
-      });
+      }, { signal: options.signal });
       if (options.onUsage && response.usage) {
         options.onUsage({
           promptTokens: response.usage.prompt_tokens,
@@ -140,7 +140,7 @@ export class OpenAIProvider implements LLMProvider {
       ...(reasoningEffort
         ? { reasoning_effort: reasoningEffort, max_completion_tokens: options.maxTokens ?? 4096 }
         : { temperature: options.temperature ?? 0.7 }),
-    });
+    }, { signal: options.signal });
 
     for await (const chunk of stream) {
       const text = chunk.choices[0]?.delta?.content ?? '';

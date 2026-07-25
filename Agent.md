@@ -103,8 +103,26 @@ openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
 openboard agent setup github --github-token "ghp_..."     # remote mode only
 openboard agent setup vercel --vercel-token "..."          # remote mode only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
+openboard agent setup gmail --gmail-client-id "xxx.apps.googleusercontent.com" --gmail-client-secret "GOCSPX-..."
 openboard agent setup status --json
 ```
+
+### Gmail (mail as a data source)
+
+`agent setup gmail` saves the Google OAuth Desktop-app client (secret encrypted at rest; env fallbacks `OPENBOARD_GMAIL_CLIENT_ID` / `OPENBOARD_GMAIL_CLIENT_SECRET`, options `--gmail-query`, `--gmail-sync-interval`). The browser consent step is interactive-only — a human finishes it once in the TUI (Settings › Gmail integration). After that:
+
+```bash
+# One-shot sync into the local cache (~/.openboard/mail/messages.json):
+openboard agent mail sync --json
+
+# Connection + sync state (connected, needsReauth, totalCached, lastSyncAt, cachePath):
+openboard agent mail status --json
+
+# The cache is a plain JSON data file — feed it to the normal create/update flow:
+openboard agent create --data ~/.openboard/mail/messages.json --name "Inbox"
+```
+
+`mail sync` exits 1 with `needsReauth: true` when the refresh token was revoked/expired; re-consent in the TUI and retry.
 
 Flags:
 

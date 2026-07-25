@@ -63,6 +63,13 @@ describe('Command Parsing', () => {
       expect(parseCommand('/logs')).toEqual({ type: 'logs' });
       expect(parseCommand('/data')).toEqual({ type: 'data' });
     });
+
+    it('should recognize "/stop" and "/resume" as cancellation commands', () => {
+      expect(parseCommand('/stop')).toEqual({ type: 'stop' });
+      expect(parseCommand('/resume')).toEqual({ type: 'resume' });
+      expect(parseCommand('/STOP')).toEqual({ type: 'stop' });
+      expect(parseCommand('  /resume  ')).toEqual({ type: 'resume' });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -166,6 +173,19 @@ describe('Command Parsing', () => {
       expect(HELP_TEXT).toContain('/config');
       expect(HELP_TEXT).toContain('/status');
       expect(HELP_TEXT).toContain('/help');
+      expect(HELP_TEXT).toContain('/stop');
+      expect(HELP_TEXT).toContain('/resume');
+    });
+
+    it('/stop and /resume description lines do not mention /deploy or /push', () => {
+      // Regression guard: helpTextForMode(false) only strips lines *starting*
+      // with /deploy or /push, so a stray "/deploy "/"/push " substring inside
+      // another command's own description (e.g. /stop's) would still leak
+      // into local-mode help text.
+      const stopLine = HELP_TEXT.split('\n').find((line) => line.trim().startsWith('/stop'));
+      const resumeLine = HELP_TEXT.split('\n').find((line) => line.trim().startsWith('/resume'));
+      expect(stopLine).not.toMatch(/\/deploy\s|\/push\s/);
+      expect(resumeLine).not.toMatch(/\/deploy\s|\/push\s/);
     });
 
     it('should expose command suggestions with categories and colors', () => {

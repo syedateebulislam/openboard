@@ -189,21 +189,21 @@ export class ProjectManager {
   /**
    * Install npm dependencies in the project.
    */
-  async install(projectDir: string, onProgress?: ProgressCallback): Promise<OperationResult> {
+  async install(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<OperationResult> {
     if (!existsSync(join(projectDir, 'package.json'))) {
       return { success: false, error: 'No package.json found in project directory' };
     }
-    return BuildService.install(projectDir, onProgress);
+    return BuildService.install(projectDir, onProgress, signal);
   }
 
   /**
    * Build the project (TypeScript check + Vite build).
    */
-  async build(projectDir: string, onProgress?: ProgressCallback): Promise<BuildResult> {
+  async build(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<BuildResult> {
     if (!existsSync(join(projectDir, 'package.json'))) {
       return { success: false, error: 'No package.json found in project directory' };
     }
-    const result = await BuildService.build(projectDir, onProgress);
+    const result = await BuildService.build(projectDir, onProgress, signal);
     return {
       success: result.success,
       error: result.error,
@@ -322,7 +322,7 @@ export class ProjectManager {
    * Full push: commit + push in one step.
    * Auto-initializes git if not already a git repo.
    */
-  async commitAndPush(projectDir: string, message: string, onProgress?: ProgressCallback): Promise<GitResult> {
+  async commitAndPush(projectDir: string, message: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<GitResult> {
     // Auto-init git if not already initialized
     if (!existsSync(join(projectDir, '.git'))) {
       onProgress?.('📋 Initializing git repository...');
@@ -332,7 +332,7 @@ export class ProjectManager {
       }
     }
 
-    const result = await GitHubService.commitAndPush(projectDir, message, undefined, onProgress);
+    const result = await GitHubService.commitAndPush(projectDir, message, undefined, onProgress, signal);
     return {
       success: result.success,
       error: result.error,
@@ -539,7 +539,7 @@ export class ProjectManager {
    * Deploy to Vercel (production).
    * Auto-injects dashboard credentials from config before deploying.
    */
-  async deploy(projectDir: string, onProgress?: ProgressCallback): Promise<OperationResult & { url?: string }> {
+  async deploy(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<OperationResult & { url?: string }> {
     // Step 0: Pre-deploy checks — fix common issues
     const preDeploy = this.preDeployChecks(projectDir, onProgress);
     if (!preDeploy.success) {
@@ -573,7 +573,7 @@ export class ProjectManager {
     }
 
     // Step 4: Deploy
-    const result = await VercelService.deployProduction(projectDir, onProgress);
+    const result = await VercelService.deployProduction(projectDir, onProgress, signal);
     return {
       success: result.success,
       error: result.error,
@@ -684,6 +684,7 @@ export class ProjectManager {
     'src/components/DashboardTabs.tsx',
     'src/components/DashboardHeader.tsx',
     'src/components/InsightCard.tsx',
+    'src/components/ErrorBoundary.tsx',
     'src/hooks/useTheme.ts',
     'api/_auth.ts',
     'api/auth.ts',
