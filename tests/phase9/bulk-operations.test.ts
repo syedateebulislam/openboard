@@ -33,6 +33,13 @@ vi.mock('../../src/services/llm/LLMService.js', () => ({
   LLMService: { createProvider: () => ({ complete: completeMock }) },
 }));
 
+// repairAndRebuild runs a real `npx tsc --noEmit` as an advisory signal; the
+// fake workspaces here have no package.json/node_modules, so leaving it real
+// spawns an actual npx process per repair attempt — slow and flaky in CI.
+vi.mock('../../src/services/build/BuildService.js', () => ({
+  BuildService: { typeCheck: vi.fn(async () => ({ success: true, errors: [] })) },
+}));
+
 import { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
 import { RunStateService } from '../../src/services/project/RunStateService.js';
 import { TemplateService as RealTemplateService } from '../../src/services/template/TemplateService.js';
