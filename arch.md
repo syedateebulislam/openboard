@@ -1,6 +1,6 @@
 # OpenBoard Architecture
 
-> Version: 1.5.2  
+> Version: 1.6.0  
 > Current branch: main  
 > Scope: OpenBoard TUI, non-interactive CLI, shared generated dashboard app
 
@@ -84,6 +84,7 @@ src/
     BoardCreationScreen.tsx
     ManageBoardsScreen.tsx
     ChatScreen.tsx
+    GmailSettingsScreen.tsx
   components/
     ChatMessage.tsx
     LoadingRemark.tsx
@@ -92,6 +93,7 @@ src/
     Spinner.tsx
     ProgressBar.tsx
     StatusBadge.tsx
+    LocalModelPicker.tsx             live Ollama/LM Studio model list, replaces static SelectInput
   services/
     auth/AuthService.ts
     build/BuildService.ts
@@ -115,7 +117,14 @@ src/
     llm/OllamaProvider.ts
     llm/MoonshotProvider.ts
     llm/heartbeat.ts                     liveness lines during long LLM calls
-    llm/prompts/systemPrompt.ts
+    llm/localModelDiscovery.ts           live installed-model listing for Ollama/LM Studio
+    llm/prompts/systemPrompt.ts           SYSTEM_PROMPT (high) + SYSTEM_PROMPT_LOW
+    mail/GmailAuthService.ts             OAuth desktop-app client + token storage
+    mail/GmailClient.ts                  Gmail API read-only fetch
+    mail/MailSyncService.ts              orchestrates fetch -> normalize -> cache
+    mail/MailNormalizer.ts               raw message -> flat row shape
+    mail/MailCacheService.ts             ~/.openboard/mail/messages.json cache
+    mail/mailScheduler.ts                in-process interval sync while the TUI is open
     project/ProjectManager.ts
     project/BoardRegistryService.ts
     project/PromptHistoryService.ts
@@ -123,15 +132,16 @@ src/
     project/DashboardBuildPipeline.ts    ordered manifest->shell->install->build stages
     project/DashboardManifestService.ts  deterministic tab manifest generation
     project/useCases/RefreshAllDashboardsUseCase.ts
-    project/RunStateService.ts
+    project/RunStateService.ts            per-run JSON records under ~/.openboard/runs/; running/failed/succeeded/cancelled
     project/ProjectLockService.ts
     project/pipelinePhases.ts
     template/TemplateService.ts
   utils/
     commandParser.ts
     codeExtractor.ts
-    crossSpawn.ts
+    crossSpawn.ts                    spawns npm/git/vercel; accepts an AbortSignal
     errorCodes.ts                    error classification + user-facing humanizer
+    pathNormalizer.ts                 strips matching surrounding quotes from pasted paths
     logger.ts
 templates/dashboard/
 projects/
@@ -152,11 +162,12 @@ openboard update --dashboard <selector>
 openboard update --all
 openboard update --all --prompt "..."           # modify every dashboard with one prompt
 openboard rollback --dashboard <selector>
-openboard agent setup <llm|github|vercel|dashboard|status|all> [flags]   # headless configuration
-openboard agent create --data <file> --name <title> [--type custom] [--prompt "..."] [--json]
+openboard agent setup <llm|github|vercel|dashboard|gmail|status|all> [flags]   # headless configuration
+openboard agent create --data <file> --name <title> [--type custom] [--quality high|low] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent update --all --prompt "..." [--json]    # modify every dashboard
 openboard agent remove --all [--json]                   # remove every dashboard (empty the app)
+openboard agent mail <sync|status> [--json]             # headless Gmail sync
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help
@@ -183,6 +194,7 @@ settings-llm
 settings-github
 settings-vercel
 settings-dashboard-auth
+settings-gmail
 deploy
 ```
 
@@ -247,10 +259,13 @@ against the running operation's phase list, not the full create pipeline.
 | `/build` | Build generated app |
 | `/update` | Regenerate using latest data and saved prompt history, then build/push/deploy |
 | `/data` | Parse and summarize linked data source |
+| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links the synced inbox as this board's data |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
 | `/doctor` | Show readiness checks |
 | `/model` | Show or switch model and effort |
+| `/stop` | Abort the in-flight operation via `AbortController`/`AbortSignal` threaded through the LLM provider and `crossSpawn`-based build/push/deploy calls; marks the active `RunStateService` run `'cancelled'` |
+| `/resume` | Find the latest non-succeeded `RunRecord` for this board and call `DashboardUpdateService.resume(runId, ...)` |
 | `/status` | Show project/dashboard status |
 | `/config` | Open settings |
 | `/commands` | Show command palette |
@@ -277,7 +292,13 @@ The generated app has one authenticated shell with multiple dashboard tabs.
 Composition is deterministic and product-owned:
 
 - `App.tsx` is a shell file, re-synced from the template on every build/deploy;
-  it renders tabs exclusively from `src/generated/dashboardManifest.tsx`.
+  it renders tabs exclusively from `src/generated/dashboardManifest.tsx`, each
+  wrapped in `components/ErrorBoundary.tsx` (keyed by `activeTab`) — a class
+  component that catches render-time crashes so one bad tab shows a "failed to
+  load" fallback instead of blanking the whole app. `ErrorBoundary.tsx` is
+  itself a shell file: synced by `TemplateService.SHELL_SYNC_FILES`, protected
+  from removal by `ProjectManager.PRODUCT_SHELL_FILES` and the
+  `DashboardManifestService`/`DashboardUpdateService` shell-component regexes.
 - `DashboardManifestService.sync()` regenerates that manifest from the board
   registry (scoring each board's best component export) before every build,
   preview, and deploy — in the TUI chat flows and in `DashboardBuildPipeline`
@@ -329,7 +350,12 @@ requirement); `LLMService.createProvider` delegates to it. Supported providers:
 | Ollama | Local host (native `/api` endpoints, no key) | `OllamaProvider` |
 | LM Studio | Local OpenAI-compatible server (`/v1`, no key) | `OpenAICompatibleProvider` |
 
-In **Local only** mode, only Ollama and LM Studio are selectable.
+In **Local only** mode, only Ollama and LM Studio are selectable. For those two
+providers, the model picker (`LocalModelPicker`, backed by
+`llm/localModelDiscovery.ts`) queries the local server for its actual
+installed/loaded models and lists those live, falling back to the static
+per-provider catalog (`config/llmCatalog.ts`) if the query fails. Other
+providers always use the static catalog.
 
 OpenAI Codex auth is isolated: OpenBoard runs `codex` with its own codex home
 (`~/.openboard/codex-home` by default; override with `OPENBOARD_CODEX_HOME`).
@@ -340,12 +366,56 @@ is intentionally ignored so a parent tool (e.g. OpenClaw spawning `openboard
 agent`) can't redirect OpenBoard's codex auth to its own home. Sign in once via
 `openboard` → Settings → LLM → OpenAI Codex; codex then keeps it refreshed.
 
+## UI Quality Modes
+
+`BoardConfig.uiQuality` (`'high' | 'low'`, default `high`) is chosen once per
+dashboard — in the create wizard's "Choose UI complexity" step, or via
+`agent create --quality`. It selects which system prompt and completion
+budget every generation call for that board uses, including every later
+`/update` and repair attempt, not just the first generation:
+
+| | High (default) | Low |
+|---|---|---|
+| System prompt | `SYSTEM_PROMPT` (`llm/prompts/systemPrompt.ts`) | `SYSTEM_PROMPT_LOW`, loaded from `prompts/system/low-quality.md` |
+| Required output | KPI row, 4-tile Top Insights, trend chart + period toggle, sortable/searchable/paginated records table | `<DashboardHeader>`, 1-3 KPI tiles, exactly one chart — everything else optional |
+| Completion budget | 8192 tokens | 4096 tokens |
+
+Low quality exists because small/local models can exhaust their entire
+completion budget on internal reasoning against the full prompt and return no
+code at all (see `repairAndRebuild`'s `anyAttemptProducedFiles` diagnostic
+below) — the create wizard pre-highlights Low when the configured provider is
+Ollama or LM Studio, but either mode can be chosen with any provider. The
+shared master Overview tab (`MASTER_DASHBOARD_PROMPT` / `syncMasterTab`)
+always uses the standard prompt regardless of any individual board's
+`uiQuality` — it is one product-controlled aggregation across all boards, not
+a per-dashboard choice.
+
+## Cancellation And Resume
+
+Every cancellable operation (LLM generation, install, build, git push, Vercel
+deploy) accepts an `AbortSignal`, threaded from `ChatScreen`'s `/stop` command
+through `LLMProvider.complete/stream`, `ProjectManager`, `BuildService`,
+`GitHubService`, `VercelService`, and `ProjectCommandHandlers` down to
+`crossSpawn` (which forwards it to the child process) and each provider's
+underlying SDK call (native `fetch` abort for OpenAI/Anthropic/Gemini/
+Moonshot/OpenAI-compatible; explicit `client.abort()`/`stream.abort()` calls
+for `OllamaProvider`, including an upfront `signal.aborted` check so an abort
+that lands before/during the initial handshake isn't missed).
+
+`RunStateService` persists one JSON record per create/update run under
+`~/.openboard/runs/<run-id>.json` with status `running | succeeded | failed |
+cancelled`. `/stop` calls `runs.cancel(record)`; `/resume` finds the latest
+non-`succeeded` run for the current board (`runs.list().filter(...)`, newest
+first) and calls `DashboardUpdateService.resume(runId, onProgress, signal)` —
+the same tail-only (build → push → deploy → verify, no LLM re-call) resume
+mechanism `agent resume <run-id>` uses headlessly.
+
 ## Data And Generation Flow
 
 ```mermaid
 flowchart TD
-    A["DataParserService: parse CSV/XLSX/JSON"] --> B["DataAnalyzer: infer types, row count, column stats, categorical hints"]
-    B --> C["LLM prompt: board context, registered dashboards, data summary (components only — no App.tsx)"]
+    A["DataParserService: normalizeUserPath, then parse CSV/XLSX/JSON"] --> B["DataAnalyzer: infer types, row count, column stats, categorical hints"]
+    B --> C["LLM prompt: SYSTEM_PROMPT or SYSTEM_PROMPT_LOW per board.uiQuality, board context, registered dashboards, data summary (components only — no App.tsx)"]
     C --> D[LLM response]
     D --> E["codeExtractor: extract //CODE_START blocks; drop App.tsx / generated/* / MasterDashboard"]
     E --> F["TemplateService: write generated files into shared workspace (allowlisted paths)"]
@@ -365,6 +435,24 @@ flowchart TD
 ```
 
 If GitHub push succeeds but direct Vercel CLI auth fails, OpenBoard reports that Vercel Git integration may still deploy the pushed commit.
+
+## Gmail (Mail) Integration
+
+Gmail can act as a live, refreshable data source instead of a static CSV/JSON file:
+
+```mermaid
+flowchart LR
+    A["GmailSettingsScreen: OAuth Desktop-app client + consent (localhost loopback, gmail.readonly)"] --> B["GmailAuthService: encrypted client secret + refresh token"]
+    B --> C["mailScheduler: interval sync while the TUI is open"]
+    C --> D["MailSyncService: GmailClient fetch -> MailNormalizer -> flat rows"]
+    D --> E["MailCacheService: ~/.openboard/mail/messages.json"]
+    E --> F["DataParserService reads the cache like any .json data file"]
+```
+
+- `agent setup gmail` stores the OAuth client headlessly; the browser consent step is interactive-only (`GmailSettingsScreen`, once).
+- `agent mail sync|status` drives `MailSyncService`/`MailCacheService` without the TUI; `mail sync` exits 1 with `needsReauth: true` if Google revoked the refresh token.
+- Typing `gmail` as a data path, or `/mail use` in chat, links `~/.openboard/mail/messages.json` as the board's `dataFiles[0]` — after that it flows through the normal parse/analyze/generate pipeline like any other file.
+- `WelcomeScreen`'s `mailStatusLine()` and `/mail` render the same `MailSchedulerStatus` shape (`not-configured | syncing | connected | needs-reauth | error`).
 
 ## Config And Security
 

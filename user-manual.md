@@ -93,9 +93,11 @@ Supported LLM providers:
 - Ollama (local model library and runtime)
 - LM Studio (local OpenAI-compatible server; start it from the Developer tab)
 
-Each provider shows eight recent text/code model choices. The catalog was
-reviewed against provider documentation on July 18, 2026; actual availability
-can still vary by API account, plan, and region.
+Ollama and LM Studio show your actual installed/loaded models, fetched live
+from the local server; if that lookup fails, they fall back to a static
+catalog of eight recent choices. Other providers always show that static
+catalog. It was reviewed against provider documentation on July 18, 2026;
+actual availability can still vary by API account, plan, and region.
 
 The mode and every setting can be changed later from Settings (Settings > App
 mode). Switching to All remote later asks for GitHub/Vercel tokens; switching
@@ -106,14 +108,24 @@ to Local only requires either the Ollama or LM Studio provider.
 1. Open Dashboards.
 2. Select Add new dashboard.
 3. Choose a preset: Health, Finance, Grocery, Travel, Food, Shopping, Subscriptions, Utilities, Invoices, or Custom.
-4. Enter a CSV/XLSX/JSON file path (or type `gmail` to use your synced Gmail inbox, once Gmail is connected in Settings).
-5. Enter the dashboard name.
-6. Confirm after data analysis.
-7. OpenBoard enters the internal LLM chat.
+4. Choose UI complexity: **High quality** (default, full-featured) or **Low quality**
+   (lightweight — recommended for local/small-context models). Low is
+   pre-highlighted when your configured provider is Ollama or LM Studio.
+5. Enter a CSV/XLSX/JSON file path (or type `gmail` to use your synced Gmail inbox, once Gmail is connected in Settings). Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
+6. Enter the dashboard name.
+7. Confirm after data analysis.
+8. OpenBoard enters the internal LLM chat.
 
 If no LLM is configured yet, step 1 shows a warning up front pointing to Setup.
 If the data file can't be read or the name is invalid, ESC returns you to that
 field with your input preserved — you never restart from the preset step.
+
+Low quality boards use a shorter system prompt and a smaller completion
+budget for every generation and update, not just the first one — this applies
+on every `/update` too, so a low-context local model doesn't hit the same
+wall again later. A Low quality dashboard only requires a header, 1-3 KPI
+cards, and one chart; a High quality one also requires Top Insights, a
+trend chart, and a searchable/sortable records table.
 
 For a newly configured dashboard, the chat header shows:
 
@@ -175,6 +187,8 @@ Commands must start with `/`.
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/model` | Show or switch the LLM model and effort |
+| `/stop` | Cancel the current in-flight operation (generation, build, push, or deploy) |
+| `/resume` | Resume the latest interrupted/failed run for this dashboard |
 | `/status` | Show dashboard/project status |
 | `/config` | Open settings |
 | `/commands` | Show command palette |
@@ -312,7 +326,15 @@ Check:
 
 ### Build failed
 
-Try a smaller prompt or ask the LLM to simplify the dashboard. OpenBoard also runs pre-deploy checks to relax common generated-code build blockers.
+Try a smaller prompt or ask the LLM to simplify the dashboard. OpenBoard also runs pre-deploy checks to relax common generated-code build blockers. If every automatic repair attempt returns no code at all, the error explains this directly — it usually means a local "thinking" model spent its whole response budget on internal reasoning. Switch that dashboard to Low quality (or a smaller/non-reasoning local model), or increase the model's max output tokens in your local server settings.
+
+### A dashboard tab shows "failed to load"
+
+Each tab has its own error boundary, so a crash in one tab's generated code never blanks the rest of the app. Switch away and back to retry the render, or send a chat message (or `/update`) asking the LLM to fix the reported error.
+
+### A generation, build, push, or deploy seems stuck
+
+Type `/stop` to cancel it. If it left the dashboard in a partially-finished state (e.g. build/push/deploy failed after generation succeeded), `/resume` picks the latest interrupted run back up — no LLM cost for the parts that already succeeded.
 
 ## Verification Commands
 

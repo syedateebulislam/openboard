@@ -200,6 +200,7 @@ Flags:
 | `--data` | yes | CSV/JSON file path |
 | `--name` | no | Dashboard title; derived from file name if omitted |
 | `--type` | no | `health`, `finance`, `grocery`, or `custom`; default `custom` |
+| `--quality` | no | `high` (default, full-featured) or `low` (shorter prompt, smaller completion budget — for small-context/local models); applies to this dashboard's initial generation and every later update |
 | `--prompt` | no | Intent for the initial dashboard |
 | `--json` | no | Final result as JSON on stdout; progress logs on stderr |
 

@@ -61,7 +61,7 @@ On a fresh install (no LLM configured), `openboard` opens the setup wizard autom
 
 - App mode: Local only / Hybrid / All remote (asked first — see [Modes](#modes--pick-your-privacy-level-first)).
 - LLM provider: OpenAI API, OpenAI Codex via ChatGPT subscription, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, local Ollama, or local LM Studio.
-- Local choices span Qwen, Gemma, Mistral/Devstral, OpenAI GPT-OSS, DeepSeek R1, Llama, and Phi in multiple hardware sizes. LM Studio can automatically select the first model its local server exposes.
+- Ollama and LM Studio show your actual installed/loaded models (live discovery against the local server), falling back to a static catalog spanning Qwen, Gemma, Mistral/Devstral, OpenAI GPT-OSS, DeepSeek R1, Llama, and Phi only if the local server can't be reached. LM Studio can also automatically select the first model its local server exposes.
 - Model and execution effort (`low` / `medium` / `high` / `max`) — picked from lists in the wizard; effort maps to each provider's reasoning knob (OpenAI `reasoning_effort`, Anthropic extended thinking, Codex `model_reasoning_effort`).
 - GitHub token or authenticated GitHub CLI *(All remote mode only)*.
 - Vercel token or Vercel Git integration *(All remote mode only)*.
@@ -88,8 +88,9 @@ OpenAI Codex can be signed in headlessly too — `--codex-access-token`, `--api-
 
 OpenBoard uses one master generated React app.
 
-- Add a dashboard: Dashboards -> Add new dashboard to UI. Data sources: `.csv`, `.xlsx`, or `.json`.
+- Add a dashboard: Dashboards -> Add new dashboard to UI. Data sources: `.csv`, `.xlsx`, or `.json` — the path can be typed or pasted with or without surrounding quotes (e.g. Windows Explorer's "Copy as path").
 - Category presets (`--type` for agents): `health`, `finance`, `grocery`, `travel`, `food`, `shopping`, `subscriptions`, `utilities`, `invoices`, `custom` — each ships a tuned default prompt (rides/bookings, food delivery, e-commerce orders, recurring SaaS/OTT bills, telecom/society bills, mixed invoice ledgers, ...).
+- UI complexity (`--quality` for agents): **High** (default — full KPI row, Top Insights, trend chart, sortable/searchable records table) or **Low** (lightweight — 1-3 KPI cards and one chart; shorter prompt and smaller completion budget). Low is pre-selected when your configured provider is Ollama or LM Studio, since small/local models often can't finish a full high-quality generation without exhausting their reasoning budget — but either quality can be chosen with any provider.
 - Modify a dashboard: Dashboards -> Modify: `<dashboard title>`.
 - Remove a dashboard: Dashboards -> Remove: `<dashboard title>`.
 
@@ -101,12 +102,16 @@ As soon as the app has at least one dashboard, a master **Overview** tab is gene
 
 ### Default UI contract
 
-Every generated tab includes by default (until you ask the chat to change it):
+Every **High** quality generated tab includes by default (until you ask the chat to change it):
 
 - A row of equal-sized KPI cards.
 - A "Top Insights" block of exactly 4 tiles: top 2 spending + top 2 saving insights.
 - A time-trend chart with a Weekly/Monthly/Quarterly toggle (when dates exist).
 - A "Recent Records" table at the bottom — newest first, 10 most recent visible by default, with pagination, sorting, and search.
+
+**Low** quality tabs only require a header, 1-3 KPI cards, and exactly one chart — everything else above is optional, traded for a shorter prompt and smaller completion budget so small/local models are more likely to finish valid code instead of exhausting their token budget on reasoning.
+
+Each dashboard tab is wrapped in its own error boundary, so a runtime crash in one tab shows a "failed to load" card instead of blanking the whole app; switching tabs (or regenerating via `/update`) gives it a fresh render attempt.
 
 The generated app header shows the OpenBoard website/GitHub/npm icon links on the left and the clickable OpenBoard brand in the center.
 
@@ -138,6 +143,8 @@ Internal chat commands start with `/`.
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/model` | Show or switch the LLM model and effort (`/model <model> [effort]`, `/model effort <level>`) |
+| `/stop` | Cancel the current in-flight operation (generation, build, push, or deploy) |
+| `/resume` | Resume the latest interrupted/failed run for this dashboard from where it left off |
 | `/status` | Show dashboard/project status |
 | `/config` | Open settings |
 | `/commands` | Show command palette |
@@ -182,7 +189,7 @@ openboard start
 openboard update --dashboard <id-or-name-or-title>
 openboard update --all
 openboard rollback --dashboard <id-or-name-or-title>
-openboard agent create --data <file.csv|.xlsx|.json> --name <title> [--type custom] [--prompt "..."] [--json]
+openboard agent create --data <file.csv|.xlsx|.json> --name <title> [--type custom] [--quality high|low] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent setup llm --provider <name> [--model <model>] [--effort low|medium|high|max]
 openboard agent setup gmail --gmail-client-id <id> --gmail-client-secret <secret> [--gmail-query "in:inbox"] [--gmail-sync-interval 5]
