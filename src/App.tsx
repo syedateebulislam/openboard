@@ -8,6 +8,7 @@ import { BoardCreationScreen } from './screens/BoardCreationScreen.js';
 import { ChatScreen } from './screens/ChatScreen.js';
 import { ManageBoardsScreen } from './screens/ManageBoardsScreen.js';
 import { GmailSettingsScreen } from './screens/GmailSettingsScreen.js';
+import { LocalModelPicker } from './components/LocalModelPicker.js';
 import { ProjectManager } from './services/project/ProjectManager.js';
 import { ConfigService } from './services/config/ConfigService.js';
 import { LLMService } from './services/llm/LLMService.js';
@@ -470,13 +471,25 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       <Text bold color={UI_COLORS.logo}>LLM Model</Text>
       <Text color={UI_COLORS.subtitle}>Provider: {provider}</Text>
       <Box marginTop={1}>
-        <SelectInput
-          items={MODEL_CHOICES[provider]}
-          onSelect={(item) => {
-            setModel(item.value);
-            setTimeout(() => void saveLLM(item.value), 0);
-          }}
-        />
+        {provider === 'ollama' || provider === 'lmstudio' ? (
+          <LocalModelPicker
+            provider={provider}
+            host={ollamaHost}
+            staticChoices={MODEL_CHOICES[provider]}
+            onPick={(value) => {
+              setModel(value);
+              setTimeout(() => void saveLLM(value), 0);
+            }}
+          />
+        ) : (
+          <SelectInput
+            items={MODEL_CHOICES[provider]}
+            onSelect={(item) => {
+              setModel(item.value);
+              setTimeout(() => void saveLLM(item.value), 0);
+            }}
+          />
+        )}
       </Box>
       {status && (
         <Box marginTop={1}>

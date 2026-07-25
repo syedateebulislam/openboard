@@ -20,6 +20,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 
+import { LocalModelPicker } from '../components/LocalModelPicker.js';
 import { AuthService } from '../services/auth/AuthService.js';
 import { LLMService } from '../services/llm/LLMService.js';
 import { OpenAICodexProvider } from '../services/llm/OpenAICodexProvider.js';
@@ -355,13 +356,25 @@ function Step1LLMConfig({
           <Box marginTop={1} flexDirection="column">
             <Text color={UI_COLORS.logo}>Select model:</Text>
             <Box marginTop={1}>
-              <SelectInput
-                items={MODEL_CHOICES[provider]}
-                onSelect={(item) => {
-                  onModelChange(item.value);
-                  setPhase('effort');
-                }}
-              />
+              {provider === 'ollama' || provider === 'lmstudio' ? (
+                <LocalModelPicker
+                  provider={provider}
+                  host={ollamaHost}
+                  staticChoices={MODEL_CHOICES[provider]}
+                  onPick={(value) => {
+                    onModelChange(value);
+                    setPhase('effort');
+                  }}
+                />
+              ) : (
+                <SelectInput
+                  items={MODEL_CHOICES[provider]}
+                  onSelect={(item) => {
+                    onModelChange(item.value);
+                    setPhase('effort');
+                  }}
+                />
+              )}
             </Box>
           </Box>
           <Text color={UI_COLORS.subtitle}>
