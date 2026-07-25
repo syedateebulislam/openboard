@@ -66,6 +66,15 @@ describe('DataParserService CSV/JSON regression', () => {
         .rejects.toThrow(/File not found/);
     });
 
+    it('accepts a path wrapped in quotes (Windows "Copy as path")', async () => {
+      const path = writeFixture('quoted.csv', 'name,amount\nZomato,450\n');
+
+      const parsed = await DataParserService.parse(`"${path}"`);
+
+      expect(parsed.format).toBe('csv');
+      expect(parsed.rows).toEqual([{ name: 'Zomato', amount: 450 }]);
+    });
+
     it('reports stream metrics and enforces the materialized row limit', async () => {
       const path = writeFixture('limited.csv', 'id\n1\n2\n3\n');
       const parsed = await DataParserService.parse(path);

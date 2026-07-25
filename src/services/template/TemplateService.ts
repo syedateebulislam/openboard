@@ -54,6 +54,7 @@ const SHELL_SYNC_FILES = [
   'src/components/BrandLogo.tsx',
   'src/components/DashboardHeader.tsx',
   'src/components/DashboardTabs.tsx',
+  'src/components/ErrorBoundary.tsx',
   'src/components/HeaderLinks.tsx',
   'src/components/InsightCard.tsx',
   'src/components/LoginPage.tsx',

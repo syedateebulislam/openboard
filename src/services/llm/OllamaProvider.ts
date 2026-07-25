@@ -77,8 +77,14 @@ export class OllamaProvider implements LLMProvider {
    */
   async complete(options: LLMCompletionOptions): Promise<string> {
     const stopHeartbeat = startHeartbeat(options.onProgress, `ollama (${this.model})`);
+    const client = await this.getClient();
+    if (options.signal?.aborted) {
+      stopHeartbeat();
+      throw Object.assign(new Error('Request was aborted'), { name: 'AbortError' });
+    }
+    const onAbort = () => client.abort();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      const client = await this.getClient();
       const response = await client.chat({
         model: this.model,
         messages: options.messages.map((m) => ({
@@ -94,6 +100,7 @@ export class OllamaProvider implements LLMProvider {
       }
       return response.message.content;
     } finally {
+      options.signal?.removeEventListener('abort', onAbort);
       stopHeartbeat();
     }
   }
@@ -113,11 +120,26 @@ export class OllamaProvider implements LLMProvider {
       stream: true,
     });
 
-    for await (const chunk of stream) {
-      yield {
-        text: chunk.message.content,
-        done: chunk.done,
-      };
+    // The handshake above can take a real amount of time (e.g. a local model
+    // still loading) — check whether the signal fired during that await,
+    // since a listener attached only now would miss an abort that already
+    // happened.
+    if (options.signal?.aborted) {
+      stream.abort();
+      throw Object.assign(new Error('Request was aborted'), { name: 'AbortError' });
+    }
+
+    const onAbort = () => stream.abort();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      for await (const chunk of stream) {
+        yield {
+          text: chunk.message.content,
+          done: chunk.done,
+        };
+      }
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort);
     }
   }
 }

@@ -102,6 +102,9 @@ const cli = meow(`
     type: {
       type: 'string',
     },
+    quality: {
+      type: 'string',
+    },
     prompt: {
       type: 'string',
     },
@@ -530,6 +533,14 @@ if (!command || command === 'start') {
       process.exit(1);
     }
 
+    const quality = cli.flags.quality as BoardConfig['uiQuality'] | undefined;
+    if (quality !== undefined && quality !== 'high' && quality !== 'low') {
+      const error = 'Invalid --quality. Use "high" or "low".';
+      if (jsonMode) printJson({ success: false, action: 'create', error, errorCode: 'E_VALIDATION' });
+      else console.error(error);
+      process.exit(1);
+    }
+
     const result = await service.createFromDataSource({
       dataFile,
       title: cli.flags.name,
@@ -537,6 +548,7 @@ if (!command || command === 'start') {
       prompt: cli.flags.prompt,
       dryRun: cli.flags.dryRun,
       idempotencyKey: cli.flags.idempotencyKey,
+      quality,
     }, onProgress);
 
     if (!result.success) {

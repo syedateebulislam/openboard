@@ -5,6 +5,42 @@
  * It establishes the model's identity, technology stack, and output format rules.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Resolve repo root relative to this module's location, same pattern as
+// src/config/dashboardPrompts.ts (dev/tsx vs prod/tsup bundle layouts differ).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = __dirname.includes('dist')
+  ? resolve(__dirname, '..')
+  : resolve(__dirname, '..', '..', '..', '..');
+
+const BUILTIN_LOW_QUALITY_FALLBACK =
+  'Generate a lightweight dashboard: one <DashboardHeader>, 1-3 KPI cards in a single grid, and exactly '
+  + 'one chart. Skip Top Insights, trend toggles, and data tables — prioritize finishing complete, valid '
+  + 'code over feature richness. Never return App.tsx, generated/dashboardManifest.tsx, or '
+  + 'components/MasterDashboard.tsx. Use the required //CODE_START/--- FILE: ---/--- END FILE ---/'
+  + '//CODE_END format, Recharts-only imports, and guard every render against 0/1/many rows.';
+
+/**
+ * Much shorter system prompt for local/small-context models: keeps the
+ * non-negotiable safety/ownership/output-format rules but drops the mandatory
+ * Top Insights block, trend chart + period toggle, paginated/searchable
+ * table, chart-hygiene checklist, and worked example that make SYSTEM_PROMPT
+ * a large, fixed token cost the full prompt asks the model to match with a
+ * lot of generated code.
+ */
+export const SYSTEM_PROMPT_LOW: string = (() => {
+  try {
+    const text = readFileSync(resolve(PROJECT_ROOT, 'prompts', 'system', 'low-quality.md'), 'utf-8').trim();
+    return text || BUILTIN_LOW_QUALITY_FALLBACK;
+  } catch {
+    return BUILTIN_LOW_QUALITY_FALLBACK;
+  }
+})();
+
 export const SYSTEM_PROMPT = `You are an expert React and TypeScript developer specializing in data visualization dashboards.
 You generate clean, production-ready code using React 19, Recharts 3, Tailwind CSS 4, and TypeScript strict mode.
 
@@ -96,7 +132,7 @@ RULES:
 3. OpenBoard registers the primary component as a tab automatically. Do not implement tab navigation, authentication, LoginPage, logout, the OpenBoard header, or DashboardTabs inside a dashboard component.
 4. NEVER rename or recreate the OpenBoard application shell. Individual dashboard names belong in DashboardHeader and dashboard content only.
 5. Keep edits scoped to the requested dashboard and its helper files. Other dashboards are independent modules managed by OpenBoard.
-10. Use Recharts for all charts. Use ResponsiveContainer for responsive sizing.
+10. Use Recharts for all charts. Import ResponsiveContainer and every chart primitive (LineChart, BarChart, PieChart, Line, Bar, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, etc.) exclusively from "recharts" — never from "react-responsive" or any other package.
 11. Every chart must include a readable title or aria-label, visible axis/legend/tooltip labels where relevant, and must not rely on color alone to communicate state.
 12. Use proper TypeScript interfaces for all props and data.
 13. Do NOT use sample/mock rows for real dashboards. If loading, render loading/empty states; when data arrives, compute metrics from protected hook rows.

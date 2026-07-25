@@ -30,6 +30,12 @@ export interface BoardConfig {
   createdAt: string;
   generatedAt?: string;
   dataSummary?: string; // data analysis summary for LLM context
+  /**
+   * UI generation complexity. 'low' uses a much shorter system prompt and a
+   * smaller completion budget — for local/small-context models that can't
+   * reliably finish the full-featured prompt. Undefined behaves as 'high'.
+   */
+  uiQuality?: 'high' | 'low';
 }
 
 export interface ChatMessage {

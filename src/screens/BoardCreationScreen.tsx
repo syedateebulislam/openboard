@@ -9,6 +9,7 @@ import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { MailCacheService } from '../services/mail/MailCacheService.js';
+import { normalizeUserPath } from '../utils/pathNormalizer.js';
 import { existsSync } from 'node:fs';
 import { UI_COLORS } from '../theme.js';
 
@@ -18,10 +19,11 @@ import { UI_COLORS } from '../theme.js';
 
 type CreationStep =
   | 'select-preset'    // 1 — choose domain preset
-  | 'enter-file'       // 2 — enter data file path
-  | 'enter-name'       // 3 — name the board
-  | 'analyzing'        // 4 — parsing + analyzing data
-  | 'show-summary'     // 5 — show analysis, confirm
+  | 'select-quality'   // 2 — choose UI complexity (high/low)
+  | 'enter-file'       // 3 — enter data file path
+  | 'enter-name'       // 4 — name the board
+  | 'analyzing'        // 5 — parsing + analyzing data
+  | 'show-summary'     // 6 — show analysis, confirm
   | 'error';           // error state
 
 interface Props {
@@ -39,11 +41,9 @@ interface SelectItem {
 // ---------------------------------------------------------------------------
 
 function normalizeFilePath(input: string): string {
-  const cleaned = input
-    .trim()
-    .replace(/^[-*]\s+/, '')
-    .replace(/^["']|["']$/g, '')
-    .trim();
+  // Strip a pasted markdown bullet prefix, then let the shared normalizer
+  // handle whitespace/quote stripping (e.g. Windows "Copy as path").
+  const cleaned = normalizeUserPath(input.trim().replace(/^[-*]\s+/, ''));
   // "gmail" is a shortcut for the synced Gmail cache, which is a plain JSON
   // data file — everything downstream treats it like any other source.
   if (cleaned.toLowerCase() === 'gmail') return MailCacheService.getCachePath();
@@ -67,6 +67,16 @@ export function hasConfiguredLLM(config = new ConfigService()): boolean {
   return Boolean(config.getSecret('llm.apiKey'));
 }
 
+function isLocalLLMProvider(config = new ConfigService()): boolean {
+  const provider = config.get('llm.provider') as string | undefined;
+  return provider === 'ollama' || provider === 'lmstudio';
+}
+
+const QUALITY_ITEMS: Array<{ label: string; value: BoardConfig['uiQuality'] }> = [
+  { label: 'High quality — full-featured (default)', value: 'high' },
+  { label: 'Low quality — lightweight, recommended for local/small models', value: 'low' },
+];
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -77,6 +87,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
 
   // User selections
   const [selectedPreset, setSelectedPreset] = useState<BoardPreset | null>(null);
+  const [uiQuality, setUiQuality] = useState<BoardConfig['uiQuality']>('high');
   const [filePath, setFilePath] = useState('');
   const [boardName, setBoardName] = useState('');
 
@@ -89,6 +100,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
 
   // Checked once at entry so users learn about missing setup before doing work.
   const [llmReady] = useState(() => hasConfiguredLLM());
+  const [localLLM] = useState(() => isLocalLLMProvider());
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -104,9 +116,14 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
     const preset = BOARD_PRESETS.find(p => p.id === item.value);
     if (preset) {
       setSelectedPreset(preset);
-      setStep('enter-file');
+      setStep('select-quality');
     }
   }, [onNavigate]);
+
+  const handleQualitySelect = useCallback((item: { value: BoardConfig['uiQuality'] }) => {
+    setUiQuality(item.value ?? 'high');
+    setStep('enter-file');
+  }, []);
 
   const handleFileSubmit = useCallback((value: string) => {
     const trimmed = normalizeFilePath(value);
@@ -153,7 +170,8 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   // Keyboard: ESC goes back, Enter confirms on show-summary
   useInput((_input, key) => {
     if (key.escape) {
-      if (step === 'enter-file') setStep('select-preset');
+      if (step === 'select-quality') setStep('select-preset');
+      else if (step === 'enter-file') setStep('select-quality');
       else if (step === 'enter-name') setStep('enter-file');
       else if (step === 'show-summary') setStep('enter-name');
       else if (step === 'error') setStep(errorReturnStep);
@@ -177,6 +195,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         components: [],
         createdAt: new Date().toISOString(),
         dataSummary: analysis ? DataAnalyzer.generateSummary(analysis) : undefined,
+        uiQuality,
       };
       
       if (onBoardCreated) {
@@ -206,14 +225,15 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   );
 
   const renderStepIndicator = () => {
-    const steps = ['Preset', 'File', 'Name', 'Analyze', 'Confirm'];
+    const steps = ['Preset', 'Quality', 'File', 'Name', 'Analyze', 'Confirm'];
     const stepIndex = {
       'select-preset': 0,
-      'enter-file': 1,
-      'enter-name': 2,
-      analyzing: 3,
-      'show-summary': 4,
-      error: 4,
+      'select-quality': 1,
+      'enter-file': 2,
+      'enter-name': 3,
+      analyzing: 4,
+      'show-summary': 5,
+      error: 5,
     }[step];
 
     return (
@@ -240,7 +260,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         {renderHeader()}
         {renderStepIndicator()}
         <Text bold color={UI_COLORS.logo}>
-          Step 1/4: Select a dashboard preset
+          Step 1/5: Select a dashboard preset
         </Text>
         {!llmReady && (
           <Box marginTop={1}>
@@ -261,13 +281,45 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
     );
   }
 
+  if (step === 'select-quality') {
+    return (
+      <Box flexDirection="column" padding={2}>
+        {renderHeader()}
+        {renderStepIndicator()}
+        <Text bold color={UI_COLORS.logo}>
+          Step 2/5: Choose UI complexity
+        </Text>
+        {localLLM && (
+          <Box marginTop={1}>
+            <Text color="yellow">
+              ⚠ Local LLM detected — "Low quality" is recommended so smaller models can finish generating.
+            </Text>
+          </Box>
+        )}
+        <Box marginTop={1}>
+          <SelectInput
+            items={QUALITY_ITEMS}
+            initialIndex={localLLM ? 1 : 0}
+            onSelect={handleQualitySelect}
+          />
+        </Box>
+        <Box marginTop={1}>
+          <Text color={UI_COLORS.subtitle}>
+            Low quality uses a shorter prompt and fewer required features — better odds of completing on
+            local/small-context models. Use ↑/↓ to navigate, Enter to select · ESC to go back
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
   if (step === 'enter-file') {
     return (
       <Box flexDirection="column" padding={2}>
         {renderHeader()}
         {renderStepIndicator()}
         <Text bold color={UI_COLORS.logo}>
-          Step 2/4: Data file path
+          Step 3/5: Data file path
         </Text>
         <Box marginTop={1}>
           <Text color={UI_COLORS.logo}>Preset: </Text>
@@ -313,7 +365,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         {renderHeader()}
         {renderStepIndicator()}
         <Text bold color={UI_COLORS.logo}>
-          Step 3/4: Name your dashboard
+          Step 4/5: Name your dashboard
         </Text>
         <Box marginTop={1}>
           <Text color={UI_COLORS.logo}>File: </Text>
@@ -379,6 +431,9 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             <Text color="white">
               {selectedPreset?.icon} {selectedPreset?.name}
             </Text>
+          </Text>
+          <Text>
+            {'  '}UI quality: <Text color="white">{uiQuality === 'low' ? 'Low (lightweight)' : 'High (full-featured)'}</Text>
           </Text>
         </Box>
 

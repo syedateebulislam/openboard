@@ -7,6 +7,8 @@
  *   /preview                                     - Open local dev server
  *   /build                                       - Run TypeScript check + Vite build
  *   /update                                      - Regenerate from latest data + saved prompt history, then deploy
+ *   /stop                                        - Cancel the current in-flight operation (generation, build, push, or deploy)
+ *   /resume                                      - Resume this dashboard's last stopped or failed task
  *   /config                                      - Navigate to settings screen
  *   /status                                      - Show board info + deploy URL
  *   /commands                                    - Show command palette
@@ -26,6 +28,8 @@ export type Command =
   | { type: 'preview' }
   | { type: 'build' }
   | { type: 'update' }
+  | { type: 'stop' }
+  | { type: 'resume' }
   | { type: 'config' }
   | { type: 'status' }
   | { type: 'commands' }
@@ -57,6 +61,8 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/preview', category: 'local', color: 'cyan', description: 'Start or restart local preview' },
   { command: '/build', category: 'local', color: 'cyan', description: 'Run the generated app build' },
   { command: '/update', category: 'data', color: 'magenta', description: 'Refresh from latest data and saved prompt history' },
+  { command: '/stop', category: 'local', color: 'cyan', description: 'Cancel the current in-flight operation (generation, build, push, or deploy)' },
+  { command: '/resume', category: 'local', color: 'cyan', description: "Resume this dashboard's last stopped or failed task" },
   { command: '/data', category: 'data', color: 'magenta', description: 'Show linked data file summary' },
   { command: '/mail', category: 'data', color: 'magenta', description: 'Gmail sync status; /mail sync fetches now, /mail use links the inbox as data' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
@@ -109,6 +115,8 @@ export function parseCommand(input: string): Command {
   if (/^\/preview$/i.test(trimmed)) return { type: 'preview' };
   if (/^\/build$/i.test(trimmed)) return { type: 'build' };
   if (/^\/update$/i.test(trimmed)) return { type: 'update' };
+  if (/^\/stop$/i.test(trimmed)) return { type: 'stop' };
+  if (/^\/resume$/i.test(trimmed)) return { type: 'resume' };
   if (/^\/data$/i.test(trimmed)) return { type: 'data' };
   if (/^\/history$/i.test(trimmed)) return { type: 'history' };
   if (/^\/logs$/i.test(trimmed)) return { type: 'logs' };
@@ -180,6 +188,8 @@ export const HELP_TEXT = `Available commands:
   /preview      - Start or restart local preview server
   /build        - Run TypeScript check + Vite build
   /update       - Regenerate from latest data using saved prompt history, then build + push + deploy
+  /stop         - Cancel the current in-flight operation (generation, build, push, or deploy)
+  /resume       - Resume this dashboard's last stopped or failed task
   /data         - Show linked data source summary
   /mail         - Show Gmail sync status; /mail sync fetches now; /mail use links the inbox as this board's data
   /history      - Show this dashboard's prompt history
