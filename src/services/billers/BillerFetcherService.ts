@@ -40,6 +40,29 @@ const PYTHON_COMMANDS = ['python', 'python3', 'py'] as const;
 /** Only numeric/enum args ever reach argv — no user free-text is passed through. */
 const SAFE_ARG = /^[A-Za-z0-9._:\\/-]+$/;
 
+/**
+ * The fetchers catch their own connection errors, log them, and still exit 0 —
+ * so a rejected login is indistinguishable from "no new invoices" by exit code
+ * alone. Without this, bad credentials would silently report success forever.
+ * Only whole-run failures belong here; per-message problems are logged at
+ * WARNING by the scripts and must not trip this.
+ */
+const FATAL_OUTPUT_SIGNATURES = [
+  /Failed to connect\/login to IMAP/i,
+  /AUTHENTICATIONFAILED/i,
+  /Application-specific password required/i,
+  /Traceback \(most recent call last\)/i,
+  /ModuleNotFoundError/i,
+];
+
+/** A run that "succeeded" but whose output proves it did nothing useful. */
+export function findFatalOutput(output: string): string | undefined {
+  const line = output
+    .split(/\r?\n/)
+    .find((candidate) => FATAL_OUTPUT_SIGNATURES.some((pattern) => pattern.test(candidate)));
+  return line?.trim() || undefined;
+}
+
 export interface BillerFetcherDeps {
   settings?: () => BillerSettings;
   updateService?: DashboardUpdateService;
@@ -203,6 +226,13 @@ export class BillerFetcherService {
 
     if (run.code !== 0) {
       return { ...base, error: describeFetchError(run.output) };
+    }
+
+    // Exit 0 is not proof of success: the fetchers log connection failures and
+    // return normally, which would otherwise read as "no new invoices".
+    const fatal = findFatalOutput(run.output);
+    if (fatal) {
+      return { ...base, error: describeFetchError(fatal) };
     }
 
     const after = await hashFile(biller.csvPath);

@@ -21,6 +21,7 @@ import {
 import {
   BillerFetcherService,
   describeFetchError,
+  findFatalOutput,
   hashFile,
 } from '../../src/services/billers/BillerFetcherService.js';
 import {
@@ -280,6 +281,40 @@ describe('Biller invoice fetchers', () => {
       ran.length = 0;
       await service.syncEnabled({ only: 'uber_rides' });
       expect(ran).toEqual(['uber_rides']);
+    });
+
+    it('treats a login failure as a failure even though the script exits 0', async () => {
+      // Verbatim from a real run: the fetchers catch connection errors, log
+      // them, and return normally. Trusting the exit code would report bad
+      // credentials as "no new invoices" indefinitely.
+      const realOutput = [
+        "2026-07-26 16:15:16,693 ERROR: [zomato] Failed to connect/login to IMAP: b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'",
+        '2026-07-26 16:15:16,693 INFO: [zomato] 0 new rows (scanned 0 messages)',
+      ].join('\n');
+
+      expect(findFatalOutput(realOutput)).toMatch(/Failed to connect\/login to IMAP/);
+
+      const updateService = fakeUpdateService();
+      const service = new BillerFetcherService({
+        settings: () => settings(),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: realOutput }),
+      });
+
+      const [result] = await service.syncEnabled();
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/App Password/i);
+      expect(updateService.createFromDataSource).not.toHaveBeenCalled();
+    });
+
+    it('does not mistake per-message warnings for a failed run', () => {
+      // The scripts log these at WARNING during otherwise healthy runs.
+      const healthy = [
+        '2026-07-26 16:15:16,693 WARNING: [zomato] Failed to fetch UID 42',
+        '2026-07-26 16:15:16,693 WARNING: [zomato] UID 43 missing HTML body',
+        '2026-07-26 16:15:16,693 INFO: [zomato] 7 new rows (scanned 20 messages)',
+      ].join('\n');
+      expect(findFatalOutput(healthy)).toBeUndefined();
     });
 
     it('reports a non-zero exit as a friendly failure', async () => {
