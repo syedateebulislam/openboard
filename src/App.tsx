@@ -7,7 +7,6 @@ import { SetupWizard } from './screens/SetupWizard.js';
 import { BoardCreationScreen } from './screens/BoardCreationScreen.js';
 import { ChatScreen } from './screens/ChatScreen.js';
 import { ManageBoardsScreen } from './screens/ManageBoardsScreen.js';
-import { GmailSettingsScreen } from './screens/GmailSettingsScreen.js';
 import { LocalModelPicker } from './components/LocalModelPicker.js';
 import { ProjectManager } from './services/project/ProjectManager.js';
 import { ConfigService } from './services/config/ConfigService.js';
@@ -18,8 +17,8 @@ import { VercelService } from './services/deploy/VercelService.js';
 import { AuthService } from './services/auth/AuthService.js';
 import type { LLMConfig, LLMProviderName } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
-import type { MailSchedulerStatus } from './types/mail.js';
-import { startMailScheduler } from './services/mail/mailScheduler.js';
+import { startBillerScheduler } from './services/billers/billerScheduler.js';
+import { BillerSettingsScreen } from './screens/BillerSettingsScreen.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -47,7 +46,7 @@ export type Screen =
   | 'settings-github'
   | 'settings-llm'
   | 'settings-dashboard-auth'
-  | 'settings-gmail';
+  | 'settings-billers';
 
 // Placeholder components with "Go Back" option
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
@@ -69,9 +68,7 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
           { label: 'Re-enter Vercel token', value: 'vercel' },
         ]
       : []),
-    // Gmail is a local data input (not a deploy output), so it stays visible
-    // in every app mode without weakening the local/hybrid privacy contract.
-    { label: 'Gmail integration', value: 'gmail' },
+    { label: 'Invoice fetchers (billers)', value: 'billers' },
     { label: 'Reset dashboard login', value: 'dashboard-auth' },
     { label: 'Run full setup wizard', value: 'setup' },
     { label: '← Go Back', value: 'back' },
@@ -89,7 +86,7 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
             else if (item.value === 'llm') onNavigate('settings-llm');
             else if (item.value === 'github') onNavigate('settings-github');
             else if (item.value === 'vercel') onNavigate('settings-vercel');
-            else if (item.value === 'gmail') onNavigate('settings-gmail');
+            else if (item.value === 'billers') onNavigate('settings-billers');
             else if (item.value === 'dashboard-auth') onNavigate('settings-dashboard-auth');
             else if (item.value === 'setup') onNavigate('setup');
             else onNavigate('welcome');
@@ -605,14 +602,12 @@ export function App() {
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
   const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
-  const [mailStatus, setMailStatus] = useState<MailSchedulerStatus | null>(null);
-  const [mailConfigVersion, setMailConfigVersion] = useState(0);
+  const [billerConfigVersion, setBillerConfigVersion] = useState(0);
 
-  // In-process Gmail sync loop: lives for the whole TUI session, dies with the
-  // terminal. startMailScheduler no-ops when Gmail is not connected and
-  // returns its own disposer, so it doubles as the effect cleanup.
-  // mailConfigVersion re-arms it after connect/disconnect in Gmail settings.
-  useEffect(() => startMailScheduler(setMailStatus), [mailConfigVersion]);
+
+  // Same lifecycle for the invoice fetchers, but it only fires when a full
+  // interval has elapsed since the last run — see billerScheduler for why.
+  useEffect(() => startBillerScheduler(() => {}), [billerConfigVersion]);
 
   const navigate = (s: Screen) => setScreen(s);
 
@@ -651,7 +646,7 @@ export function App() {
 
   switch (screen) {
     case 'welcome':
-      return <WelcomeScreen onNavigate={navigate} mailStatus={mailStatus} />;
+      return <WelcomeScreen onNavigate={navigate} />;
     
     case 'setup': 
       return <SetupWizard onComplete={handleSetupComplete} onNavigate={navigate} />;
@@ -705,18 +700,18 @@ export function App() {
     case 'settings-dashboard-auth':
       return <DashboardAuthSettings onNavigate={navigate} />;
 
-    case 'settings-gmail':
+    case 'settings-billers':
       return (
-        <GmailSettingsScreen
+        <BillerSettingsScreen
           onNavigate={navigate}
-          onGmailConfigured={() => setMailConfigVersion((n) => n + 1)}
+          onBillersConfigured={() => setBillerConfigVersion((n) => n + 1)}
         />
       );
-    
+
     case 'deploy':
       return <DeployPlaceholder onNavigate={navigate} />;
     
     default:
-      return <WelcomeScreen onNavigate={navigate} mailStatus={mailStatus} />;
+      return <WelcomeScreen onNavigate={navigate} />;
   }
 }

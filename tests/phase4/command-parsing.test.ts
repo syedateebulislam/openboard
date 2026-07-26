@@ -70,6 +70,15 @@ describe('Command Parsing', () => {
       expect(parseCommand('/STOP')).toEqual({ type: 'stop' });
       expect(parseCommand('  /resume  ')).toEqual({ type: 'resume' });
     });
+
+    it('should recognize "/billers" and pass its subcommand through as args', () => {
+      expect(parseCommand('/billers')).toEqual({ type: 'billers', args: [] });
+      expect(parseCommand('/billers sync')).toEqual({ type: 'billers', args: ['sync'] });
+      expect(parseCommand('/billers enable zomato')).toEqual({ type: 'billers', args: ['enable', 'zomato'] });
+      expect(parseCommand('/BILLERS disable uber_rides')).toEqual({ type: 'billers', args: ['disable', 'uber_rides'] });
+      // Must not be swallowed by the /build prefix or vice versa.
+      expect(parseCommand('/build')).toEqual({ type: 'build' });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -175,17 +184,19 @@ describe('Command Parsing', () => {
       expect(HELP_TEXT).toContain('/help');
       expect(HELP_TEXT).toContain('/stop');
       expect(HELP_TEXT).toContain('/resume');
+      expect(HELP_TEXT).toContain('/billers');
     });
 
-    it('/stop and /resume description lines do not mention /deploy or /push', () => {
+    it('/stop, /resume and /billers description lines do not mention /deploy or /push', () => {
       // Regression guard: helpTextForMode(false) only strips lines *starting*
       // with /deploy or /push, so a stray "/deploy "/"/push " substring inside
       // another command's own description (e.g. /stop's) would still leak
       // into local-mode help text.
-      const stopLine = HELP_TEXT.split('\n').find((line) => line.trim().startsWith('/stop'));
-      const resumeLine = HELP_TEXT.split('\n').find((line) => line.trim().startsWith('/resume'));
-      expect(stopLine).not.toMatch(/\/deploy\s|\/push\s/);
-      expect(resumeLine).not.toMatch(/\/deploy\s|\/push\s/);
+      for (const command of ['/stop', '/resume', '/billers']) {
+        const line = HELP_TEXT.split('\n').find((l) => l.trim().startsWith(command));
+        expect(line, `${command} should have a help line`).toBeDefined();
+        expect(line).not.toMatch(/\/deploy\s|\/push\s/);
+      }
     });
 
     it('should expose command suggestions with categories and colors', () => {

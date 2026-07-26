@@ -103,26 +103,54 @@ openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
 openboard agent setup github --github-token "ghp_..."     # remote mode only
 openboard agent setup vercel --vercel-token "..."          # remote mode only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
-openboard agent setup gmail --gmail-client-id "xxx.apps.googleusercontent.com" --gmail-client-secret "GOCSPX-..."
+openboard agent setup billers --scripts-dir "/path/to/invoice_fetchers" --biller-email "you@gmail.com" --biller-app-password "..."
 openboard agent setup status --json
 ```
 
-### Gmail (mail as a data source)
+### Invoice fetchers (per-biller scripts)
 
-`agent setup gmail` saves the Google OAuth Desktop-app client (secret encrypted at rest; env fallbacks `OPENBOARD_GMAIL_CLIENT_ID` / `OPENBOARD_GMAIL_CLIENT_SECRET`, options `--gmail-query`, `--gmail-sync-interval`). The browser consent step is interactive-only — a human finishes it once in the TUI (Settings › Gmail integration). After that:
+Per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). They authenticate over IMAP with a Gmail App Password.
+
+OpenBoard ships fetchers for Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy Instamart, Uber, Urban Company and Zomato inside the package at `scripts/invoice_fetchers/`. A human installs them with one keypress in the TUI; there is no headless installer, because writing executable scripts onto a machine should be an explicit human action. Point `--scripts-dir` at your own folder to use your own instead.
+
+There is no interactive step here, so an agent can configure it completely:
 
 ```bash
-# One-shot sync into the local cache (~/.openboard/mail/messages.json):
-openboard agent mail sync --json
+openboard agent setup billers \
+  --scripts-dir "/path/to/scripts/invoice_fetchers" \
+  --biller-email "you@gmail.com" \
+  --biller-app-password "abcdefghijklmnop" \
+  --biller-key zomato --biller-key uber_rides --json
 
-# Connection + sync state (connected, needsReauth, totalCached, lastSyncAt, cachePath):
-openboard agent mail status --json
+# What is discovered and what is enabled (no LLM, no network):
+openboard agent billers status --json                # discovered invoice fetchers + which are enabled
 
-# The cache is a plain JSON data file — feed it to the normal create/update flow:
-openboard agent create --data ~/.openboard/mail/messages.json --name "Inbox"
+# One-shot run of the enabled billers (or just one):
+openboard agent billers sync --json
+openboard agent billers sync --biller zomato --json
 ```
 
-`mail sync` exits 1 with `needsReauth: true` when the refresh token was revoked/expired; re-consent in the TUI and retry.
+Billers are **discovered, never hardcoded**: OpenBoard scans `--scripts-dir` for `fetch_*.py` files and reads each script's own `KEY`/`DISPLAY_NAME` constants. `fetch_pending_invoices.py` and `run_backfill_invoices_new.py` are excluded (they are not per-biller fetchers). `--biller-key` accepts only discovered keys and *replaces* the enabled set; `status` lists the valid keys.
+
+Each biller's CSV is hashed before and after its run. Unchanged output ends the run for that biller with no LLM call; changed output creates that biller's dashboard on first data (mapped to a category preset — `zomato`/`swiggy_*` → food, `uber_rides`/`rapido`/`amazon_pay` → travel, `amazon` → shopping, `urban_company` → utilities, otherwise custom) and refreshes it afterwards via the normal update pipeline.
+
+`billers sync` exits 1 if any enabled biller failed; each entry in `results[]` carries `key`, `ok`, `changed`, `dashboardUpdated`, and a plain-language `error` (missing Python, missing `beautifulsoup4`/`pdfplumber`, rejected login).
+
+The **recurring schedule is TUI-only** — it is an in-process loop, so `agent billers sync` is the headless equivalent. Drive it from your own cron/Task Scheduler if you need unattended runs.
+
+Flags:
+
+| Flag | Meaning |
+|---|---|
+| `--scripts-dir` | Folder of `fetch_<biller>.py` scripts; validated to contain at least one |
+| `--biller-email` | Gmail address the fetchers log in as |
+| `--biller-app-password` | 16-char Google App Password (or `OPENBOARD_BILLER_APP_PASSWORD`, preferred) |
+| `--biller-key` | Enable this biller; repeatable, replaces the current selection |
+| `--biller-sync-interval` | TUI fetch interval in minutes (default 360) |
+| `--biller-since-days` | How far back each fetcher searches (default 30) |
+| `--biller` | `billers sync` only: run just this one biller |
+
+OpenBoard writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` in plain text because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Owner-only (`0600`) permissions are requested but only apply on POSIX — on Windows the file inherits the folder's ACLs. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
 
 Flags:
 
@@ -285,6 +313,7 @@ This relies on local prompt history stored per dashboard. It works after a dashb
 openboard agent list --json                          # all dashboards + deploy URLs + data staleness
 openboard agent status --dashboard "uber-rides" --json   # one dashboard, incl. dataStale flag
 openboard agent runs --json                          # recent pipeline runs + failure summary
+openboard agent billers status --json                # discovered invoice fetchers + which are enabled
 ```
 
 `agent status` reports `dataStale: true` when a linked data file changed after the last generation — use it to decide between `openboard update --dashboard <selector>` (refresh) and doing nothing.

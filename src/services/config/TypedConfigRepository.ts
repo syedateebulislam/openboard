@@ -3,11 +3,10 @@ import { getAppMode, providerAllowedInMode } from '../../config/appModes.js';
 import type { AppMode } from '../../config/appModes.js';
 import type { LLMConfig, LLMProviderName } from '../../types/llm.js';
 import {
-  GMAIL_DEFAULT_MAX_RESULTS,
-  GMAIL_DEFAULT_QUERY,
-  GMAIL_DEFAULT_SYNC_INTERVAL_MINUTES,
-  type GmailSettings,
-} from '../../types/mail.js';
+  BILLERS_DEFAULT_SINCE_DAYS,
+  BILLERS_DEFAULT_SYNC_INTERVAL_MINUTES,
+  type BillerSettings,
+} from '../../types/billers.js';
 import { ConfigService } from './ConfigService.js';
 
 export interface OpenBoardRuntimeConfig {
@@ -59,21 +58,24 @@ export class TypedConfigRepository {
     return llm;
   }
 
-  getGmailSettings(): GmailSettings {
-    const interval = this.store.get('gmail.syncIntervalMinutes');
-    const maxResults = this.store.get('gmail.maxResults');
+  getBillerSettings(): BillerSettings {
+    const interval = this.store.get('billers.syncIntervalMinutes');
+    const sinceDays = this.store.get('billers.sinceDays');
+    const enabled = this.store.get('billers.enabledKeys');
     return {
-      clientId: this.store.get('gmail.clientId') as string | undefined,
-      clientSecret: this.store.getSecret('gmail.clientSecret'),
-      email: this.store.get('gmail.email') as string | undefined,
-      query: (this.store.get('gmail.query') as string | undefined) || GMAIL_DEFAULT_QUERY,
+      scriptsDir: this.store.get('billers.scriptsDir') as string | undefined,
+      email: this.store.get('billers.email') as string | undefined,
+      appPassword: this.store.getSecret('billers.appPassword'),
+      enabledKeys: Array.isArray(enabled)
+        ? enabled.filter((key): key is string => typeof key === 'string')
+        : [],
       syncIntervalMinutes: typeof interval === 'number' && interval >= 1
         ? Math.floor(interval)
-        : GMAIL_DEFAULT_SYNC_INTERVAL_MINUTES,
-      maxResults: typeof maxResults === 'number' && maxResults >= 1
-        ? Math.min(Math.floor(maxResults), 500)
-        : GMAIL_DEFAULT_MAX_RESULTS,
-      needsReauth: this.store.get('gmail.needsReauth') === true,
+        : BILLERS_DEFAULT_SYNC_INTERVAL_MINUTES,
+      sinceDays: typeof sinceDays === 'number' && sinceDays >= 1
+        ? Math.floor(sinceDays)
+        : BILLERS_DEFAULT_SINCE_DAYS,
+      lastRunAt: this.store.get('billers.lastRunAt') as string | undefined,
     };
   }
 
