@@ -871,7 +871,12 @@ if (!command || command === 'start') {
       const ok = results.every((result) => result.ok);
       if (jsonMode) printJson({ success: ok, action: 'billers-sync', results });
       else {
-        if (results.length === 0) console.log('No billers are enabled. Enable one with `openboard agent setup billers --biller-key <key>`.');
+        if (results.length === 0) {
+          // Nothing ran for two very different reasons — say which.
+          console.log(discovered.length === 0
+            ? `No biller scripts found in ${settings.scriptsDir}. Check the folder still exists and holds fetch_<biller>.py files.`
+            : 'No billers are enabled. Enable one with `openboard agent setup billers --biller-key <key>`.');
+        }
         for (const result of results) {
           console.log(result.ok
             ? `${result.displayName}: ${result.changed ? `new invoices${result.dashboardUpdated ? ' — dashboard refreshed' : ''}` : 'no new invoices'}`

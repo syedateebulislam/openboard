@@ -132,7 +132,10 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
         onProgress: (line) => setStatus(line.slice(0, 120)),
       });
       if (results.length === 0) {
-        setStatus('No billers are enabled yet — switch one on in the list above.');
+        // Distinguish "none switched on" from "the folder went missing".
+        setStatus(billers.length === 0
+          ? `No biller scripts found in ${settings.scriptsDir}. Check the folder still exists, then use "Rescan billers folder".`
+          : 'No billers are enabled yet — switch one on in the list above.');
         return;
       }
       const failed = results.filter((r) => !r.ok);

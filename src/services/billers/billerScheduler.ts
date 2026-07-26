@@ -71,13 +71,20 @@ export function startBillerScheduler(
   let stopped = false;
   let lastRunAt = initial.lastRunAt;
 
+  // While the startup catch-up is pending it fires sooner than the interval,
+  // so report that instead — otherwise the status advertises a later time than
+  // the run that will actually happen next.
+  let pendingStartupAt: number | undefined;
+
   const emit = (state: BillerSchedulerStatus['state'], extra: Partial<BillerSchedulerStatus> = {}) => {
     if (stopped) return;
+    const nextAt = pendingStartupAt
+      ?? (timer ? Date.now() + currentIntervalMs : undefined);
     onStatus({
       state,
       lastRunAt,
       enabledCount: settings().enabledKeys.length,
-      nextRunAt: timer ? new Date(Date.now() + currentIntervalMs).toISOString() : undefined,
+      nextRunAt: nextAt ? new Date(nextAt).toISOString() : undefined,
       ...extra,
     });
   };
@@ -100,6 +107,7 @@ export function startBillerScheduler(
 
   const tick = async () => {
     if (isRunning || stopped) return;
+    pendingStartupAt = undefined;
     isRunning = true;
     emit('running');
     try {
@@ -146,6 +154,7 @@ export function startBillerScheduler(
   if (dueInMs === 0) {
     void tick();
   } else {
+    pendingStartupAt = Date.now() + dueInMs;
     emit('idle');
     startupTimer = setTimeout(() => { void tick(); }, dueInMs);
     startupTimer.unref?.();

@@ -427,6 +427,26 @@ describe('Biller invoice fetchers', () => {
       stop();
     });
 
+    it('reports the pending catch-up time, not the later interval tick', () => {
+      // Overdue in 20 min, but the interval is 60 — the status must advertise
+      // the run that actually happens next, not the one an hour out.
+      const lastRunAt = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+      const seen: (string | undefined)[] = [];
+      const stop = startBillerScheduler(
+        (status) => seen.push(status.nextRunAt),
+        {
+          settings: () => ({ ...ready, lastRunAt }),
+          fetcher: { syncEnabled: vi.fn() } as any,
+          recordRun: vi.fn(),
+        },
+      );
+      const nextAt = Date.parse(seen[seen.length - 1]!);
+      const minutesOut = (nextAt - Date.now()) / 60000;
+      expect(minutesOut).toBeGreaterThan(15);
+      expect(minutesOut).toBeLessThan(25);
+      stop();
+    });
+
     it('does not re-fetch on startup when a run happened recently', () => {
       const syncEnabled = vi.fn();
       const stop = startBillerScheduler(() => {}, {
