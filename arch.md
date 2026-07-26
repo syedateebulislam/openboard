@@ -471,9 +471,11 @@ append rows to a per-biller CSV.
 
 ```mermaid
 flowchart TD
-    A["BillerDiscoveryService: scan scriptsDir for fetch_*.py, read each script's KEY / DISPLAY_NAME"] --> B["BillerFetcherService: write secrets/gmail_app_credentials.json (0600)"]
+    A["BillerDiscoveryService: scan scriptsDir for fetch_*.py, read each script's KEY / DISPLAY_NAME"] --> B["BillerFetcherService: write secrets/gmail_app_credentials.json"]
     B --> C["spawn python <script> --since-days N (allowlisted interpreter, numeric args only)"]
-    C --> D{"CSV sha256 changed?"}
+    C --> C2{"output shows a fatal login/import failure?"}
+    C2 -- yes --> C3["fail with a translated message (exit code alone is not trusted)"]
+    C2 -- no --> D{"CSV sha256 changed?"}
     D -- no --> E["stop — no LLM call"]
     D -- yes --> F{"findBoard(key) exists?"}
     F -- no --> G["createFromDataSource: preset from BILLER_PRESET_MAP"]
@@ -507,8 +509,9 @@ flowchart TD
 - **Credential model**: an IMAP **App Password**, not OAuth — unrelated to
   `GmailAuthService`. `BillerSettingsScreen` asks for the folder, then the email,
   then the password, in that order. The materialized JSON for the scripts is
-  necessarily plaintext (they cannot decrypt) and written `0600`; OpenBoard's own
-  copy uses `setEncrypted`.
+  necessarily plaintext (they cannot decrypt); OpenBoard's own copy uses
+  `setEncrypted`. `0600` is requested on write but is POSIX-only — Node ignores
+  mode bits on Windows, so there the file is only as protected as its folder.
 - **Spawn safety**: allowlist `python`/`python3`/`py` (deliberately separate from
   `BuildService`'s npm/npx list), `isInsideScriptsDir()` before executing, and
   numeric/enum arguments only so no user free-text reaches argv.

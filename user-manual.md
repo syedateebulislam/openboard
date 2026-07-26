@@ -324,8 +324,10 @@ Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping) and
 refreshes it on later runs.
 
 Security worth knowing: the scripts cannot decrypt anything, so their credentials
-file is necessarily plain text on your machine (OpenBoard writes it readable only
-by you, and keeps its own copy of the password encrypted). An App Password also
+file is necessarily plain text on your machine (OpenBoard keeps its own copy of
+the password encrypted). It is written with owner-only permissions on
+macOS/Linux; on Windows those bits are ignored, so the file is only as protected
+as the folder holding it. An App Password also
 grants full mailbox read access, which is broader than the read-only OAuth scope
 used by Gmail integration — revoke it in your Google account to cut access off.
 
@@ -342,7 +344,7 @@ When invoice fetchers are configured, these live next to your scripts folder
 (two levels above it, where the scripts themselves expect them):
 
 ```text
-<repo>/secrets/gmail_app_credentials.json   (written by OpenBoard, mode 0600)
+<repo>/secrets/gmail_app_credentials.json   (written by OpenBoard, plain text)
 <repo>/data/invoices/<biller>.csv           (written by each fetcher)
 <repo>/data/invoices/raw/<biller>/          (raw mail + per-biller dedup state)
 ```

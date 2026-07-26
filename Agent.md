@@ -166,7 +166,7 @@ Flags:
 | `--biller-since-days` | How far back each fetcher searches (default 30) |
 | `--biller` | `billers sync` only: run just this one biller |
 
-OpenBoard writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` (mode `0600`) because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
+OpenBoard writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` in plain text because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Owner-only (`0600`) permissions are requested but only apply on POSIX — on Windows the file inherits the folder's ACLs. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
 
 Flags:
 

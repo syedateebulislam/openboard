@@ -291,8 +291,9 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       <Box marginTop={1} flexDirection="column">
         <Text color={UI_COLORS.subtitle}>
           The fetchers read Gmail over IMAP, so they need their credentials in a plain file
-          on this machine (written 0600). An App Password grants full mailbox read access —
-          revoke it in your Google account to cut access off.
+          on this machine — protected only as well as the folder it sits in (owner-only
+          permissions apply on macOS/Linux; Windows uses the folder's ACLs). An App Password
+          grants full mailbox read access — revoke it in your Google account to cut access off.
         </Text>
         <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open. Press ESC to go back</Text>
       </Box>

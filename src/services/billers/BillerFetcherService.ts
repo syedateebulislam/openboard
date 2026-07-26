@@ -10,8 +10,10 @@
  *
  * Credentials note: the JSON written for the scripts is necessarily plaintext —
  * the Python fetchers have no way to decrypt anything. OpenBoard's own copy in
- * config.json stays encrypted; this file is written 0600 as the best available
- * protection. See the security section in the docs.
+ * config.json stays encrypted. The file is requested with owner-only 0600, but
+ * that is POSIX-only: on Windows Node ignores the mode bits and the file simply
+ * inherits the parent folder's ACLs. Treat it as "as protected as the folder it
+ * sits in", not as guaranteed owner-only. See the security section in the docs.
  */
 
 import { createHash } from 'node:crypto';
@@ -143,6 +145,8 @@ export class BillerFetcherService {
 
     const path = credentialsPathFor(scriptsDir);
     mkdirSync(dirname(path), { recursive: true });
+    // 0600 is honoured on POSIX and ignored on Windows (the file inherits the
+    // folder's ACLs there) — requested anyway, since it costs nothing.
     writeFileSync(
       path,
       `${JSON.stringify({ email, app_password: appPassword }, null, 2)}\n`,
