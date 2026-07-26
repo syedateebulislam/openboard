@@ -11,7 +11,16 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import { existsSync, statSync } from 'node:fs';
-import { ChatMessageComponent } from '../components/ChatMessage.js';
+import { ChatLineRow } from '../components/ChatMessage.js';
+import {
+  clampOffset,
+  flattenMessages,
+  maxScrollOffset,
+  pageStep,
+  scrollbarColumn,
+  visibleLines,
+} from '../utils/chatViewport.js';
+import type { WrapCache } from '../utils/chatViewport.js';
 import { LoadingRemark } from '../components/LoadingRemark.js';
 import { PipelineProgress } from '../components/PipelineProgress.js';
 import { PipelineReporter, PHASE_ORDER } from '../services/project/pipelinePhases.js';
@@ -116,14 +125,16 @@ interface SendToLLMOptions {
 
 // Maximum messages to keep in history to prevent memory issues
 const MAX_MESSAGES = 100;
-// Messages scrolled per PgUp/PgDn press in the chat history.
-const SCROLL_STEP = 3;
 // Maximum chat history messages to include in LLM context
 const MAX_CONTEXT_MESSAGES = 20;
 
-function lineCount(content: string): number {
-  return Math.max(1, content.split('\n').length);
-}
+// Chrome around the chat log, in terminal rows: outer frame border (2), header
+// box (3 lines + border + padding + margin = 8), input box (3), footer hint
+// (1), loader slot (1), scroll status (1). Overshooting here makes the log
+// taller than the terminal, which breaks the fixed layout entirely — so the log
+// takes what is left, never a fixed fraction of the screen.
+const CHROME_ROWS = 16;
+const MIN_LOG_HEIGHT = 5;
 
 function isVercelAuthError(error: string | undefined): boolean {
   if (!error) return false;
@@ -182,9 +193,10 @@ export function ChatScreen({
   const [isLoading, setIsLoading] = useState(false);
   const [pipeline, setPipeline] = useState<{ phase: PipelinePhase; pct: number; phaseStartedAt: number } | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<'deploy' | 'push' | null>(null);
-  // Chat history scrolling: scrollOffset = how many messages are hidden BELOW
-  // the visible window (0 = pinned to the newest). Scrolling up anchors the
-  // view, so new log lines never yank the reader back down mid-read.
+  // Chat history scrolling: scrollOffset = how many rendered LINES are hidden
+  // BELOW the visible window (0 = pinned to the newest). Bottom-anchored, so
+  // new log lines never yank the reader back down mid-read; line-addressed, so
+  // a page of PgUp always moves exactly one screenful.
   const [scrollOffset, setScrollOffset] = useState(0);
   const [llmProvider, setLlmProvider] = useState<LLMProvider | null>(null);
   const [llmMeta, setLlmMeta] = useState<{ model: string; effort: LLMEffort } | null>(null);
@@ -1671,24 +1683,6 @@ Requirements:
     [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll, autoGenerateInitial, updateStreamingMsg, appendLog],
   );
 
-  // ESC: go back to welcome screen · PgUp/PgDn: scroll chat history
-  useInput((_input, key) => {
-    if (key.escape) onNavigate?.('welcome');
-    if (key.pageUp) {
-      setScrollOffset((offset) => Math.min(offset + SCROLL_STEP, Math.max(0, messages.length - 1)));
-    }
-    if (key.pageDown) {
-      setScrollOffset((offset) => Math.max(0, offset - SCROLL_STEP));
-    }
-  });
-
-  // Get terminal height for fixed message area
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 24;
-  // Reserve rows for: header(5) + warning(2) + input(2) + footer(1) + loader(1) + padding(2)
-  const availableMessageHeight = Math.max(6, termHeight - 13);
-  const messageAreaHeight = Math.max(6, Math.ceil(availableMessageHeight / 2));
-
   const commandSuggestions = useMemo(() => {
     const trimmed = input.trim().toLowerCase();
     if (!trimmed.startsWith('/')) return [];
@@ -1697,34 +1691,67 @@ Requirements:
       .slice(0, 5);
   }, [input]);
 
-  // Clamp the offset when history gets trimmed (MAX_MESSAGES).
-  const effectiveOffset = Math.min(scrollOffset, Math.max(0, messages.length - 1));
+  // ─── Chat log viewport ──────────────────────────────────────────────────────
+  const { stdout } = useStdout();
+  const termHeight = stdout?.rows ?? 24;
+  const termWidth = stdout?.columns ?? 80;
+  // Content width minus the outer frame (border 2 + paddingX 2) and the
+  // scrollbar gutter (gap 1 + bar 1).
+  const logWidth = Math.max(20, termWidth - 6);
+  // Conditional chrome shrinks the log instead of overflowing the screen.
+  const reserved = CHROME_ROWS + (llmError ? 2 : 0) + commandSuggestions.length;
+  const logHeight = Math.max(MIN_LOG_HEIGHT, termHeight - reserved);
+
+  // Re-wrapping every message on every streamed token is the one hot path here,
+  // so unchanged messages keep their wrapped lines across renders.
+  const wrapCacheRef = useRef<WrapCache>(new Map());
+  const lines = useMemo(
+    () => flattenMessages(messages, logWidth, wrapCacheRef.current),
+    [messages, logWidth],
+  );
+
+  // Clamp: history trimming (MAX_MESSAGES) and terminal resizes both shrink the
+  // scrollable range under a parked offset.
+  const effectiveOffset = clampOffset(scrollOffset, lines.length, logHeight);
   const hiddenNewer = effectiveOffset;
-  const hiddenOlder = Math.max(0, messages.length - effectiveOffset - 4);
+  const hiddenOlder = maxScrollOffset(lines.length, logHeight) - effectiveOffset;
+  const rows = visibleLines(lines, logHeight, effectiveOffset);
+  const scrollbar = scrollbarColumn(lines.length, logHeight, effectiveOffset);
 
-  const visibleMessages = useMemo(() => {
-    const upToOffset = effectiveOffset > 0 ? messages.slice(0, messages.length - effectiveOffset) : messages;
-    const recent = upToOffset.slice(-4);
-    const selected: Array<{ message: ChatMessage; maxLines: number }> = recent.map((message) => ({
-      message,
-      maxLines: 1,
-    }));
-    let remaining = Math.max(0, messageAreaHeight - selected.length);
+  // useInput re-subscribes each render, but the handler still closes over the
+  // metrics of the render that registered it — read them through a ref so a
+  // burst of keypresses cannot page by a stale height.
+  const viewRef = useRef({ totalLines: lines.length, logHeight });
+  viewRef.current = { totalLines: lines.length, logHeight };
 
-    for (let i = selected.length - 1; i >= 0 && remaining > 0; i--) {
-      const item = selected[i];
-      const message = item.message;
-      const desiredLines = Math.min(lineCount(message.content), 20);
-      const extraLines = Math.min(desiredLines - item.maxLines, remaining);
-      item.maxLines += Math.max(0, extraLines);
-      remaining -= Math.max(0, extraLines);
+  // ESC: go back to welcome screen · PgUp/PgDn: scroll chat history by a page
+  useInput((_input, key) => {
+    if (key.escape) onNavigate?.('welcome');
+    if (key.pageUp) {
+      const view = viewRef.current;
+      setScrollOffset((offset) =>
+        clampOffset(offset + pageStep(view.logHeight), view.totalLines, view.logHeight),
+      );
     }
-
-    return selected;
-  }, [messages, messageAreaHeight, effectiveOffset]);
+    if (key.pageDown) {
+      const view = viewRef.current;
+      setScrollOffset((offset) =>
+        clampOffset(offset - pageStep(view.logHeight), view.totalLines, view.logHeight),
+      );
+    }
+  });
 
   return (
-    <Box flexDirection="column" padding={1}>
+    // Outer frame wraps the whole screen — header, log and footer sit inside
+    // it. paddingY stays 0 because the frame's own border rows replace the
+    // blank padding rows the screen used to have (see CHROME_ROWS).
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={UI_COLORS.border}
+      paddingX={1}
+      paddingY={0}
+    >
       {/* Header */}
       <Box
         borderStyle="round"
@@ -1747,21 +1774,31 @@ Requirements:
         </Box>
       )}
 
-      {/* Message log — fixed height to prevent layout shifts */}
-      <Box flexDirection="column" height={messageAreaHeight} overflow="hidden" marginBottom={0}>
-        {visibleMessages.map(({ message, maxLines }) => (
-          <ChatMessageComponent key={message.id} message={message} maxLines={maxLines} />
-        ))}
+      {/* Message log — fixed height to prevent layout shifts, scrollbar right */}
+      <Box height={logHeight} overflow="hidden" marginBottom={0}>
+        <Box flexDirection="column" width={logWidth} flexShrink={0}>
+          {rows.map((line) => (
+            <ChatLineRow key={line.key} line={line} />
+          ))}
+        </Box>
+        <Box flexDirection="column" width={1} flexShrink={0} marginLeft={1}>
+          {/* '░' track rather than '│' — a line here reads as a second frame. */}
+          {scrollbar.map((filled, row) => (
+            <Text key={row} color={filled ? UI_COLORS.logo : UI_COLORS.border} dimColor={!filled}>
+              {filled ? '█' : '░'}
+            </Text>
+          ))}
+        </Box>
       </Box>
 
-      {/* Scroll position indicator */}
-      {(hiddenNewer > 0 || hiddenOlder > 0) && (
-        <Text color={hiddenNewer > 0 ? 'yellow' : UI_COLORS.subtitle}>
-          {hiddenOlder > 0 ? `↑ ${hiddenOlder} older (PgUp)` : ''}
-          {hiddenOlder > 0 && hiddenNewer > 0 ? ' · ' : ''}
-          {hiddenNewer > 0 ? `↓ ${hiddenNewer} newer (PgDn for latest)` : ''}
-        </Text>
-      )}
+      {/* Scroll position indicator — always rendered so the layout never shifts */}
+      <Text color={hiddenNewer > 0 ? 'yellow' : UI_COLORS.subtitle}>
+        {hiddenNewer > 0
+          ? `↑ ${hiddenOlder} older · ↓ ${hiddenNewer} newer (PgDn for latest)`
+          : hiddenOlder > 0
+            ? `↑ ${hiddenOlder} older (PgUp)`
+            : ' '}
+      </Text>
 
       {/* Loading indicator — phase-weighted progress bar when a pipeline is active */}
       {isLoading && (pipeline ? (
