@@ -161,6 +161,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
       <Text color={UI_COLORS.subtitle}>
         Sync your inbox into a local cache and use it as dashboard data.
         Needs a Google Cloud OAuth "Desktop app" client (scope: gmail.readonly).
+        Which account gets connected is chosen on Google's consent screen, not here.
       </Text>
       <Box marginTop={1} flexDirection="column">
         <Text color={authStatus.needsReauth ? 'yellow' : UI_COLORS.subtitle}>{connectionLine}</Text>

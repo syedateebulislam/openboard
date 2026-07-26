@@ -126,6 +126,19 @@ OpenBoard can use your Gmail inbox as a live dashboard data source:
 
 Privacy: mail is cached only on your machine and is read-only. It leaves the machine only if you deploy a mail-backed dashboard in remote mode. If Google revokes the token (e.g. testing-mode OAuth apps expire refresh tokens after 7 days), OpenBoard shows a "re-auth needed" status instead of failing loops — reconnect from Settings.
 
+## Invoice Fetchers (per-biller)
+
+If you have your own per-biller invoice scripts — one dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending rows to `data/invoices/<biller>.csv` — OpenBoard can drive them for you:
+
+- **Point OpenBoard at the folder once**: Settings → Invoice fetchers. It scans for `fetch_*.py` files, reads each script's own `KEY`/`DISPLAY_NAME` constants, and lists every biller it finds. Nothing is hardcoded, so dropping in a new fetcher and choosing "Rescan billers folder" picks it up.
+- **Credentials, in a sensible order**: you're asked for the folder, then the **Gmail address**, then that account's **App Password** — you always know which account you're authorizing before typing a secret for it. This is a separate credential from the [Gmail integration](#gmail-integration) above: these scripts use IMAP + an App Password, not OAuth, and neither feature requires the other.
+- **Enable exactly the billers you want**: the list is a live toggle (`[x]`/`[ ]`) you can revisit and change any time. Only enabled billers ever run.
+- **Runs on a visible schedule**: one shared interval for all enabled billers, shown and editable in the same screen (default every 360 min). Like the Gmail sync it is in-process — it runs while OpenBoard is open, with no daemon — but the last run time is remembered, so reopening the TUI doesn't re-fetch everything and an overdue run fires on launch.
+- **Invoices become dashboards automatically**: after each fetch OpenBoard hashes the biller's CSV. Unchanged means it stops there (no LLM call). Changed means it creates that biller's dashboard the first time — using the matching category preset, e.g. Zomato → Food, Uber → Travel, Amazon → Shopping — and refreshes it from then on.
+- **Headless**: `openboard agent setup billers --scripts-dir ... --biller-email ... --biller-app-password ...` configures it, `openboard agent billers status|sync [--biller <key>]` inspects or runs it once. The recurring schedule itself is TUI-only.
+
+Security: the fetchers read their credentials from a plain JSON file (they have no way to decrypt anything), so OpenBoard writes `secrets/gmail_app_credentials.json` next to your scripts with mode `0600`, while keeping its own copy of the password encrypted in `~/.openboard/config.json`. An App Password grants full mailbox read access — broader than the OAuth integration's read-only scope — so revoke it in your Google account when you want to cut access off. OpenBoard only ever executes `python`/`python3`/`py` on `.py` files directly inside the folder you configured, and passes only numeric/enum arguments.
+
 ## Internal Chat Commands
 
 Internal chat commands start with `/`.
@@ -139,6 +152,7 @@ Internal chat commands start with `/`.
 | `/update` | Regenerate from latest linked data using prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
 | `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links the synced inbox as the board's data source |
+| `/billers` | Invoice fetcher status; `/billers sync` runs the enabled ones; `/billers enable\|disable <key>` toggles one |
 | `/history` | Show prompt history for the dashboard |
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
@@ -194,6 +208,8 @@ openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--
 openboard agent setup llm --provider <name> [--model <model>] [--effort low|medium|high|max]
 openboard agent setup gmail --gmail-client-id <id> --gmail-client-secret <secret> [--gmail-query "in:inbox"] [--gmail-sync-interval 5]
 openboard agent mail <sync|status> [--json]
+openboard agent setup billers --scripts-dir <dir> --biller-email <address> --biller-app-password <pw> [--biller-key <key>]... [--biller-sync-interval 360]
+openboard agent billers <sync|status> [--biller <key>] [--json]
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help

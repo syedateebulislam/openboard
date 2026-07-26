@@ -28,6 +28,9 @@ import {
   type AppMode,
 } from '../../config/appModes.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
+import { TypedConfigRepository } from './TypedConfigRepository.js';
+import { normalizeUserPath } from '../../utils/pathNormalizer.js';
+import { discoverBillers, validateScriptsDir } from '../billers/BillerDiscoveryService.js';
 
 export type ProgressFn = (line: string) => void;
 
@@ -51,6 +54,7 @@ export interface SetupStatus {
   vercel: boolean;
   dashboardAuth: boolean;
   gmail: { email?: string; connected: boolean } | null;
+  billers: { email?: string; scriptsDir?: string; enabled: string[]; ready: boolean } | null;
 }
 
 export interface ConfigureGmailInput {
@@ -58,6 +62,16 @@ export interface ConfigureGmailInput {
   clientSecret?: string;
   query?: string;
   syncIntervalMinutes?: number;
+}
+
+export interface ConfigureBillersInput {
+  scriptsDir?: string;
+  email?: string;
+  appPassword?: string;
+  syncIntervalMinutes?: number;
+  sinceDays?: number;
+  /** Keys to switch on; replaces the current selection when provided. */
+  enable?: string[];
 }
 
 export interface ConfigureLLMInput {
@@ -333,6 +347,90 @@ export class SetupService {
     };
   }
 
+  /**
+   * Save invoice-fetcher settings. Unlike Gmail OAuth there is no interactive
+   * step here, so a headless call can fully configure the feature — though the
+   * recurring schedule itself only runs while the TUI is open.
+   */
+  configureBillers(input: ConfigureBillersInput): SetupPartResult {
+    const scriptsDir = input.scriptsDir?.trim();
+    const email = input.email?.trim();
+    const appPassword = input.appPassword?.replace(/\s+/g, '');
+
+    if (scriptsDir) {
+      const path = normalizeUserPath(scriptsDir);
+      const check = validateScriptsDir(path);
+      if (!check.valid) {
+        return { configured: false, error: check.error ?? 'Invalid --scripts-dir.', errorCode: 'E_VALIDATION' };
+      }
+      this.config.set('billers.scriptsDir', path);
+    }
+
+    if (email) {
+      if (!email.includes('@')) {
+        return { configured: false, error: 'Invalid --biller-email: expected a full address.', errorCode: 'E_VALIDATION' };
+      }
+      this.config.set('billers.email', email);
+    }
+
+    if (appPassword) {
+      if (appPassword.length < 16) {
+        return { configured: false, error: 'Invalid --biller-app-password: a Google App Password is 16 characters.', errorCode: 'E_VALIDATION' };
+      }
+      this.config.setEncrypted('billers.appPassword', appPassword);
+    }
+
+    if (input.syncIntervalMinutes !== undefined) {
+      if (!Number.isInteger(input.syncIntervalMinutes) || input.syncIntervalMinutes < 1) {
+        return { configured: false, error: 'Invalid --biller-sync-interval: whole minutes, minimum 1.', errorCode: 'E_VALIDATION' };
+      }
+      this.config.set('billers.syncIntervalMinutes', input.syncIntervalMinutes);
+    }
+
+    if (input.sinceDays !== undefined) {
+      if (!Number.isInteger(input.sinceDays) || input.sinceDays < 1) {
+        return { configured: false, error: 'Invalid --biller-since-days: whole days, minimum 1.', errorCode: 'E_VALIDATION' };
+      }
+      this.config.set('billers.sinceDays', input.sinceDays);
+    }
+
+    if (input.enable) {
+      const dir = this.config.get('billers.scriptsDir') as string | undefined;
+      const known = new Set(discoverBillers(dir).map((biller) => biller.key));
+      const unknown = input.enable.filter((key) => !known.has(key));
+      if (unknown.length > 0) {
+        return {
+          configured: false,
+          error: `Unknown biller key(s): ${unknown.join(', ')}. Known: ${[...known].join(', ') || 'none — set --scripts-dir first'}.`,
+          errorCode: 'E_VALIDATION',
+        };
+      }
+      this.config.set('billers.enabledKeys', input.enable);
+    }
+
+    if (!scriptsDir && !email && !appPassword && !input.enable
+      && input.syncIntervalMinutes === undefined && input.sinceDays === undefined) {
+      return {
+        configured: false,
+        error: 'Nothing to configure. Pass --scripts-dir, --biller-email, --biller-app-password, --biller-key, --biller-sync-interval, or --biller-since-days.',
+        errorCode: 'E_VALIDATION',
+      };
+    }
+
+    const settings = new TypedConfigRepository(this.config).getBillerSettings();
+    const ready = Boolean(settings.scriptsDir && settings.email && settings.appPassword);
+    return {
+      configured: true,
+      detail: ready
+        ? `Invoice fetchers ready — ${settings.enabledKeys.length} biller(s) enabled, every ${settings.syncIntervalMinutes} min while the TUI is open. Run \`openboard agent billers sync\` for a one-shot fetch.`
+        : 'Invoice fetcher settings saved. Still needed: ' + [
+            settings.scriptsDir ? null : 'scripts folder',
+            settings.email ? null : 'Gmail address',
+            settings.appPassword ? null : 'App Password',
+          ].filter(Boolean).join(', ') + '.',
+    };
+  }
+
   status(): SetupStatus {
     const provider = this.config.get('llm.provider') as string | undefined;
     const githubUser = this.config.get('github.username') as string | undefined;
@@ -357,6 +455,17 @@ export class SetupService {
             email: this.config.get('gmail.email') as string | undefined,
             connected: this.config.has('gmail.refreshToken') && this.config.get('gmail.needsReauth') !== true,
           }
+        : null,
+      billers: this.config.has('billers.scriptsDir')
+        ? (() => {
+            const billers = new TypedConfigRepository(this.config).getBillerSettings();
+            return {
+              email: billers.email,
+              scriptsDir: billers.scriptsDir,
+              enabled: billers.enabledKeys,
+              ready: Boolean(billers.scriptsDir && billers.email && billers.appPassword),
+            };
+          })()
         : null,
     };
   }

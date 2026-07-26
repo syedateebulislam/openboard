@@ -104,6 +104,7 @@ openboard agent setup github --github-token "ghp_..."     # remote mode only
 openboard agent setup vercel --vercel-token "..."          # remote mode only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
 openboard agent setup gmail --gmail-client-id "xxx.apps.googleusercontent.com" --gmail-client-secret "GOCSPX-..."
+openboard agent setup billers --scripts-dir "/path/to/invoice_fetchers" --biller-email "you@gmail.com" --biller-app-password "..."
 openboard agent setup status --json
 ```
 
@@ -123,6 +124,49 @@ openboard agent create --data ~/.openboard/mail/messages.json --name "Inbox"
 ```
 
 `mail sync` exits 1 with `needsReauth: true` when the refresh token was revoked/expired; re-consent in the TUI and retry.
+
+### Invoice fetchers (per-biller scripts)
+
+For users who keep their own per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). This is a **separate credential from Gmail OAuth above** — an IMAP App Password, not a token — and neither feature requires the other.
+
+Unlike `setup gmail`, this has no interactive step, so an agent can configure it completely:
+
+```bash
+openboard agent setup billers \
+  --scripts-dir "/path/to/scripts/invoice_fetchers" \
+  --biller-email "you@gmail.com" \
+  --biller-app-password "abcdefghijklmnop" \
+  --biller-key zomato --biller-key uber_rides --json
+
+# What is discovered and what is enabled (no LLM, no network):
+openboard agent billers status --json
+
+# One-shot run of the enabled billers (or just one):
+openboard agent billers sync --json
+openboard agent billers sync --biller zomato --json
+```
+
+Billers are **discovered, never hardcoded**: OpenBoard scans `--scripts-dir` for `fetch_*.py` files and reads each script's own `KEY`/`DISPLAY_NAME` constants. `fetch_pending_invoices.py` and `run_backfill_invoices_new.py` are excluded (they are not per-biller fetchers). `--biller-key` accepts only discovered keys and *replaces* the enabled set; `status` lists the valid keys.
+
+Each biller's CSV is hashed before and after its run. Unchanged output ends the run for that biller with no LLM call; changed output creates that biller's dashboard on first data (mapped to a category preset — `zomato`/`swiggy_*` → food, `uber_rides`/`rapido`/`amazon_pay` → travel, `amazon` → shopping, `urban_company` → utilities, otherwise custom) and refreshes it afterwards via the normal update pipeline.
+
+`billers sync` exits 1 if any enabled biller failed; each entry in `results[]` carries `key`, `ok`, `changed`, `dashboardUpdated`, and a plain-language `error` (missing Python, missing `beautifulsoup4`/`pdfplumber`, rejected login).
+
+The **recurring schedule is TUI-only** — it is an in-process loop, so `agent billers sync` is the headless equivalent. Drive it from your own cron/Task Scheduler if you need unattended runs.
+
+Flags:
+
+| Flag | Meaning |
+|---|---|
+| `--scripts-dir` | Folder of `fetch_<biller>.py` scripts; validated to contain at least one |
+| `--biller-email` | Gmail address the fetchers log in as |
+| `--biller-app-password` | 16-char Google App Password (or `OPENBOARD_BILLER_APP_PASSWORD`, preferred) |
+| `--biller-key` | Enable this biller; repeatable, replaces the current selection |
+| `--biller-sync-interval` | TUI fetch interval in minutes (default 360) |
+| `--biller-since-days` | How far back each fetcher searches (default 30) |
+| `--biller` | `billers sync` only: run just this one biller |
+
+OpenBoard writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` (mode `0600`) because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
 
 Flags:
 
@@ -285,6 +329,7 @@ This relies on local prompt history stored per dashboard. It works after a dashb
 openboard agent list --json                          # all dashboards + deploy URLs + data staleness
 openboard agent status --dashboard "uber-rides" --json   # one dashboard, incl. dataStale flag
 openboard agent runs --json                          # recent pipeline runs + failure summary
+openboard agent billers status --json                # discovered invoice fetchers + which are enabled
 ```
 
 `agent status` reports `dataStale: true` when a linked data file changed after the last generation — use it to decide between `openboard update --dashboard <selector>` (refresh) and doing nothing.

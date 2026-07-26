@@ -177,6 +177,7 @@ describe('SetupService (headless setup)', () => {
       vercel: false,
       dashboardAuth: false,
       gmail: null,
+      billers: null,
     });
     await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' });
     await setup.configureDashboardAuth('admin', 'supersecret');

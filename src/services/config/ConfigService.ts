@@ -68,6 +68,19 @@ const GmailConfigSchema = z.object({
   needsReauth: z.boolean().optional(),
 }).optional();
 
+// External per-biller invoice fetchers: where the scripts live, the Gmail
+// account they log into over IMAP, and which billers are switched on.
+// appPassword is stored encrypted (enc:...).
+const BillersConfigSchema = z.object({
+  scriptsDir: z.string().optional(),
+  email: z.string().optional(),
+  appPassword: z.string().optional(),
+  enabledKeys: z.array(z.string()).optional(),
+  syncIntervalMinutes: z.number().int().min(1).optional(),
+  sinceDays: z.number().int().min(1).optional(),
+  lastRunAt: z.string().optional(),
+}).optional();
+
 const CredentialsSchema = z.object({
   username: z.string().optional(),
   passwordHash: z.string().optional(),
@@ -89,6 +102,7 @@ const AppConfigSchema = z.object({
   github: GitHubConfigSchema,
   vercel: VercelConfigSchema,
   gmail: GmailConfigSchema,
+  billers: BillersConfigSchema,
   credentials: CredentialsSchema,
   boards: z.array(BoardSchema).optional(),
 }).optional();

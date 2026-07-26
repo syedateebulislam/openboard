@@ -17,6 +17,7 @@
  *   /logs                                        - Show latest operation log
  *   /data                                        - Show linked data source summary
  *   /mail [sync|use]                             - Gmail sync status / fetch now / link inbox as data
+ *   /billers [sync|enable <key>|disable <key>]   - Invoice fetcher status / run now / toggle one biller
  *   /help                                        - Show available commands
  *   /unknown                                     - Show command suggestions
  *   <anything else>                              - Routed to LLM as a message
@@ -38,6 +39,7 @@ export type Command =
   | { type: 'logs' }
   | { type: 'data' }
   | { type: 'mail'; args: string[] }
+  | { type: 'billers'; args: string[] }
   | { type: 'model'; args: string[] }
   | { type: 'help' }
   | { type: 'unknown'; text: string; suggestions: string[] }
@@ -65,6 +67,7 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/resume', category: 'local', color: 'cyan', description: "Resume this dashboard's last stopped or failed task" },
   { command: '/data', category: 'data', color: 'magenta', description: 'Show linked data file summary' },
   { command: '/mail', category: 'data', color: 'magenta', description: 'Gmail sync status; /mail sync fetches now, /mail use links the inbox as data' },
+  { command: '/billers', category: 'data', color: 'magenta', description: 'Invoice fetcher status; /billers sync runs them, enable/disable toggles one' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
   { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoard readiness' },
@@ -131,6 +134,9 @@ export function parseCommand(input: string): Command {
   if (/^\/mail(\s|$)/i.test(trimmed)) {
     return { type: 'mail', args: input.trim().split(/\s+/).slice(1) };
   }
+  if (/^\/billers(\s|$)/i.test(trimmed)) {
+    return { type: 'billers', args: input.trim().split(/\s+/).slice(1) };
+  }
 
   if (trimmed.startsWith('/')) {
     return {
@@ -192,6 +198,7 @@ export const HELP_TEXT = `Available commands:
   /resume       - Resume this dashboard's last stopped or failed task
   /data         - Show linked data source summary
   /mail         - Show Gmail sync status; /mail sync fetches now; /mail use links the inbox as this board's data
+  /billers      - Show invoice fetcher status; /billers sync runs them; /billers enable|disable <key> toggles one
   /history      - Show this dashboard's prompt history
   /logs         - Show latest operation log
   /doctor       - Check LLM/GitHub/Vercel/project readiness

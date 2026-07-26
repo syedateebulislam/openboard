@@ -185,6 +185,7 @@ Commands must start with `/`.
 | `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links your inbox as this board's data |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
+| `/billers` | Invoice fetcher status; `/billers sync` runs them; `/billers enable\|disable <key>` toggles one |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/model` | Show or switch the LLM model and effort |
 | `/stop` | Cancel the current in-flight operation (generation, build, push, or deploy) |
@@ -261,6 +262,7 @@ Settings supports:
 - Re-enter GitHub token
 - Re-enter Vercel token
 - Gmail integration (connect account, sync options, disconnect)
+- Invoice fetchers (per-biller invoice scripts, schedule, enable/disable)
 - Reset dashboard login
 - Run full setup wizard
 
@@ -277,6 +279,56 @@ Connect your Gmail inbox as a live data source:
 
 If the status shows **re-auth needed** (Google expired or revoked the token), open Settings → Gmail integration and reconnect. Disconnecting removes the stored tokens; the local cache file stays until you delete `~/.openboard/mail/`.
 
+Note: the account here is chosen on Google's own consent screen, so OpenBoard
+learns which address you connected only after you approve it.
+
+### Invoice Fetchers
+
+This is for people who already have their own per-biller invoice scripts: one
+dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending
+rows to `data/invoices/<biller>.csv`. OpenBoard can enable them, run them on a
+schedule, and turn each biller's invoices into its own dashboard.
+
+It is **separate from Gmail integration above**: those scripts sign in with a
+Gmail App Password over IMAP, not OAuth. You do not need Gmail integration
+connected to use this, or the other way round.
+
+Settings → Invoice fetchers, in this order:
+
+1. **Invoice scripts folder** — the folder holding your `fetch_*.py` files (paste
+   with or without quotes). OpenBoard reads each script's own `KEY` and
+   `DISPLAY_NAME` constants to build the biller list, so nothing is hardcoded and
+   `fetch_pending_invoices.py` / `run_backfill_invoices_new.py` are ignored (they
+   are not per-biller fetchers).
+2. **Gmail address** — the account the fetchers log into. Asked before any
+   credential, so you always know which account you are about to authorize.
+3. **Gmail App Password** — a 16-character App Password from
+   myaccount.google.com/apppasswords, *not* your normal Gmail password. Saving it
+   writes the `secrets/gmail_app_credentials.json` file your scripts already read.
+4. **The biller list** appears — one row per discovered biller with a `[x]`/`[ ]`
+   toggle. Select a row to switch that biller on or off. Come back and change it
+   any time.
+5. **Fetch interval** — one shared schedule for every enabled biller (default 360
+   min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
+   ones immediately. **Rescan billers folder** picks up newly added scripts.
+
+Fetching runs in-process, only while OpenBoard is open — the same tradeoff as the
+Gmail sync, no background daemon. The last run time is remembered between
+sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
+starts shortly after launch.
+
+After each biller runs, OpenBoard compares its CSV before and after. Nothing new
+means it stops there, with no LLM call. New invoices mean it creates that
+biller's dashboard the first time (using the closest category preset — Zomato and
+Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping) and
+refreshes it on later runs.
+
+Security worth knowing: the scripts cannot decrypt anything, so their credentials
+file is necessarily plain text on your machine (OpenBoard writes it readable only
+by you, and keeps its own copy of the password encrypted). An App Password also
+grants full mailbox read access, which is broader than the read-only OAuth scope
+used by Gmail integration — revoke it in your Google account to cut access off.
+
 ## Files OpenBoard Uses
 
 ```text
@@ -284,6 +336,15 @@ If the status shows **re-auth needed** (Google expired or revoked the token), op
 ~/.openboard/prompt-history/<dashboard-id>.json
 ~/.openboard/mail/messages.json      (synced Gmail cache, when connected)
 projects/openboard-app-workspace-<id>/
+```
+
+When invoice fetchers are configured, these live next to your scripts folder
+(two levels above it, where the scripts themselves expect them):
+
+```text
+<repo>/secrets/gmail_app_credentials.json   (written by OpenBoard, mode 0600)
+<repo>/data/invoices/<biller>.csv           (written by each fetcher)
+<repo>/data/invoices/raw/<biller>/          (raw mail + per-biller dedup state)
 ```
 
 Do not manually edit encrypted config values. Re-enter tokens through Settings.
