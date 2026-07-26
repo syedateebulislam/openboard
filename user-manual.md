@@ -268,10 +268,17 @@ Use Settings when tokens cannot be decrypted or external auth fails.
 
 ### Invoice Fetchers
 
-This is for people who already have their own per-biller invoice scripts: one
-dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending
-rows to `data/invoices/<biller>.csv`. OpenBoard can enable them, run them on a
-schedule, and turn each biller's invoices into its own dashboard.
+Turn invoice emails into per-biller spending dashboards. OpenBoard ships
+ready-made fetchers for **Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy
+Instamart, Uber, Urban Company and Zomato**, and will drive any
+`fetch_<biller>.py` you write yourself. Each one reads Gmail over IMAP and
+appends rows to `data/invoices/<biller>.csv`; OpenBoard enables them, runs them
+on a schedule, and turns each biller's invoices into its own dashboard.
+
+The quickest start is **Install the fetchers bundled with OpenBoard**, offered
+as the first option when nothing is set up yet. It copies them into the folder
+below and configures the path in one step. Running it again only adds fetchers
+that are missing — anything you have edited is left untouched.
 
 **Where to keep everything.** OpenBoard suggests — and pre-fills — one canonical
 layout, so the scripts, your invoice data, and the credentials they need all sit
@@ -292,6 +299,8 @@ if you already keep them somewhere, but that folder must have the same
 
 Settings → Invoice fetchers, in this order:
 
+0. **Install the fetchers bundled with OpenBoard** — offered first when nothing
+   is configured. Skip this only if you keep your own scripts elsewhere.
 1. **Invoice scripts folder** — the folder holding your `fetch_*.py` files (paste
    with or without quotes). OpenBoard reads each script's own `KEY` and
    `DISPLAY_NAME` constants to build the biller list, so nothing is hardcoded and

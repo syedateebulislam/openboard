@@ -15,8 +15,9 @@
  * the scripts stay unmodified.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NON_BILLER_SCRIPTS, type BillerScript } from '../../types/billers.js';
 
 const KEY_PATTERN = /^KEY\s*=\s*["'](.+?)["']/m;
@@ -112,6 +113,57 @@ export function validateScriptsDir(scriptsDir: string): ScriptsDirValidation {
     };
   }
   return { valid: true, billers };
+}
+
+/**
+ * Where the fetchers that ship with OpenBoard live inside the installed package.
+ *
+ * Same dev-vs-bundle split as the prompt loaders, but the depth is this file's,
+ * not theirs: from dist/ the package root is one level up; from
+ * src/services/billers/ it is three.
+ */
+export function bundledScriptsDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const packageRoot = here.includes('dist')
+    ? resolve(here, '..')
+    : resolve(here, '..', '..', '..');
+  return join(packageRoot, 'scripts', 'invoice_fetchers');
+}
+
+export interface InstallResult {
+  installed: string[];
+  skipped: string[];
+  error?: string;
+}
+
+/**
+ * Copy the bundled fetchers into a user folder. Existing files are left alone —
+ * a user who has edited a fetcher must never lose that to an upgrade.
+ */
+export function installBundledScripts(targetDir: string): InstallResult {
+  const source = bundledScriptsDir();
+  if (!existsSync(source)) {
+    return { installed: [], skipped: [], error: `No bundled fetchers found at ${source}.` };
+  }
+
+  const installed: string[] = [];
+  const skipped: string[] = [];
+  try {
+    mkdirSync(targetDir, { recursive: true });
+    for (const entry of readdirSync(source)) {
+      if (!entry.startsWith('fetch_') || !entry.endsWith('.py')) continue;
+      const destination = join(targetDir, entry);
+      if (existsSync(destination)) {
+        skipped.push(entry);
+        continue;
+      }
+      copyFileSync(join(source, entry), destination);
+      installed.push(entry);
+    }
+  } catch (error: any) {
+    return { installed, skipped, error: error.message };
+  }
+  return { installed, skipped };
 }
 
 /**

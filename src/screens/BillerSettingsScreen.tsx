@@ -11,6 +11,7 @@ import { normalizeUserPath } from '../utils/pathNormalizer.js';
 import {
   credentialsPathFor,
   discoverBillers,
+  installBundledScripts,
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
@@ -154,6 +155,19 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     }
   };
 
+  const installBundled = () => {
+    const target = defaultScriptsDir();
+    const result = installBundledScripts(target);
+    if (result.error) {
+      setStatus(`Could not install the bundled fetchers: ${result.error}`);
+      return;
+    }
+    config.set('billers.scriptsDir', target);
+    const kept = result.skipped.length > 0 ? ` (${result.skipped.length} already there, left alone)` : '';
+    setStatus(`Installed ${result.installed.length} fetcher(s) to ${target}${kept}. Next: add the Gmail address they log in as.`);
+    changed();
+  };
+
   const clearCredentials = () => {
     config.delete('billers.email');
     config.delete('billers.appPassword');
@@ -162,6 +176,9 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   };
 
   const menuItems = [
+    // Offered first on a fresh setup: one keypress from nothing to a working
+    // folder, instead of hunting for scripts the user may not have yet.
+    ...(hasDir ? [] : [{ label: 'Install the fetchers bundled with OpenBoard (recommended)', value: 'install' }]),
     { label: hasDir ? `Invoice scripts folder (current: ${settings.scriptsDir})` : 'Set invoice scripts folder', value: 'dir' },
     ...(hasDir ? [{ label: hasEmail ? `Gmail address (current: ${settings.email})` : 'Set Gmail address', value: 'email' }] : []),
     ...(hasDir && hasEmail
@@ -187,6 +204,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     if (busy) return;
     setStatus('');
     if (item.value.startsWith('toggle:')) { toggleBiller(item.value.slice(7)); return; }
+    if (item.value === 'install') { installBundled(); return; }
     // Pre-fill the canonical location so the common case is just Enter.
     if (item.value === 'dir') { setDirInput(settings.scriptsDir ?? defaultScriptsDir()); setStep('scripts-dir'); }
     else if (item.value === 'email') { setEmailInput(settings.email ?? ''); setStep('email'); }

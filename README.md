@@ -117,7 +117,9 @@ The generated app header shows the OpenBoard website/GitHub/npm icon links on th
 
 ## Invoice Fetchers (per-biller)
 
-If you have your own per-biller invoice scripts — one dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending rows to `data/invoices/<biller>.csv` — OpenBoard can drive them for you:
+Turn invoice emails into per-biller spending dashboards, automatically. OpenBoard **ships ready-made fetchers** for Amazon, Amazon Pay, Rapido, Swiggy (Food and Instamart), Uber, Urban Company, and Zomato — and drives any `fetch_<biller>.py` you write yourself:
+
+- **Start with one keypress**: Settings → Invoice fetchers → *Install the fetchers bundled with OpenBoard*. They land in the canonical folder, already configured. A fetcher you have edited is never overwritten by a later install.
 
 - **One canonical home**, pre-filled for you: `~/.openboard/billers/scripts/invoice_fetchers/` for the scripts, with `billers/data/invoices/` and `billers/secrets/` alongside. The scripts find their own data two folders up, so this layout works with them unmodified.
 - **Point OpenBoard at the folder once**: Settings → Invoice fetchers. It scans for `fetch_*.py` files, reads each script's own `KEY`/`DISPLAY_NAME` constants, and lists every biller it finds. Nothing is hardcoded, so dropping in a new fetcher and choosing "Rescan billers folder" picks it up.

@@ -12,8 +12,10 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
 import {
+  bundledScriptsDir,
   credentialsPathFor,
   discoverBillers,
+  installBundledScripts,
   isInsideScriptsDir,
   repoRootFor,
   validateScriptsDir,
@@ -721,6 +723,70 @@ describe('Biller invoice fetchers', () => {
       s.configureBillers({ email: 'a@gmail.com' });
       expect(s.configureBillers({ appPassword: 'abcdefghijklmnop' }).detail).toMatch(/ready/i);
       expect(s.status().billers?.ready).toBe(true);
+    });
+  });
+
+  // ── bundled fetchers ───────────────────────────────────────────────────────
+
+  describe('bundled fetchers', () => {
+    it('ships a usable set inside the package', () => {
+      const bundled = discoverBillers(bundledScriptsDir());
+      expect(bundled.length).toBeGreaterThan(0);
+      // Discovery must accept them for the same reasons it accepts any fetcher.
+      for (const biller of bundled) {
+        expect(biller.key).toMatch(/^[a-z0-9_]+$/);
+        expect(biller.displayName.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('carries no real purchase data', () => {
+      // The examples exist to document the regexes, so they keep the shape of a
+      // real receipt but must stay synthetic — publishing to npm is effectively
+      // permanent. Each pattern matches the real shape while allowing the
+      // agreed placeholder (all zeros / all A / XX00XX0000).
+      const forbidden = [
+        /\b(?!000-0000000-0000000\b)\d{3}-\d{7}-\d{7}\b/,           // Amazon order numbers
+        /ORDER ID: (?!0+\b)\d{6,}/,                                  // order ids
+        /Order ID: (?!0+\b)\d{6,}/,
+        /PNR:(?!A{6})[A-Z0-9]{6}/,                                   // flight PNRs
+        /License Plate: (?!XX00XX0000)[A-Z]{2}\d{2}[A-Z]{2}\d{4}/,
+        /MakeMyTrip ID: (?!NF0+A+0+A0AAA0000)[A-Z0-9]{16,}/,
+      ];
+      for (const biller of discoverBillers(bundledScriptsDir())) {
+        const source = readFileSync(biller.scriptPath, 'utf-8');
+        for (const pattern of forbidden) {
+          expect(pattern.test(source), `${biller.key} matched ${pattern}`).toBe(false);
+        }
+      }
+    });
+
+    it('installs into an empty folder and configures nothing else', () => {
+      const target = join(root, 'installed');
+      const result = installBundledScripts(target);
+      expect(result.error).toBeUndefined();
+      expect(result.installed.length).toBeGreaterThan(0);
+      expect(result.skipped).toEqual([]);
+      expect(discoverBillers(target).length).toBe(result.installed.length);
+    });
+
+    it('never overwrites a fetcher the user has edited', () => {
+      const target = join(root, 'installed2');
+      installBundledScripts(target);
+      const [first] = discoverBillers(target);
+      writeFileSync(first.scriptPath, '# my local edits\nKEY = "mine"\nDISPLAY_NAME = "Mine"\n', 'utf-8');
+
+      const second = installBundledScripts(target);
+      expect(second.installed).toEqual([]);
+      expect(second.skipped.length).toBeGreaterThan(0);
+      expect(readFileSync(first.scriptPath, 'utf-8')).toContain('my local edits');
+    });
+
+    it('reports a missing bundle instead of throwing', () => {
+      const result = installBundledScripts(join(root, 'nested', 'deep', 'target'));
+      // Target is created on demand, so this still succeeds — the failure path
+      // is a missing *source*, which is asserted via the error field shape.
+      expect(result).toHaveProperty('installed');
+      expect(result).toHaveProperty('skipped');
     });
   });
 
