@@ -300,6 +300,16 @@ describe('Biller invoice fetchers', () => {
       expect(describeFetchError('imaplib.error: b\'[AUTHENTICATIONFAILED] Invalid credentials\'')).toMatch(/App Password/i);
     });
 
+    it('names the App Password mistake when Gmail asks for one', () => {
+      // Verbatim reply from imap.gmail.com when a regular account password is
+      // used. It never says "authentication failed", so it needs its own rule.
+      const real = "imaplib.error: b'[ALERT] Application-specific password required: "
+        + "https://support.google.com/accounts/answer/185833 (Failure)'";
+      const message = describeFetchError(real);
+      expect(message).toMatch(/App Password, not your normal account password/i);
+      expect(message).toMatch(/apppasswords/);
+    });
+
     it('hashes only existing files', async () => {
       const path = join(root, 'hash-me.csv');
       expect(await hashFile(path)).toBeUndefined();

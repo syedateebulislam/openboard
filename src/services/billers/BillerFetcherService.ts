@@ -71,6 +71,12 @@ export function describeFetchError(raw: string): string {
   if (/ModuleNotFoundError: No module named ['"]?pdfplumber/i.test(text)) {
     return 'Missing Python dependency: pdfplumber (needed by the Rapido fetcher). Install it with `pip install pdfplumber`.';
   }
+  // Google's reply when a regular account password is used instead of an App
+  // Password — by far the most common setup mistake, and it says nothing about
+  // "authentication failed", so it needs its own branch.
+  if (/Application-specific password required|WEBLOGIN required/i.test(text)) {
+    return 'Gmail needs an App Password, not your normal account password. Create one at myaccount.google.com/apppasswords (16 characters) and re-enter it in Settings › Invoice fetchers.';
+  }
   if (/AUTHENTICATIONFAILED|Invalid credentials|LOGIN failed/i.test(text)) {
     return 'Gmail rejected the login. Check the address and App Password in Settings › Invoice fetchers.';
   }
