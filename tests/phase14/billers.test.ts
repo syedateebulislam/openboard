@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import type { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
 import {
   credentialsPathFor,
@@ -30,6 +30,7 @@ import {
   startBillerScheduler,
 } from '../../src/services/billers/billerScheduler.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
+import { SetupService } from '../../src/services/config/SetupService.js';
 import { TypedConfigRepository } from '../../src/services/config/TypedConfigRepository.js';
 import {
   BILLERS_DEFAULT_SINCE_DAYS,
@@ -213,6 +214,97 @@ describe('Biller invoice fetchers', () => {
     it('refuses to write credentials when the account is incomplete', () => {
       const service = new BillerFetcherService({ settings: () => settings({ appPassword: undefined }) });
       expect(() => service.writeCredentialsFile()).toThrow(/App Password/i);
+      const noDir = new BillerFetcherService({ settings: () => settings({ scriptsDir: undefined }) });
+      expect(() => noDir.writeCredentialsFile()).toThrow(/folder/i);
+    });
+
+    it('replaces an existing credentials file cleanly when the password changes', () => {
+      // Rewritten before every run, so a stale password must not survive and the
+      // file must never end up with two JSON documents concatenated.
+      const first = new BillerFetcherService({ settings: () => settings() });
+      const path = first.writeCredentialsFile();
+      const second = new BillerFetcherService({
+        settings: () => settings({ appPassword: 'zzzzzzzzzzzzzzzz', email: 'new@gmail.com' }),
+      });
+      second.writeCredentialsFile();
+      const raw = readFileSync(path, 'utf-8');
+      expect(JSON.parse(raw)).toEqual({ email: 'new@gmail.com', app_password: 'zzzzzzzzzzzzzzzz' });
+      expect(raw.trim().endsWith('}')).toBe(true);
+    });
+
+    it('creates the secrets folder when it is missing', () => {
+      const fresh = join(root, 'fresh', 'scripts', 'invoice_fetchers');
+      mkdirSync(fresh, { recursive: true });
+      const service = new BillerFetcherService({ settings: () => settings({ scriptsDir: fresh }) });
+      const path = service.writeCredentialsFile();
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('keeps going when one biller fails, and preserves order', async () => {
+      const ran: string[] = [];
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: ['uber_rides', 'zomato'] }),
+        updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+        runScript: async (biller) => {
+          ran.push(biller.key);
+          return biller.key === 'uber_rides'
+            ? { code: 1, output: 'boom' }
+            : { code: 0, output: '' };
+        },
+      });
+
+      const results = await service.syncEnabled();
+      expect(ran).toEqual(['uber_rides', 'zomato']); // sorted by display name, both attempted
+      expect(results.map((r) => r.key)).toEqual(['uber_rides', 'zomato']);
+      expect(results[0].ok).toBe(false);
+      expect(results[1].ok).toBe(true);
+    });
+
+    it('stops before the next biller once aborted', async () => {
+      const controller = new AbortController();
+      const ran: string[] = [];
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: ['uber_rides', 'zomato'] }),
+        updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+        runScript: async (biller) => {
+          ran.push(biller.key);
+          controller.abort();
+          return { code: 0, output: '' };
+        },
+      });
+
+      await service.syncEnabled({ signal: controller.signal });
+      expect(ran).toEqual(['uber_rides']);
+    });
+
+    it('propagates an abort rather than reporting a clean run', async () => {
+      const service = new BillerFetcherService({
+        settings: () => settings(),
+        updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+        runScript: async () => {
+          throw Object.assign(new Error('Command was aborted'), { name: 'AbortError' });
+        },
+      });
+      await expect(service.syncEnabled()).rejects.toThrow(/abort/i);
+    });
+
+    it('reports a dashboard failure as a failed run, not a silent success', async () => {
+      const updateService = fakeUpdateService();
+      updateService.createFromDataSource = vi.fn(async () => ({ success: false, error: 'no LLM configured' })) as any;
+      const service = new BillerFetcherService({
+        settings: () => settings(),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async (biller) => {
+          mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+          writeFileSync(biller.csvPath, `order_id\n${Date.now()}\n`, 'utf-8');
+          return { code: 0, output: '' };
+        },
+      });
+
+      const [result] = await service.syncEnabled();
+      expect(result.changed).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/no LLM configured/);
     });
 
     it('creates a dashboard the first time a biller produces data', async () => {
@@ -340,20 +432,35 @@ describe('Biller invoice fetchers', () => {
       expect(result.error).toMatch(/beautifulsoup4/i);
     });
 
-    it('translates the common failure modes into actionable text', () => {
-      expect(describeFetchError('spawn python ENOENT')).toMatch(/Python was not found/i);
-      expect(describeFetchError("ModuleNotFoundError: No module named 'pdfplumber'")).toMatch(/pdfplumber/i);
-      expect(describeFetchError('imaplib.error: b\'[AUTHENTICATIONFAILED] Invalid credentials\'')).toMatch(/App Password/i);
+    // Table-driven so a new failure mode is one line, and each case asserts the
+    // load-bearing token (a package name, a URL) rather than a whole sentence
+    // that would break on any copy edit.
+    const FAILURE_CASES: Array<{ name: string; raw: string; expect: RegExp }> = [
+      { name: 'python missing', raw: 'spawn python ENOENT', expect: /python/i },
+      { name: 'bs4 missing', raw: "ModuleNotFoundError: No module named 'bs4'", expect: /beautifulsoup4/i },
+      { name: 'pdfplumber missing', raw: "ModuleNotFoundError: No module named 'pdfplumber'", expect: /pdfplumber/i },
+      { name: 'bad credentials', raw: "imaplib.error: b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'", expect: /App Password/i },
+      {
+        // Verbatim from imap.gmail.com when a normal account password is used.
+        name: 'regular password used',
+        raw: "imaplib.error: b'[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)'",
+        expect: /apppasswords/,
+      },
+      { name: 'credentials file missing', raw: "FileNotFoundError: 'secrets/gmail_app_credentials.json'", expect: /credentials/i },
+    ];
+
+    it.each(FAILURE_CASES)('explains "$name" without leaking a traceback', ({ raw, expect: pattern }) => {
+      const message = describeFetchError(raw);
+      expect(message).toMatch(pattern);
+      // Never hand the user a raw Python traceback or an empty string.
+      expect(message).not.toMatch(/Traceback \(most recent call last\)/);
+      expect(message.length).toBeGreaterThan(10);
     });
 
-    it('names the App Password mistake when Gmail asks for one', () => {
-      // Verbatim reply from imap.gmail.com when a regular account password is
-      // used. It never says "authentication failed", so it needs its own rule.
-      const real = "imaplib.error: b'[ALERT] Application-specific password required: "
-        + "https://support.google.com/accounts/answer/185833 (Failure)'";
-      const message = describeFetchError(real);
-      expect(message).toMatch(/App Password, not your normal account password/i);
-      expect(message).toMatch(/apppasswords/);
+    it('still says something useful for a failure it does not recognise', () => {
+      const message = describeFetchError('some totally novel failure mode\nlast meaningful line here');
+      expect(message).toBe('last meaningful line here');
+      expect(describeFetchError('')).toMatch(/no output/i);
     });
 
     it('hashes only existing files', async () => {
@@ -467,6 +574,188 @@ describe('Biller invoice fetchers', () => {
       });
       expect(syncEnabled).not.toHaveBeenCalled();
       stop();
+    });
+
+    it('never runs two fetches at once', async () => {
+      // A slow fetch must not be re-entered by the interval firing underneath it;
+      // two concurrent runs would race on the same CSVs and dedup state.
+      let active = 0;
+      let maxActive = 0;
+      const syncEnabled = vi.fn(async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 20));
+        active -= 1;
+        return [];
+      });
+      const stop = startBillerScheduler(() => {}, {
+        settings: () => ({ ...ready, syncIntervalMinutes: 1 }),
+        fetcher: { syncEnabled } as any,
+        recordRun: vi.fn(),
+      });
+      await new Promise((r) => setTimeout(r, 60));
+      expect(maxActive).toBe(1);
+      stop();
+    });
+
+    it('stops firing once disposed', async () => {
+      const syncEnabled = vi.fn(async () => []);
+      const stop = startBillerScheduler(() => {}, {
+        settings: () => ready,
+        fetcher: { syncEnabled } as any,
+        recordRun: vi.fn(),
+      });
+      await vi.waitFor(() => expect(syncEnabled).toHaveBeenCalled());
+      const callsAtStop = syncEnabled.mock.calls.length;
+      stop();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(syncEnabled.mock.calls.length).toBe(callsAtStop);
+    });
+
+    it('goes quiet when disposed while a fetch is still in flight', async () => {
+      // Closing the screen mid-fetch: the run finishes in the background and
+      // must not push status into a component that is gone.
+      const onStatus = vi.fn();
+      let release!: () => void;
+      const inFlight = new Promise<void>((resolve) => { release = resolve; });
+
+      const stop = startBillerScheduler(onStatus, {
+        settings: () => ready,
+        fetcher: { syncEnabled: vi.fn(async () => { await inFlight; return []; }) } as any,
+        recordRun: vi.fn(),
+      });
+
+      await new Promise((r) => setTimeout(r, 10)); // let the tick reach its await
+      stop();
+      const afterStop = onStatus.mock.calls.length;
+
+      release();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(onStatus.mock.calls.length).toBe(afterStop);
+    });
+
+    it('records the run even when some billers failed', async () => {
+      // lastRunAt drives the due check; skipping it on partial failure would
+      // make the loop retry every launch forever.
+      const recordRun = vi.fn();
+      const stop = startBillerScheduler(() => {}, {
+        settings: () => ready,
+        fetcher: {
+          syncEnabled: vi.fn(async () => [
+            { key: 'zomato', displayName: 'Zomato', ok: false, changed: false, error: 'boom' },
+          ]),
+        } as any,
+        recordRun,
+      });
+      await vi.waitFor(() => expect(recordRun).toHaveBeenCalledTimes(1));
+      stop();
+    });
+
+    it('survives a fetcher that throws instead of returning results', async () => {
+      const onStatus = vi.fn();
+      const stop = startBillerScheduler(onStatus, {
+        settings: () => ready,
+        fetcher: { syncEnabled: vi.fn(async () => { throw new Error('unexpected'); }) } as any,
+        recordRun: vi.fn(),
+      });
+      await vi.waitFor(() => {
+        const states = onStatus.mock.calls.map((c) => c[0].state);
+        expect(states).toContain('error');
+      });
+      stop();
+    });
+  });
+
+  // ── headless setup validation ──────────────────────────────────────────────
+
+  describe('headless setup', () => {
+    const setup = () => new SetupService(new ConfigService());
+
+    it('rejects an unknown biller key and names the valid ones', () => {
+      const s = setup();
+      s.configureBillers({ scriptsDir });
+      const result = s.configureBillers({ enable: ['zomato', 'nope'] });
+      expect(result.configured).toBe(false);
+      expect(result.errorCode).toBe('E_VALIDATION');
+      expect(result.error).toMatch(/nope/);
+      expect(result.error).toMatch(/zomato/); // lists what IS valid
+    });
+
+    // Built lazily: `root` only exists once beforeEach has run, and it.each
+    // tables are evaluated at collection time.
+    it.each([
+      ['scriptsDir that does not exist', () => ({ scriptsDir: join(root, 'missing') })],
+      ['email without an @', () => ({ email: 'notanemail' })],
+      ['app password under 16 chars', () => ({ appPassword: 'tooshort' })],
+      ['zero interval', () => ({ syncIntervalMinutes: 0 })],
+      ['fractional interval', () => ({ syncIntervalMinutes: 1.5 })],
+      ['zero sinceDays', () => ({ sinceDays: 0 })],
+    ])('rejects %s', (_label, makeInput) => {
+      const result = setup().configureBillers(makeInput() as any);
+      expect(result.configured).toBe(false);
+      expect(result.errorCode).toBe('E_VALIDATION');
+    });
+
+    it('rejects a call that would change nothing', () => {
+      expect(setup().configureBillers({}).configured).toBe(false);
+    });
+
+    it('accepts a partial update without clobbering other fields', () => {
+      const s = setup();
+      s.configureBillers({ scriptsDir, email: 'a@gmail.com', appPassword: 'abcdefghijklmnop' });
+      s.configureBillers({ syncIntervalMinutes: 90 });
+      const after = new TypedConfigRepository().getBillerSettings();
+      expect(after.email).toBe('a@gmail.com');
+      expect(after.appPassword).toBe('abcdefghijklmnop');
+      expect(after.syncIntervalMinutes).toBe(90);
+    });
+
+    it('accepts an app password pasted with Google\'s spaces', () => {
+      setup().configureBillers({ appPassword: 'abcd efgh ijkl mnop' });
+      expect(new TypedConfigRepository().getBillerSettings().appPassword).toBe('abcdefghijklmnop');
+    });
+
+    it('reports readiness only once folder, address and password are all set', () => {
+      const s = setup();
+      expect(s.configureBillers({ scriptsDir }).detail).toMatch(/still needed/i);
+      s.configureBillers({ email: 'a@gmail.com' });
+      expect(s.configureBillers({ appPassword: 'abcdefghijklmnop' }).detail).toMatch(/ready/i);
+      expect(s.status().billers?.ready).toBe(true);
+    });
+  });
+
+  // ── contract with the real scripts ─────────────────────────────────────────
+
+  describe('real fetcher contract', () => {
+    // Discovery reads constants straight out of the user's Python files, so this
+    // guards the assumption against the scripts drifting. Skipped where they are
+    // not installed (CI, a fresh clone) rather than failing.
+    //
+    // Resolved from the real home rather than defaultScriptsDir(), which reads
+    // OPENBOARD_CONFIG_DIR — this suite repoints that at a temp dir, so going
+    // through the helper would make these silently skip depending on ordering.
+    const realDir = join(homedir(), '.openboard', 'billers', 'scripts', 'invoice_fetchers');
+    const present = existsSync(realDir) && discoverBillers(realDir).length > 0;
+
+    it.skipIf(!present)('every installed fetcher declares KEY and DISPLAY_NAME', () => {
+      for (const biller of discoverBillers(realDir)) {
+        expect(biller.key, `${biller.scriptPath} KEY`).toMatch(/^[a-z0-9_]+$/);
+        expect(biller.displayName.length, `${biller.scriptPath} DISPLAY_NAME`).toBeGreaterThan(0);
+      }
+    });
+
+    it.skipIf(!present)('excludes the multi-biller and backfill scripts', () => {
+      const keys = discoverBillers(realDir).map((b) => b.key);
+      expect(keys).not.toContain('pending_invoices');
+      expect(keys.some((k) => k.includes('backfill'))).toBe(false);
+    });
+
+    it.skipIf(!present)('derives every CSV inside the configured tree', () => {
+      const repoRoot = repoRootFor(realDir);
+      for (const biller of discoverBillers(realDir)) {
+        expect(biller.csvPath.startsWith(repoRoot)).toBe(true);
+        expect(biller.rawDir.startsWith(repoRoot)).toBe(true);
+      }
     });
   });
 });
