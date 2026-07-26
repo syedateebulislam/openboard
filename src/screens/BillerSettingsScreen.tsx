@@ -15,6 +15,7 @@ import {
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
+import { recordBillerRun } from '../services/billers/billerScheduler.js';
 import { defaultScriptsDir } from '../types/billers.js';
 
 interface Props {
@@ -111,7 +112,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       return;
     }
     config.set('billers.syncIntervalMinutes', minutes);
-    setStatus(`Fetch interval set to ${minutes} min (${(minutes / 60).toFixed(1)}h). Applied on the next launch or after a toggle.`);
+    setStatus(`Fetch interval set to ${minutes} min (${(minutes / 60).toFixed(1)}h). The next run is now scheduled from the last fetch.`);
     setIntervalInput('');
     setStep('menu');
     changed();
@@ -151,6 +152,10 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       setStatus(`Sync failed: ${error.message}`);
     } finally {
       setBusy(false);
+      // A manual fetch is the same work a scheduled tick does, so it re-anchors
+      // the schedule. Without this the restart below still saw the old
+      // lastRunAt, judged the loop overdue, and fetched everything again.
+      recordBillerRun();
       changed();
     }
   };

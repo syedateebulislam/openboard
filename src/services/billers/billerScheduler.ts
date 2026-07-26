@@ -30,6 +30,18 @@ export interface BillerSchedulerDeps {
   recordRun?: (isoTime: string) => void;
 }
 
+/**
+ * Persist a completed run so the schedule re-anchors on it.
+ *
+ * Manual fetches count. "Fetch now" and `openboard agent billers sync` do the
+ * same work a scheduled tick does, so leaving lastRunAt untouched made the loop
+ * think it was still overdue and fire a duplicate fetch moments later.
+ */
+export function recordBillerRun(isoTime: string = new Date().toISOString()): string {
+  new ConfigService().set('billers.lastRunAt', isoTime);
+  return isoTime;
+}
+
 /** True when a scheduled run could actually do something. */
 export function isBillerSyncConfigured(settings: BillerSettings): boolean {
   return Boolean(settings.scriptsDir && settings.email && settings.appPassword)
@@ -59,55 +71,57 @@ export function startBillerScheduler(
   }
 
   const fetcher = deps.fetcher ?? new BillerFetcherService({ settings });
-  const recordRun = deps.recordRun
-    ?? ((isoTime: string) => new ConfigService().set('billers.lastRunAt', isoTime));
+  const recordRun = deps.recordRun ?? ((isoTime: string) => { recordBillerRun(isoTime); });
 
   const baseIntervalMs = initial.syncIntervalMinutes * 60 * 1000;
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let startupTimer: ReturnType<typeof setTimeout> | undefined;
-  let currentIntervalMs = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let intervalMs = baseIntervalMs;
+  let nextRunAt: number | undefined;
   let consecutiveFailures = 0;
   let isRunning = false;
   let stopped = false;
   let lastRunAt = initial.lastRunAt;
 
-  // While the startup catch-up is pending it fires sooner than the interval,
-  // so report that instead — otherwise the status advertises a later time than
-  // the run that will actually happen next.
-  let pendingStartupAt: number | undefined;
-
   const emit = (state: BillerSchedulerStatus['state'], extra: Partial<BillerSchedulerStatus> = {}) => {
     if (stopped) return;
-    const nextAt = pendingStartupAt
-      ?? (timer ? Date.now() + currentIntervalMs : undefined);
     onStatus({
       state,
       lastRunAt,
       enabledCount: settings().enabledKeys.length,
-      nextRunAt: nextAt ? new Date(nextAt).toISOString() : undefined,
+      // Report the time the pending timer will actually fire. Deriving it from
+      // "now + interval" at emit time made the advertised next run slide
+      // forward on every status change and never match the real one.
+      nextRunAt: nextRunAt ? new Date(nextRunAt).toISOString() : undefined,
       ...extra,
     });
   };
 
-  const stopTimers = () => {
-    if (timer) clearInterval(timer);
-    if (startupTimer) clearTimeout(startupTimer);
-    timer = undefined;
-    startupTimer = undefined;
-  };
-
-  const armTimer = (intervalMs: number) => {
-    if (stopped || currentIntervalMs === intervalMs) return;
-    if (timer) clearInterval(timer);
-    currentIntervalMs = intervalMs;
-    timer = setInterval(tick, intervalMs);
+  /**
+   * One self-rescheduling timer, always re-anchored on the run that just
+   * finished. A fixed setInterval was pinned to process start instead: after a
+   * startup catch-up the next tick landed a partial interval later (a 60-minute
+   * interval could fire 50 minutes after the previous run), and because the
+   * scheduler is restarted on every settings change, that interval was also
+   * reset to zero each time — so on a long interval the periodic tick could
+   * keep being pushed out and never fire at all.
+   */
+  const scheduleNext = (delayMs: number) => {
+    if (stopped) return;
+    if (timer) clearTimeout(timer);
+    const delay = Math.max(0, delayMs);
+    nextRunAt = Date.now() + delay;
+    timer = setTimeout(() => { void tick(); }, delay);
     // Never keep the process alive just for the invoice loop.
     timer.unref?.();
   };
 
+  /** Slow the loop down only once failures look persistent, not on a blip. */
+  const intervalAfterFailure = () => (
+    consecutiveFailures >= BACKOFF_AFTER_FAILURES ? baseIntervalMs * BACKOFF_MULTIPLIER : baseIntervalMs
+  );
+
   const tick = async () => {
     if (isRunning || stopped) return;
-    pendingStartupAt = undefined;
     isRunning = true;
     emit('running');
     try {
@@ -121,15 +135,15 @@ export function startBillerScheduler(
 
       if (failed.length === 0) {
         consecutiveFailures = 0;
-        armTimer(baseIntervalMs);
+        intervalMs = baseIntervalMs;
+        scheduleNext(intervalMs);
         emit('idle', { changedKeys });
         return;
       }
 
       consecutiveFailures += 1;
-      if (consecutiveFailures >= BACKOFF_AFTER_FAILURES) {
-        armTimer(baseIntervalMs * BACKOFF_MULTIPLIER);
-      }
+      intervalMs = intervalAfterFailure();
+      scheduleNext(intervalMs);
       emit('error', {
         changedKeys,
         error: failed.map((result) => `${result.displayName}: ${result.error}`).join(' · '),
@@ -137,31 +151,22 @@ export function startBillerScheduler(
     } catch (error: any) {
       if (stopped) return;
       consecutiveFailures += 1;
-      if (consecutiveFailures >= BACKOFF_AFTER_FAILURES) {
-        armTimer(baseIntervalMs * BACKOFF_MULTIPLIER);
-      }
+      intervalMs = intervalAfterFailure();
+      scheduleNext(intervalMs);
       emit('error', { error: error?.message ?? String(error) });
     } finally {
       isRunning = false;
     }
   };
 
-  armTimer(baseIntervalMs);
-
   // Only run at startup if a full interval already elapsed; otherwise wait out
   // the remainder so reopening the TUI does not re-fetch everything.
-  const dueInMs = msUntilDue(initial);
-  if (dueInMs === 0) {
-    void tick();
-  } else {
-    pendingStartupAt = Date.now() + dueInMs;
-    emit('idle');
-    startupTimer = setTimeout(() => { void tick(); }, dueInMs);
-    startupTimer.unref?.();
-  }
+  scheduleNext(msUntilDue(initial));
+  emit('idle');
 
   return () => {
     stopped = true;
-    stopTimers();
+    if (timer) clearTimeout(timer);
+    timer = undefined;
   };
 }

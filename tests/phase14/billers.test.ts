@@ -653,6 +653,102 @@ describe('Biller invoice fetchers', () => {
       stop();
     });
 
+    // ── interval anchoring ───────────────────────────────────────────────────
+    // The loop used a fixed setInterval pinned to process start. After a
+    // startup catch-up the next tick landed a partial interval later, and
+    // because the scheduler is restarted on every biller settings change, that
+    // interval was reset to zero each time. Runs must be spaced from the run
+    // that actually happened, not from when the process booted.
+    describe('interval anchoring', () => {
+      const MIN = 60 * 1000;
+
+      beforeEach(() => vi.useFakeTimers());
+      afterEach(() => vi.useRealTimers());
+
+      const runSchedule = async (settings: BillerSettings, minutes: number) => {
+        const firedAt: number[] = [];
+        const start = Date.now();
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => settings,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              firedAt.push(Math.round((Date.now() - start) / MIN));
+              return [];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+        });
+        for (let i = 0; i < minutes; i++) await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+        return firedAt;
+      };
+
+      it('spaces every run a full interval apart after a startup catch-up', async () => {
+        // 50 min since the last run on a 60 min interval -> catch-up at +10,
+        // then a full 60 between each subsequent run.
+        const lastRunAt = new Date(Date.now() - 50 * MIN).toISOString();
+        const firedAt = await runSchedule({ ...ready, lastRunAt }, 180);
+        expect(firedAt).toEqual([10, 70, 130]);
+      });
+
+      it('spaces every run a full interval apart when overdue at startup', async () => {
+        const firedAt = await runSchedule(ready, 150);
+        expect(firedAt).toEqual([0, 60, 120]);
+      });
+
+      it('does not fire early when the interval is short', async () => {
+        const firedAt = await runSchedule({ ...ready, syncIntervalMinutes: 5 }, 20);
+        expect(firedAt).toEqual([0, 5, 10, 15, 20]);
+      });
+
+      it('advertises the time the pending timer really fires', async () => {
+        // nextRunAt used to be recomputed as "now + interval" on every emit, so
+        // it slid forward and never matched the run that was actually queued.
+        const seen: (string | undefined)[] = [];
+        const lastRunAt = new Date(Date.now() - 50 * MIN).toISOString();
+        const stop = startBillerScheduler((status) => seen.push(status.nextRunAt), {
+          settings: () => ({ ...ready, lastRunAt }),
+          fetcher: { syncEnabled: vi.fn(async () => []) } as any,
+          recordRun: vi.fn(),
+        });
+
+        const advertised = Date.parse(seen[seen.length - 1]!);
+        await vi.advanceTimersByTimeAsync(10 * MIN);
+        // The run fired when the status said it would.
+        expect(Math.abs(advertised - Date.now())).toBeLessThan(MIN);
+        stop();
+      });
+
+      it('backs off after repeated failures and recovers on success', async () => {
+        const results = [
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: true, changed: false }],
+        ];
+        const firedAt: number[] = [];
+        const start = Date.now();
+        let call = 0;
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              firedAt.push(Math.round((Date.now() - start) / MIN));
+              return results[Math.min(call++, results.length - 1)];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+        });
+
+        for (let i = 0; i < 700; i++) await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+        // Two failures keep the normal 60; the third trips the backoff and
+        // pushes the next run out by 240 (120 -> 360); the success there drops
+        // the gap straight back to 60.
+        expect(firedAt.slice(0, 6)).toEqual([0, 60, 120, 360, 420, 480]);
+      });
+    });
+
     it('survives a fetcher that throws instead of returning results', async () => {
       const onStatus = vi.fn();
       const stop = startBillerScheduler(onStatus, {
