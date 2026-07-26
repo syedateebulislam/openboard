@@ -8,9 +8,7 @@ import { BOARD_PRESETS, createBoardConfig, type BoardPreset } from '../config/bo
 import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.js';
 import { ConfigService } from '../services/config/ConfigService.js';
-import { MailCacheService } from '../services/mail/MailCacheService.js';
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
-import { existsSync } from 'node:fs';
 import { UI_COLORS } from '../theme.js';
 
 // ---------------------------------------------------------------------------
@@ -43,11 +41,7 @@ interface SelectItem {
 function normalizeFilePath(input: string): string {
   // Strip a pasted markdown bullet prefix, then let the shared normalizer
   // handle whitespace/quote stripping (e.g. Windows "Copy as path").
-  const cleaned = normalizeUserPath(input.trim().replace(/^[-*]\s+/, ''));
-  // "gmail" is a shortcut for the synced Gmail cache, which is a plain JSON
-  // data file — everything downstream treats it like any other source.
-  if (cleaned.toLowerCase() === 'gmail') return MailCacheService.getCachePath();
-  return cleaned;
+  return normalizeUserPath(input.trim().replace(/^[-*]\s+/, ''));
 }
 
 function presetItems(): SelectItem[] {
@@ -348,13 +342,6 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             Supports .csv, .xlsx, and .json files · ESC to go back
           </Text>
         </Box>
-        {existsSync(MailCacheService.getCachePath()) && (
-          <Box>
-            <Text color={UI_COLORS.subtitle}>
-              Tip: type "gmail" to use your synced Gmail inbox as the data source
-            </Text>
-          </Box>
-        )}
       </Box>
     );
   }

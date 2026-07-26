@@ -41,9 +41,8 @@ import { UI_COLORS } from '../theme.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
-import { GmailAuthService } from '../services/mail/GmailAuthService.js';
-import { MailCacheService } from '../services/mail/MailCacheService.js';
-import { MailSyncService } from '../services/mail/MailSyncService.js';
+import { TypedConfigRepository } from '../services/config/TypedConfigRepository.js';
+import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
 
 const projectManager = new ProjectManager();
 const projectCommands = new ProjectCommandHandlers(projectManager);
@@ -1207,81 +1206,82 @@ For the current board "${board.title}":
         return;
       }
 
-      // ── /mail — Gmail sync status / manual sync / link inbox as data ───────
-      if (cmd.type === 'mail') {
+      // ── /billers ───────────────────────────────────────────────────────────
+      if (cmd.type === 'billers') {
         const sub = cmd.args[0]?.toLowerCase();
-        const auth = new GmailAuthService();
-        const cache = new MailCacheService();
+        const settings = new TypedConfigRepository().getBillerSettings();
+        const fetcher = new BillerFetcherService();
+
+        if (!settings.scriptsDir) {
+          addMsg(newMsg('system', 'Invoice fetchers are not set up. Open Settings › Invoice fetchers (/config) to point OpenBoard at your fetcher scripts.'));
+          return;
+        }
+
+        const discovered = fetcher.list();
 
         if (sub === undefined) {
-          const authStatus = auth.status();
-          if (!authStatus.connected && !authStatus.needsReauth) {
-            addMsg(newMsg('system', 'Gmail is not connected. Open Settings › Gmail integration (/config) to set it up.'));
-            return;
-          }
-          const state = cache.readSyncState();
           const lines = [
-            `Gmail: ${authStatus.needsReauth ? 're-auth needed — reconnect in Settings › Gmail integration' : `connected as ${authStatus.email ?? 'unknown'}`}`,
-            `Cached messages: ${state.totalCached ?? cache.readMessages().length}`,
-            `Last sync: ${state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : 'never'}${state.lastSyncCount !== undefined ? ` (${state.lastSyncCount} fetched)` : ''}`,
-            `Cache file: ${cache.cachePath}`,
+            `Invoice fetchers: ${discovered.length} found in ${settings.scriptsDir}`,
+            `Gmail account: ${settings.email ?? 'not set'}${settings.appPassword ? '' : ' (App Password missing)'}`,
+            `Interval: every ${settings.syncIntervalMinutes} min · Last run: ${settings.lastRunAt ? new Date(settings.lastRunAt).toLocaleString() : 'never'}`,
+            '',
+            ...discovered.map((biller) => `  ${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.key.padEnd(18)} ${biller.displayName}`),
+            '',
+            'Usage: /billers sync runs the enabled ones · /billers enable|disable <key> toggles one',
           ];
-          if (state.lastError) lines.push(`Last error: ${state.lastError}`);
-          lines.push('', 'Usage: /mail sync fetches now · /mail use links the inbox as this board\'s data source');
           addMsg(newMsg('system', lines.join('\n')));
           return;
         }
 
+        if (sub === 'enable' || sub === 'disable') {
+          const key = cmd.args[1];
+          if (!key) {
+            addMsg(newMsg('error', `Which biller? Usage: /billers ${sub} <key> — run /billers to list the keys.`));
+            return;
+          }
+          if (!discovered.some((biller) => biller.key === key)) {
+            addMsg(newMsg('error', `No fetcher named "${key}". Run /billers to see the available keys.`));
+            return;
+          }
+          const enabled = new Set(settings.enabledKeys);
+          if (sub === 'enable') enabled.add(key);
+          else enabled.delete(key);
+          new ConfigService().set('billers.enabledKeys', [...enabled]);
+          addMsg(newMsg('system', `${sub === 'enable' ? 'Enabled' : 'Disabled'} ${key}. Takes effect on the next scheduled run or /billers sync.`));
+          return;
+        }
+
         if (sub === 'sync') {
-          if (!auth.isConfigured()) {
-            addMsg(newMsg('error', 'Gmail is not connected. Open Settings › Gmail integration (/config) first.'));
+          if (!settings.email || !settings.appPassword) {
+            addMsg(newMsg('error', 'Gmail address and App Password are required. Open Settings › Invoice fetchers (/config).'));
             return;
           }
+          const controller = new AbortController();
+          activeAbortRef.current = controller;
           setIsLoading(true);
-          const logId = startLogMsg('Syncing Gmail…');
+          const logId = startLogMsg('Running enabled invoice fetchers…');
           const onProgress = createProgressCallback(logId);
           try {
-            const result = await new MailSyncService({ auth }).sync();
-            onProgress(result.ok
-              ? `Fetched ${result.fetched} message(s) — ${result.totalCached} cached at ${cache.cachePath}`
-              : `Sync failed: ${result.error}`);
-          } finally {
-            finishLog(logId);
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        if (sub === 'use') {
-          if (!existsSync(cache.cachePath)) {
-            addMsg(newMsg('error', 'No Gmail cache yet. Connect Gmail in Settings and run /mail sync first.'));
-            return;
-          }
-          setIsLoading(true);
-          const logId = startLogMsg('Linking Gmail inbox as this dashboard\'s data source…');
-          const onProgress = createProgressCallback(logId);
-          try {
-            const parsed = await DataParserService.parse(cache.cachePath);
-            const analysis = DataAnalyzer.analyze(parsed);
-            const summary = DataAnalyzer.generateSummary(analysis);
-            // board is shared with App state; updating in place keeps later
-            // commands (/data, /update) reading the new source this session.
-            board.dataFiles = [cache.cachePath];
-            board.dataSummary = summary;
-            new BoardRegistryService().upsertBoard(board);
-            onProgress(`Linked ${cache.cachePath}`);
-            onProgress(`Rows: ${analysis.rowCount} · Columns: ${analysis.columnCount}`);
-            onProgress('The background sync keeps this file fresh — run /update to regenerate charts from new mail.');
+            const results = await fetcher.syncEnabled({ onProgress, signal: controller.signal });
+            if (results.length === 0) {
+              onProgress('No billers are enabled — use /billers enable <key> first.');
+            }
+            for (const result of results) {
+              onProgress(result.ok
+                ? `${result.displayName}: ${result.changed ? 'new invoices' + (result.dashboardUpdated ? ' — dashboard refreshed' : '') : 'no new invoices'}`
+                : `${result.displayName}: ${result.error}`);
+            }
           } catch (error: any) {
-            onProgress(`Could not link Gmail cache: ${error.message}`);
+            onProgress(error?.name === 'AbortError' ? '⏹ Stopped by user.' : `Fetch failed: ${error.message}`);
           } finally {
+            if (activeAbortRef.current === controller) activeAbortRef.current = null;
             finishLog(logId);
             setIsLoading(false);
           }
           return;
         }
 
-        addMsg(newMsg('error', `Unknown /mail option "${cmd.args[0]}". Use /mail, /mail sync, or /mail use.`));
+        addMsg(newMsg('error', `Unknown /billers option "${cmd.args[0]}". Use /billers, /billers sync, or /billers enable|disable <key>.`));
         return;
       }
 

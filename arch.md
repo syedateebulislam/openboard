@@ -1,6 +1,6 @@
 # OpenBoard Architecture
 
-> Version: 1.6.0  
+> Version: 1.7.0  
 > Current branch: main  
 > Scope: OpenBoard TUI, non-interactive CLI, shared generated dashboard app
 
@@ -84,7 +84,7 @@ src/
     BoardCreationScreen.tsx
     ManageBoardsScreen.tsx
     ChatScreen.tsx
-    GmailSettingsScreen.tsx
+    BillerSettingsScreen.tsx
   components/
     ChatMessage.tsx
     LoadingRemark.tsx
@@ -119,12 +119,9 @@ src/
     llm/heartbeat.ts                     liveness lines during long LLM calls
     llm/localModelDiscovery.ts           live installed-model listing for Ollama/LM Studio
     llm/prompts/systemPrompt.ts           SYSTEM_PROMPT (high) + SYSTEM_PROMPT_LOW
-    mail/GmailAuthService.ts             OAuth desktop-app client + token storage
-    mail/GmailClient.ts                  Gmail API read-only fetch
-    mail/MailSyncService.ts              orchestrates fetch -> normalize -> cache
-    mail/MailNormalizer.ts               raw message -> flat row shape
-    mail/MailCacheService.ts             ~/.openboard/mail/messages.json cache
-    mail/mailScheduler.ts                in-process interval sync while the TUI is open
+    billers/BillerDiscoveryService.ts    scan a folder for fetch_<biller>.py, read KEY/DISPLAY_NAME
+    billers/BillerFetcherService.ts      credentials file, safe python spawn, CSV hash gate, dashboard sync
+    billers/billerScheduler.ts           in-process interval fetch, due-based (persisted lastRunAt)
     project/ProjectManager.ts
     project/BoardRegistryService.ts
     project/PromptHistoryService.ts
@@ -162,12 +159,13 @@ openboard update --dashboard <selector>
 openboard update --all
 openboard update --all --prompt "..."           # modify every dashboard with one prompt
 openboard rollback --dashboard <selector>
-openboard agent setup <llm|github|vercel|dashboard|gmail|status|all> [flags]   # headless configuration
+openboard agent setup <llm|github|vercel|dashboard|billers|status|all> [flags]   # headless configuration
 openboard agent create --data <file> --name <title> [--type custom] [--quality high|low] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent update --all --prompt "..." [--json]    # modify every dashboard
 openboard agent remove --all [--json]                   # remove every dashboard (empty the app)
-openboard agent mail <sync|status> [--json]             # headless Gmail sync
+openboard agent setup billers --scripts-dir <dir> --biller-email <addr> --biller-app-password <pw> [--biller-key <key>]...
+openboard agent billers <sync|status> [--biller <key>] [--json]   # headless invoice fetch
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
 openboard --version
 openboard --help
@@ -194,7 +192,7 @@ settings-llm
 settings-github
 settings-vercel
 settings-dashboard-auth
-settings-gmail
+settings-billers
 deploy
 ```
 
@@ -259,7 +257,7 @@ against the running operation's phase list, not the full create pipeline.
 | `/build` | Build generated app |
 | `/update` | Regenerate using latest data and saved prompt history, then build/push/deploy |
 | `/data` | Parse and summarize linked data source |
-| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links the synced inbox as this board's data |
+| `/billers` | Invoice fetcher status; `/billers sync` runs the enabled ones; `/billers enable\|disable <key>` toggles one |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
 | `/doctor` | Show readiness checks |
@@ -436,23 +434,60 @@ flowchart TD
 
 If GitHub push succeeds but direct Vercel CLI auth fails, OpenBoard reports that Vercel Git integration may still deploy the pushed commit.
 
-## Gmail (Mail) Integration
+## Invoice Fetchers (per-biller)
 
-Gmail can act as a live, refreshable data source instead of a static CSV/JSON file:
+A second, **independent** mail-derived data path for users who keep their own
+per-biller invoice scripts. OpenBoard never parses invoice mail itself: it drives
+a folder of external `fetch_<biller>.py` fetchers that read Gmail over IMAP and
+append rows to a per-biller CSV.
 
 ```mermaid
-flowchart LR
-    A["GmailSettingsScreen: OAuth Desktop-app client + consent (localhost loopback, gmail.readonly)"] --> B["GmailAuthService: encrypted client secret + refresh token"]
-    B --> C["mailScheduler: interval sync while the TUI is open"]
-    C --> D["MailSyncService: GmailClient fetch -> MailNormalizer -> flat rows"]
-    D --> E["MailCacheService: ~/.openboard/mail/messages.json"]
-    E --> F["DataParserService reads the cache like any .json data file"]
+flowchart TD
+    A["BillerDiscoveryService: scan scriptsDir for fetch_*.py, read each script's KEY / DISPLAY_NAME"] --> B["BillerFetcherService: write secrets/gmail_app_credentials.json"]
+    B --> C["spawn python <script> --since-days N (allowlisted interpreter, numeric args only)"]
+    C --> C2{"output shows a fatal login/import failure?"}
+    C2 -- yes --> C3["fail with a translated message (exit code alone is not trusted)"]
+    C2 -- no --> D{"CSV sha256 changed?"}
+    D -- no --> E["stop — no LLM call"]
+    D -- yes --> F{"findBoard(key) exists?"}
+    F -- no --> G["createFromDataSource: preset from BILLER_PRESET_MAP"]
+    F -- yes --> H["updateBySelector(key): refresh from linked data"]
 ```
 
-- `agent setup gmail` stores the OAuth client headlessly; the browser consent step is interactive-only (`GmailSettingsScreen`, once).
-- `agent mail sync|status` drives `MailSyncService`/`MailCacheService` without the TUI; `mail sync` exits 1 with `needsReauth: true` if Google revoked the refresh token.
-- Typing `gmail` as a data path, or `/mail use` in chat, links `~/.openboard/mail/messages.json` as the board's `dataFiles[0]` — after that it flows through the normal parse/analyze/generate pipeline like any other file.
-- `WelcomeScreen`'s `mailStatusLine()` and `/mail` render the same `MailSchedulerStatus` shape (`not-configured | syncing | connected | needs-reauth | error`).
+- **Discovery, never a hardcoded list** (`services/billers/BillerDiscoveryService.ts`):
+  `scriptsDir` is user-configured and machine-specific, and users add fetchers
+  over time. A file qualifies only if it is named `fetch_*.py`, is not one of
+  `NON_BILLER_SCRIPTS` (`fetch_pending_invoices.py`, `run_backfill_invoices_new.py`),
+  and declares both `KEY` and `DISPLAY_NAME` — the two excluded scripts happen to
+  declare neither, so that check excludes them independently of the filename list.
+- **Path convention mirrored, scripts unmodified**: each fetcher computes
+  `REPO_ROOT = Path(__file__).resolve().parents[2]`, so `repoRootFor()` walks two
+  directories up from `scriptsDir` to derive the credentials file, each
+  `data/invoices/<key>.csv`, and each `data/invoices/raw/<key>/`.
+- **Change-gate before any LLM work** (`BillerFetcherService`): the biller's CSV is
+  SHA-256 hashed before and after its run; an unchanged hash ends that biller's
+  run. This mirrors the external `run_biller_cron.py` this feature replaces, and
+  keeps a scheduled tick free when no invoices arrived.
+- **Dashboard auto-linking**: on changed output, `DashboardUpdateService.findBoard(key)`
+  decides between `createFromDataSource` (first data, typed via
+  `BILLER_PRESET_MAP` in `types/billers.ts`) and `updateBySelector` (refresh) —
+  both reuse the normal build → push → deploy pipeline and its app-mode gating.
+- **Due-based scheduling** (`services/billers/billerScheduler.ts`): same lifecycle as
+  `mailScheduler` (unref'd interval, failure backoff, disposer) but it does **not**
+  tick on every launch. A tick spawns Python and can trigger LLM builds, so
+  `billers.lastRunAt` is persisted and `msUntilDue()` only fires at startup when a
+  full interval has elapsed — otherwise the 6-hour default would rarely be reached
+  inside one TUI session.
+- **Credential model**: an IMAP **App Password**, which is what the fetchers use.
+  `BillerSettingsScreen` asks for the folder, then the email, then the password,
+  in that order — you know which account you are authorizing before typing a
+  secret for it. The materialized JSON for the scripts is
+  necessarily plaintext (they cannot decrypt); OpenBoard's own copy uses
+  `setEncrypted`. `0600` is requested on write but is POSIX-only — Node ignores
+  mode bits on Windows, so there the file is only as protected as its folder.
+- **Spawn safety**: allowlist `python`/`python3`/`py` (deliberately separate from
+  `BuildService`'s npm/npx list), `isInsideScriptsDir()` before executing, and
+  numeric/enum arguments only so no user free-text reaches argv.
 
 ## Config And Security
 
@@ -477,6 +512,7 @@ Environment variables:
 | `OPENBOARD_CODEX_HOME` | Override OpenBoard's isolated codex auth home (default `~/.openboard/codex-home`; ambient `CODEX_HOME` is ignored) |
 | `OPENBOARD_TEST_MODE` | Disable file logging in tests |
 | `OPENBOARD_DEBUG` | Enable debug logging |
+| `OPENBOARD_BILLER_APP_PASSWORD` | Gmail App Password for `agent setup billers` (preferred over the flag) |
 | `DASHBOARD_USERNAME` | Generated app login username |
 | `DASHBOARD_PASSWORD_HASH` | bcrypt password hash |
 | `JWT_SECRET` | Generated app JWT secret |

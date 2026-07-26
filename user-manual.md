@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║        [_-_] O p e n B o a r d        ║
 ║     Analytics Dashboard Generator     ║
-║                v1.6.0                 ║
+║                v1.7.0                 ║
 ╚═══════════════════════════════════════╝
 ```
 
@@ -111,7 +111,7 @@ to Local only requires either the Ollama or LM Studio provider.
 4. Choose UI complexity: **High quality** (default, full-featured) or **Low quality**
    (lightweight — recommended for local/small-context models). Low is
    pre-highlighted when your configured provider is Ollama or LM Studio.
-5. Enter a CSV/XLSX/JSON file path (or type `gmail` to use your synced Gmail inbox, once Gmail is connected in Settings). Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
+5. Enter a CSV/XLSX/JSON file path. Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
 6. Enter the dashboard name.
 7. Confirm after data analysis.
 8. OpenBoard enters the internal LLM chat.
@@ -182,9 +182,9 @@ Commands must start with `/`.
 | `/build` | Build generated app |
 | `/update` | Regenerate from latest linked data using saved prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
-| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links your inbox as this board's data |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
+| `/billers` | Invoice fetcher status; `/billers sync` runs them; `/billers enable\|disable <key>` toggles one |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/model` | Show or switch the LLM model and effort |
 | `/stop` | Cancel the current in-flight operation (generation, build, push, or deploy) |
@@ -260,30 +260,97 @@ Settings supports:
 - Update LLM provider
 - Re-enter GitHub token
 - Re-enter Vercel token
-- Gmail integration (connect account, sync options, disconnect)
+- Invoice fetchers (per-biller invoice scripts, schedule, enable/disable)
 - Reset dashboard login
 - Run full setup wizard
 
 Use Settings when tokens cannot be decrypted or external auth fails.
 
-### Gmail Integration
+### Invoice Fetchers
 
-Connect your Gmail inbox as a live data source:
+Turn invoice emails into per-biller spending dashboards. OpenBoard ships
+ready-made fetchers for **Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy
+Instamart, Uber, Urban Company and Zomato**, and will drive any
+`fetch_<biller>.py` you write yourself. Each one reads Gmail over IMAP and
+appends rows to `data/invoices/<biller>.csv`; OpenBoard enables them, runs them
+on a schedule, and turns each biller's invoices into its own dashboard.
 
-1. Create a Google Cloud OAuth client of type **Desktop app** and copy its client ID + secret.
-2. Settings → Gmail integration → enter the OAuth client, then **Connect Google account**. Your browser opens Google's consent page (read-only scope); approve and return to the terminal.
-3. While the TUI is open, OpenBoard syncs new mail in the background (default every 5 minutes; configurable per query and interval). Closing the terminal stops the sync — it restarts automatically on the next launch. The Welcome screen shows a `✉ Gmail: … cached · last sync …` line.
-4. Use the inbox as data: type `gmail` as the file path when creating a dashboard, or `/mail use` in chat. `/update` refreshes charts from the newest mail.
+The quickest start is **Install the fetchers bundled with OpenBoard**, offered
+as the first option when nothing is set up yet. It copies them into the folder
+below and configures the path in one step. Running it again only adds fetchers
+that are missing — anything you have edited is left untouched.
 
-If the status shows **re-auth needed** (Google expired or revoked the token), open Settings → Gmail integration and reconnect. Disconnecting removes the stored tokens; the local cache file stays until you delete `~/.openboard/mail/`.
+**Where to keep everything.** OpenBoard suggests — and pre-fills — one canonical
+layout, so the scripts, your invoice data, and the credentials they need all sit
+together under OpenBoard's own folder:
+
+```text
+~/.openboard/billers/
+  scripts/invoice_fetchers/     your fetch_<biller>.py files  ← this is the folder you configure
+  secrets/                      gmail_app_credentials.json (OpenBoard writes it)
+  data/invoices/                <biller>.csv — one per biller, appended over time
+    raw/<biller>/state.json     which emails were already imported
+```
+
+The depth matters: the scripts locate their own data two folders above
+themselves, so this layout works with them unmodified. You can point elsewhere
+if you already keep them somewhere, but that folder must have the same
+`scripts/<anything>/` shape.
+
+Settings → Invoice fetchers, in this order:
+
+0. **Install the fetchers bundled with OpenBoard** — offered first when nothing
+   is configured. Skip this only if you keep your own scripts elsewhere.
+1. **Invoice scripts folder** — the folder holding your `fetch_*.py` files (paste
+   with or without quotes). OpenBoard reads each script's own `KEY` and
+   `DISPLAY_NAME` constants to build the biller list, so nothing is hardcoded and
+   `fetch_pending_invoices.py` / `run_backfill_invoices_new.py` are ignored (they
+   are not per-biller fetchers).
+2. **Gmail address** — the account the fetchers log into. Asked before any
+   credential, so you always know which account you are about to authorize.
+3. **Gmail App Password** — a 16-character App Password from
+   myaccount.google.com/apppasswords, *not* your normal Gmail password. Saving it
+   writes the `secrets/gmail_app_credentials.json` file your scripts already read.
+4. **The biller list** appears — one row per discovered biller with a `[x]`/`[ ]`
+   toggle. Select a row to switch that biller on or off. Come back and change it
+   any time.
+5. **Fetch interval** — one shared schedule for every enabled biller (default 360
+   min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
+   ones immediately. **Rescan billers folder** picks up newly added scripts.
+
+Fetching runs in-process, only while OpenBoard is open — no background daemon. The last run time is remembered between
+sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
+starts shortly after launch.
+
+After each biller runs, OpenBoard compares its CSV before and after. Nothing new
+means it stops there, with no LLM call. New invoices mean it creates that
+biller's dashboard the first time (using the closest category preset — Zomato and
+Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping) and
+refreshes it on later runs.
+
+Security worth knowing: the scripts cannot decrypt anything, so their credentials
+file is necessarily plain text on your machine (OpenBoard keeps its own copy of
+the password encrypted). It is written with owner-only permissions on
+macOS/Linux; on Windows those bits are ignored, so the file is only as protected
+as the folder holding it. An App Password also
+grants full mailbox read access — revoke it in your Google account to cut access
+off.
 
 ## Files OpenBoard Uses
 
 ```text
 ~/.openboard/config.json
 ~/.openboard/prompt-history/<dashboard-id>.json
-~/.openboard/mail/messages.json      (synced Gmail cache, when connected)
 projects/openboard-app-workspace-<id>/
+```
+
+When invoice fetchers are configured, these live next to your scripts folder
+(two levels above it, where the scripts themselves expect them):
+
+```text
+<repo>/secrets/gmail_app_credentials.json   (written by OpenBoard, plain text)
+<repo>/data/invoices/<biller>.csv           (written by each fetcher)
+<repo>/data/invoices/raw/<biller>/          (raw mail + per-biller dedup state)
 ```
 
 Do not manually edit encrypted config values. Re-enter tokens through Settings.

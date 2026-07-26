@@ -55,17 +55,17 @@ const VercelConfigSchema = z.object({
   teamId: z.string().optional(),
 }).optional();
 
-// Gmail OAuth credentials + sync tuning. clientSecret/refreshToken are stored
-// encrypted (enc:...); the access token is never persisted.
-const GmailConfigSchema = z.object({
-  clientId: z.string().optional(),
-  clientSecret: z.string().optional(),
-  refreshToken: z.string().optional(),
+// External per-biller invoice fetchers: where the scripts live, the Gmail
+// account they log into over IMAP, and which billers are switched on.
+// appPassword is stored encrypted (enc:...).
+const BillersConfigSchema = z.object({
+  scriptsDir: z.string().optional(),
   email: z.string().optional(),
-  query: z.string().optional(),
+  appPassword: z.string().optional(),
+  enabledKeys: z.array(z.string()).optional(),
   syncIntervalMinutes: z.number().int().min(1).optional(),
-  maxResults: z.number().int().min(1).max(500).optional(),
-  needsReauth: z.boolean().optional(),
+  sinceDays: z.number().int().min(1).optional(),
+  lastRunAt: z.string().optional(),
 }).optional();
 
 const CredentialsSchema = z.object({
@@ -88,7 +88,7 @@ const AppConfigSchema = z.object({
   llm: LLMConfigSchema,
   github: GitHubConfigSchema,
   vercel: VercelConfigSchema,
-  gmail: GmailConfigSchema,
+  billers: BillersConfigSchema,
   credentials: CredentialsSchema,
   boards: z.array(BoardSchema).optional(),
 }).optional();

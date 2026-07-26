@@ -6,33 +6,14 @@ import { UI_COLORS } from '../theme.js';
 import { bannerVersionLine } from '../version.js';
 import { describeAppMode, getAppMode, isValidAppMode } from '../config/appModes.js';
 import { ConfigService } from '../services/config/ConfigService.js';
-import type { MailSchedulerStatus } from '../types/mail.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
-  mailStatus?: MailSchedulerStatus | null;
 }
 
 type MenuValue = Screen | 'exit';
 
-const clockTime = (iso: string | undefined) =>
-  iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
-
-/** One-line Gmail sync summary; null when Gmail is not connected. */
-export function mailStatusLine(status: MailSchedulerStatus | null | undefined): string | null {
-  if (!status || status.state === 'not-configured') return null;
-  if (status.state === 'needs-reauth') return '✉ Gmail: re-auth needed — Settings › Gmail integration';
-  const parts = [`${status.totalCached ?? 0} cached`];
-  const last = clockTime(status.lastSyncAt);
-  if (status.state === 'syncing') parts.push('syncing…');
-  else if (last) parts.push(`last sync ${last}`);
-  const next = clockTime(status.nextSyncAt);
-  if (status.state !== 'syncing' && next) parts.push(`next ${next}`);
-  if (status.state === 'error' && status.error) parts.push('last sync failed');
-  return `✉ Gmail: ${parts.join(' · ')}`;
-}
-
-export function WelcomeScreen({ onNavigate, mailStatus }: Props) {
+export function WelcomeScreen({ onNavigate }: Props) {
   // Until setup runs, don't advertise the default mode as if it were chosen.
   let configured = false;
   let modeLine: string | undefined;
@@ -88,11 +69,6 @@ export function WelcomeScreen({ onNavigate, mailStatus }: Props) {
         </Box>
       )}
 
-      {mailStatusLine(mailStatus) && (
-        <Box>
-          <Text color={UI_COLORS.subtitle}>{mailStatusLine(mailStatus)}</Text>
-        </Box>
-      )}
 
       <Box marginTop={1} flexDirection="column">
         <SelectInput items={menuItems} onSelect={handleSelect} />

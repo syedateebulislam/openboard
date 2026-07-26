@@ -1,6 +1,6 @@
 {
   "name": "openboard-cli",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "AI-powered analytics dashboard generator TUI — https://openboard-site.vercel.app",
   "license": "MIT",
   "author": "Syed Ateebul Islam <syedateebulislam@gmail.com>",
@@ -35,6 +35,7 @@
     "dist",
     "templates",
     "prompts",
+    "scripts/invoice_fetchers",
     "README.md",
     "LICENSE",
     "Agent.md",
