@@ -16,7 +16,10 @@ interface Props {
   onGmailConfigured?: () => void;
 }
 
-type Step = 'menu' | 'client-id' | 'client-secret' | 'query' | 'interval';
+// 'guide' walks the user through getting the two values from Google before we
+// ask for them. Without it the first prompt is a blank field for a term the
+// user has never seen — the single worst moment in this whole flow.
+type Step = 'menu' | 'guide' | 'client-id' | 'client-secret' | 'query' | 'interval';
 
 export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
   const [step, setStep] = useState<Step>('menu');
@@ -48,7 +51,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
     config.set('gmail.clientId', clientId.trim());
     config.setEncrypted('gmail.clientSecret', secret.trim());
     setClientSecret('');
-    setStatus('OAuth client saved. Select "Connect Google account" to finish.');
+    setStatus('Keys saved. Now choose "Step 2 · Sign in with Google" to finish.');
     setStep('menu');
     refresh();
   };
@@ -57,7 +60,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
     setBusy(true);
     try {
       const { email } = await auth.connectInteractive((line) => setStatus(line));
-      setStatus(`Connected as ${email}. Background sync starts automatically.`);
+      setStatus(`Connected as ${email}. New mail is picked up automatically from now on.`);
       onGmailConfigured?.();
     } catch (error: any) {
       setStatus(`Connect failed: ${error.message}`);
@@ -73,8 +76,8 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
     try {
       const result = await new MailSyncService({ auth }).sync();
       setStatus(result.ok
-        ? `Synced ${result.fetched} message(s) — ${result.totalCached} cached.`
-        : `Sync failed: ${result.error}`);
+        ? `Got ${result.fetched} new message(s) — ${result.totalCached} saved on this machine.`
+        : `Could not check mail: ${result.error}`);
     } finally {
       setBusy(false);
       refresh();
@@ -85,7 +88,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
     setBusy(true);
     try {
       await auth.disconnect();
-      setStatus('Gmail disconnected. Cached messages remain on disk.');
+      setStatus('Signed out. Mail already saved on this machine stays until you delete it.');
       onGmailConfigured?.();
     } catch (error: any) {
       setStatus(`Disconnect failed: ${error.message}`);
@@ -102,7 +105,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
       return;
     }
     new ConfigService().set('gmail.syncIntervalMinutes', minutes);
-    setStatus(`Sync interval set to ${minutes} min. Takes effect next launch or reconnect.`);
+    setStatus(`Will check every ${minutes} min. Applies next time you start OpenBoard or sign in again.`);
     setIntervalInput('');
     setStep('menu');
     refresh();
@@ -113,23 +116,33 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
     const config = new ConfigService();
     if (trimmed) config.set('gmail.query', trimmed);
     else config.delete('gmail.query');
-    setStatus(trimmed ? `Sync query set to "${trimmed}".` : 'Sync query reset to default (in:inbox).');
+    setStatus(trimmed ? `Now including mail matching "${trimmed}".` : 'Back to the default (in:inbox).');
     setQueryInput('');
     setStep('menu');
     refresh();
   };
 
   const menuItems = [
-    { label: authStatus.connected || auth.hasCredentials() ? 'Re-enter OAuth client (ID + secret)' : 'Enter OAuth client (ID + secret)', value: 'credentials' },
+    {
+      label: auth.hasCredentials()
+        ? 'Step 1 · Replace your Google access keys'
+        : 'Step 1 · Get your Google access keys (one-time, ~3 min)',
+      value: 'credentials',
+    },
     ...(auth.hasCredentials()
-      ? [{ label: authStatus.connected ? 'Reconnect Google account' : 'Connect Google account', value: 'connect' }]
+      ? [{
+          label: authStatus.connected
+            ? 'Step 2 · Sign in again / switch account'
+            : 'Step 2 · Sign in with Google',
+          value: 'connect',
+        }]
       : []),
     ...(authStatus.connected
       ? [
-          { label: 'Sync now', value: 'sync' },
-          { label: `Sync query (current: ${settings.query})`, value: 'query' },
-          { label: `Sync interval (current: ${settings.syncIntervalMinutes} min)`, value: 'interval' },
-          { label: 'Disconnect', value: 'disconnect' },
+          { label: 'Check for new mail now', value: 'sync' },
+          { label: `Which mail to include (current: ${settings.query})`, value: 'query' },
+          { label: `Check every (current: ${settings.syncIntervalMinutes} min)`, value: 'interval' },
+          { label: 'Disconnect this account', value: 'disconnect' },
         ]
       : []),
     { label: '← Go Back', value: 'back' },
@@ -138,7 +151,7 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
   const handleMenuSelect = (item: { value: string }) => {
     if (busy) return;
     setStatus('');
-    if (item.value === 'credentials') setStep('client-id');
+    if (item.value === 'credentials') setStep('guide');
     else if (item.value === 'connect') void connect();
     else if (item.value === 'sync') void syncNow();
     else if (item.value === 'query') { setQueryInput(settings.query); setStep('query'); }
@@ -148,76 +161,124 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
   };
 
   const connectionLine = authStatus.needsReauth
-    ? 'Status: re-auth needed — reconnect your Google account'
+    ? 'Status: Google signed you out — run Step 2 again to reconnect'
     : authStatus.connected
       ? `Status: connected as ${authStatus.email ?? 'unknown'}`
       : auth.hasCredentials()
-        ? 'Status: OAuth client saved, account not connected yet'
-        : 'Status: not configured';
+        ? 'Status: keys saved — now do Step 2 to sign in'
+        : 'Status: not set up yet — start with Step 1';
 
   return (
     <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>✉ Gmail Integration</Text>
+      <Text bold color={UI_COLORS.logo}>✉ Connect Gmail</Text>
       <Text color={UI_COLORS.subtitle}>
-        Sync your inbox into a local cache and use it as dashboard data.
-        Needs a Google Cloud OAuth "Desktop app" client (scope: gmail.readonly).
-        Which account gets connected is chosen on Google's consent screen, not here.
+        Turn your inbox into dashboard data. OpenBoard only ever reads your mail —
+        it cannot send, delete, or change anything.
+      </Text>
+      <Text color={UI_COLORS.subtitle}>
+        Google will not let any program read your mail until you register it once.
+        That is Step 1; it takes about 3 minutes and never has to be repeated.
       </Text>
       <Box marginTop={1} flexDirection="column">
         <Text color={authStatus.needsReauth ? 'yellow' : UI_COLORS.subtitle}>{connectionLine}</Text>
         {syncState.lastSyncAt && (
           <Text color={UI_COLORS.subtitle}>
-            Last sync: {new Date(syncState.lastSyncAt).toLocaleString()} · {syncState.totalCached ?? 0} cached
+            Last checked: {new Date(syncState.lastSyncAt).toLocaleString()} · {syncState.totalCached ?? 0} messages saved
           </Text>
         )}
         {authStatus.connected && (
-          <Text color={UI_COLORS.subtitle}>Cache: {MailCacheService.getCachePath()}</Text>
+          <Text color={UI_COLORS.subtitle}>Saved to: {MailCacheService.getCachePath()}</Text>
         )}
       </Box>
 
+      {step === 'guide' && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold color={UI_COLORS.logo}>Getting your two access keys from Google</Text>
+          <Text color={UI_COLORS.subtitle}>Do this once in your browser, then come back here.</Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text>  1. Go to  console.cloud.google.com/apis/credentials</Text>
+            <Text>  2. Create a project if you have none (any name works)</Text>
+            <Text>  3. Switch on Gmail access for it:</Text>
+            <Text color={UI_COLORS.subtitle}>       console.cloud.google.com/apis/library/gmail.googleapis.com</Text>
+            <Text>       then press Enable</Text>
+            <Text>  4. Back on the Credentials page, press</Text>
+            <Text>       "Create credentials" → "OAuth client ID"</Text>
+            <Text>  5. For application type choose <Text bold>Desktop app</Text>, then Create</Text>
+            <Text>  6. Google shows you two values — keep that window open</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color={UI_COLORS.subtitle}>
+              Google labels them "Client ID" and "Client secret". You will paste them next.
+            </Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color={UI_COLORS.logo}>Press Enter when you have them › </Text>
+            <TextInput value="" onChange={() => {}} onSubmit={() => setStep('client-id')} />
+          </Box>
+        </Box>
+      )}
       {step === 'client-id' && (
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.logo}>Client ID › </Text>
-          <TextInput
-            value={clientId}
-            onChange={setClientId}
-            onSubmit={(value) => { if (value.trim()) setStep('client-secret'); }}
-            placeholder="xxxx.apps.googleusercontent.com"
-          />
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>
+            Paste the first value — the long one ending in .apps.googleusercontent.com
+          </Text>
+          <Box>
+            <Text color={UI_COLORS.logo}>Client ID › </Text>
+            <TextInput
+              value={clientId}
+              onChange={setClientId}
+              onSubmit={(value) => { if (value.trim()) setStep('client-secret'); }}
+              placeholder="xxxx.apps.googleusercontent.com"
+            />
+          </Box>
         </Box>
       )}
       {step === 'client-secret' && (
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.logo}>Client secret › </Text>
-          <TextInput
-            value={clientSecret}
-            onChange={setClientSecret}
-            onSubmit={(value) => { if (value.trim()) saveCredentials(value); }}
-            mask="*"
-            placeholder="GOCSPX-..."
-          />
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>
+            Now the second value — the shorter one starting with GOCSPX-
+          </Text>
+          <Box>
+            <Text color={UI_COLORS.logo}>Client secret › </Text>
+            <TextInput
+              value={clientSecret}
+              onChange={setClientSecret}
+              onSubmit={(value) => { if (value.trim()) saveCredentials(value); }}
+              mask="*"
+              placeholder="GOCSPX-..."
+            />
+          </Box>
         </Box>
       )}
       {step === 'query' && (
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.logo}>Gmail query › </Text>
-          <TextInput
-            value={queryInput}
-            onChange={setQueryInput}
-            onSubmit={saveQuery}
-            placeholder="in:inbox (empty resets to default)"
-          />
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>
+            Same search box syntax as Gmail itself — e.g. in:inbox, or
+            from:amazon.in, or newer_than:90d. Leave empty for your whole inbox.
+          </Text>
+          <Box>
+            <Text color={UI_COLORS.logo}>Include mail matching › </Text>
+            <TextInput
+              value={queryInput}
+              onChange={setQueryInput}
+              onSubmit={saveQuery}
+              placeholder="in:inbox (empty resets to default)"
+            />
+          </Box>
         </Box>
       )}
       {step === 'interval' && (
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.logo}>Interval (minutes) › </Text>
-          <TextInput
-            value={intervalInput}
-            onChange={setIntervalInput}
-            onSubmit={saveInterval}
-            placeholder="5"
-          />
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>How often to check for new mail, in minutes.</Text>
+          <Box>
+            <Text color={UI_COLORS.logo}>Check every (minutes) › </Text>
+            <TextInput
+              value={intervalInput}
+              onChange={setIntervalInput}
+              onSubmit={saveInterval}
+              placeholder="5"
+            />
+          </Box>
         </Box>
       )}
       {step === 'menu' && (
@@ -234,7 +295,11 @@ export function GmailSettingsScreen({ onNavigate, onGmailConfigured }: Props) {
 
       <Box marginTop={1} flexDirection="column">
         <Text color={UI_COLORS.subtitle}>
-          Privacy: mail is cached only on this machine; it leaves it only if you deploy a mail-backed dashboard in remote mode.
+          Your mail is saved only on this computer. It leaves it only if you deploy a
+          dashboard built from it while in All remote mode.
+        </Text>
+        <Text color={UI_COLORS.subtitle}>
+          In Step 2 you pick which Google account to connect, on Google's own sign-in page.
         </Text>
         <Text color={UI_COLORS.subtitle}>Press ESC to go back</Text>
       </Box>
