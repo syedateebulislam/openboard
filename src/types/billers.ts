@@ -12,7 +12,23 @@
  * used to read the inbox as a data source. Neither feature requires the other.
  */
 
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { BoardConfig } from './board.js';
+
+/**
+ * Canonical home for the fetcher scripts.
+ *
+ * Nesting them under OpenBoard's own state directory keeps everything the
+ * feature owns in one place, and the depth is deliberate: the scripts derive
+ * their paths from `parents[2]`, so this puts their credentials at
+ * <base>/billers/secrets/ and their CSVs at <base>/billers/data/invoices/
+ * without a single line of the scripts needing to change.
+ */
+export function defaultScriptsDir(): string {
+  const base = process.env.OPENBOARD_CONFIG_DIR ?? join(homedir(), '.openboard');
+  return join(base, 'billers', 'scripts', 'invoice_fetchers');
+}
 
 /** One discovered per-biller fetcher script. Derived from disk, never persisted. */
 export interface BillerScript {

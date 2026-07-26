@@ -119,6 +119,7 @@ The generated app header shows the OpenBoard website/GitHub/npm icon links on th
 
 If you have your own per-biller invoice scripts — one dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending rows to `data/invoices/<biller>.csv` — OpenBoard can drive them for you:
 
+- **One canonical home**, pre-filled for you: `~/.openboard/billers/scripts/invoice_fetchers/` for the scripts, with `billers/data/invoices/` and `billers/secrets/` alongside. The scripts find their own data two folders up, so this layout works with them unmodified.
 - **Point OpenBoard at the folder once**: Settings → Invoice fetchers. It scans for `fetch_*.py` files, reads each script's own `KEY`/`DISPLAY_NAME` constants, and lists every biller it finds. Nothing is hardcoded, so dropping in a new fetcher and choosing "Rescan billers folder" picks it up.
 - **Credentials, in a sensible order**: you're asked for the folder, then the **Gmail address**, then that account's **App Password** — you always know which account you're authorizing before typing a secret for it.
 - **Enable exactly the billers you want**: the list is a live toggle (`[x]`/`[ ]`) you can revisit and change any time. Only enabled billers ever run.

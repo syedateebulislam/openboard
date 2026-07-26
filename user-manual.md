@@ -273,6 +273,23 @@ dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending
 rows to `data/invoices/<biller>.csv`. OpenBoard can enable them, run them on a
 schedule, and turn each biller's invoices into its own dashboard.
 
+**Where to keep everything.** OpenBoard suggests — and pre-fills — one canonical
+layout, so the scripts, your invoice data, and the credentials they need all sit
+together under OpenBoard's own folder:
+
+```text
+~/.openboard/billers/
+  scripts/invoice_fetchers/     your fetch_<biller>.py files  ← this is the folder you configure
+  secrets/                      gmail_app_credentials.json (OpenBoard writes it)
+  data/invoices/                <biller>.csv — one per biller, appended over time
+    raw/<biller>/state.json     which emails were already imported
+```
+
+The depth matters: the scripts locate their own data two folders above
+themselves, so this layout works with them unmodified. You can point elsewhere
+if you already keep them somewhere, but that folder must have the same
+`scripts/<anything>/` shape.
+
 Settings → Invoice fetchers, in this order:
 
 1. **Invoice scripts folder** — the folder holding your `fetch_*.py` files (paste

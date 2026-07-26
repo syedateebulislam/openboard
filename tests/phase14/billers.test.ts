@@ -34,6 +34,7 @@ import { TypedConfigRepository } from '../../src/services/config/TypedConfigRepo
 import {
   BILLERS_DEFAULT_SINCE_DAYS,
   BILLERS_DEFAULT_SYNC_INTERVAL_MINUTES,
+  defaultScriptsDir,
   presetForBiller,
   type BillerSettings,
 } from '../../src/types/billers.js';
@@ -159,6 +160,16 @@ describe('Biller invoice fetchers', () => {
       expect(settings.syncIntervalMinutes).toBe(90);
       // Never stored in the clear.
       expect(String(config.getRaw('billers.appPassword'))).toMatch(/^enc:/);
+    });
+
+    it('defaults the scripts folder inside OpenBoard, at the depth the scripts expect', () => {
+      // The scripts resolve their paths from parents[2], so the default must sit
+      // exactly two levels below the folder that should hold secrets/ and data/.
+      const dir = defaultScriptsDir();
+      expect(dir).toBe(join(configDir, 'billers', 'scripts', 'invoice_fetchers'));
+      const repoRoot = repoRootFor(dir);
+      expect(repoRoot).toBe(join(configDir, 'billers'));
+      expect(credentialsPathFor(dir)).toBe(join(configDir, 'billers', 'secrets', 'gmail_app_credentials.json'));
     });
 
     it('maps billers to their board presets, falling back to custom', () => {

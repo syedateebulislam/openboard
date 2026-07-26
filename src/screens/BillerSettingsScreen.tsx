@@ -14,6 +14,7 @@ import {
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
+import { defaultScriptsDir } from '../types/billers.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
@@ -186,7 +187,8 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     if (busy) return;
     setStatus('');
     if (item.value.startsWith('toggle:')) { toggleBiller(item.value.slice(7)); return; }
-    if (item.value === 'dir') { setDirInput(settings.scriptsDir ?? ''); setStep('scripts-dir'); }
+    // Pre-fill the canonical location so the common case is just Enter.
+    if (item.value === 'dir') { setDirInput(settings.scriptsDir ?? defaultScriptsDir()); setStep('scripts-dir'); }
     else if (item.value === 'email') { setEmailInput(settings.email ?? ''); setStep('email'); }
     else if (item.value === 'password') setStep('app-password');
     else if (item.value === 'interval') { setIntervalInput(String(settings.syncIntervalMinutes)); setStep('interval'); }
@@ -228,6 +230,10 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       {step === 'scripts-dir' && (
         <Box marginTop={1} flexDirection="column">
           <Text color={UI_COLORS.subtitle}>Folder holding your fetch_&lt;biller&gt;.py scripts (quotes are fine).</Text>
+          <Text color={UI_COLORS.subtitle}>
+            Recommended: keep them in OpenBoard's own folder, pre-filled below — your
+            invoices and credentials then live alongside it under billers/.
+          </Text>
           <Box>
             <Text color={UI_COLORS.logo}>Folder › </Text>
             <TextInput
