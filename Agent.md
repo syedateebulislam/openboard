@@ -103,33 +103,15 @@ openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
 openboard agent setup github --github-token "ghp_..."     # remote mode only
 openboard agent setup vercel --vercel-token "..."          # remote mode only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
-openboard agent setup gmail --gmail-client-id "xxx.apps.googleusercontent.com" --gmail-client-secret "GOCSPX-..."
 openboard agent setup billers --scripts-dir "/path/to/invoice_fetchers" --biller-email "you@gmail.com" --biller-app-password "..."
 openboard agent setup status --json
 ```
 
-### Gmail (mail as a data source)
-
-`agent setup gmail` saves the Google OAuth Desktop-app client (secret encrypted at rest; env fallbacks `OPENBOARD_GMAIL_CLIENT_ID` / `OPENBOARD_GMAIL_CLIENT_SECRET`, options `--gmail-query`, `--gmail-sync-interval`). The browser consent step is interactive-only — a human finishes it once in the TUI (Settings › Gmail integration). After that:
-
-```bash
-# One-shot sync into the local cache (~/.openboard/mail/messages.json):
-openboard agent mail sync --json
-
-# Connection + sync state (connected, needsReauth, totalCached, lastSyncAt, cachePath):
-openboard agent mail status --json
-
-# The cache is a plain JSON data file — feed it to the normal create/update flow:
-openboard agent create --data ~/.openboard/mail/messages.json --name "Inbox"
-```
-
-`mail sync` exits 1 with `needsReauth: true` when the refresh token was revoked/expired; re-consent in the TUI and retry.
-
 ### Invoice fetchers (per-biller scripts)
 
-For users who keep their own per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). This is a **separate credential from Gmail OAuth above** — an IMAP App Password, not a token — and neither feature requires the other.
+For users who keep their own per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). They authenticate over IMAP with a Gmail App Password.
 
-Unlike `setup gmail`, this has no interactive step, so an agent can configure it completely:
+There is no interactive step here, so an agent can configure it completely:
 
 ```bash
 openboard agent setup billers \
@@ -139,7 +121,7 @@ openboard agent setup billers \
   --biller-key zomato --biller-key uber_rides --json
 
 # What is discovered and what is enabled (no LLM, no network):
-openboard agent billers status --json
+openboard agent billers status --json                # discovered invoice fetchers + which are enabled
 
 # One-shot run of the enabled billers (or just one):
 openboard agent billers sync --json

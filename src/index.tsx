@@ -22,7 +22,7 @@ const cli = meow(`
     update         Update dashboards non-interactively
     rollback       Roll a dashboard back to the previous deploy
     agent          Agent automation commands:
-                     setup              Headless config (mode|llm|github|vercel|dashboard|gmail|status|all)
+                     setup              Headless config (mode|llm|github|vercel|dashboard|billers|status|all)
                      create | onboard   Create dashboard from a data file
                      update             Update a dashboard with a prompt
                      update --all       Modify every dashboard with one prompt
@@ -32,8 +32,6 @@ const cli = meow(`
                      runs               List recent pipeline runs
                      resume <run-id>    Resume a failed run
                      rollback           Roll back to the previous deploy
-                     mail sync          Fetch Gmail into the local mail cache now
-                     mail status        Show Gmail connection + sync state
 
   Options
     --dashboard         Dashboard id, name, or title
@@ -48,10 +46,6 @@ const cli = meow(`
                         GitHub + live Vercel web app)
     --effort            LLM execution effort: low, medium, high, max (agent setup)
     --base-url          LM Studio API URL (default http://127.0.0.1:1234/v1)
-    --gmail-client-id       Google Cloud OAuth client ID for Gmail (agent setup gmail)
-    --gmail-client-secret   Google Cloud OAuth client secret (or OPENBOARD_GMAIL_CLIENT_SECRET)
-    --gmail-query           Gmail search query for sync (default in:inbox)
-    --gmail-sync-interval   Background sync interval in minutes (default 5)
     --scripts-dir           Folder holding your fetch_<biller>.py scripts (agent setup billers)
     --biller-email          Gmail address the fetchers log in as
     --biller-app-password   Gmail App Password (or OPENBOARD_BILLER_APP_PASSWORD)
@@ -80,8 +74,6 @@ const cli = meow(`
     $ openboard agent list --json
     $ openboard agent resume run-2026-06-10-ab12cd34 --json
     $ openboard rollback --dashboard uber-data
-    $ openboard agent setup gmail --gmail-client-id xxx.apps.googleusercontent.com --gmail-client-secret GOCSPX-...
-    $ openboard agent mail sync --json
     $ openboard agent setup billers --scripts-dir ./scripts/invoice_fetchers --biller-email you@gmail.com --biller-app-password "abcd efgh ijkl mnop"
     $ openboard agent billers status --json
     $ openboard agent billers sync --biller zomato --json
@@ -162,18 +154,6 @@ const cli = meow(`
     },
     password: {
       type: 'string',
-    },
-    gmailClientId: {
-      type: 'string',
-    },
-    gmailClientSecret: {
-      type: 'string',
-    },
-    gmailQuery: {
-      type: 'string',
-    },
-    gmailSyncInterval: {
-      type: 'number',
     },
     scriptsDir: {
       type: 'string',
@@ -450,14 +430,6 @@ if (!command || command === 'start') {
     const vercelToken = cli.flags.vercelToken ?? process.env.OPENBOARD_VERCEL_TOKEN;
     const codexAccessToken = cli.flags.codexAccessToken ?? process.env.OPENBOARD_CODEX_ACCESS_TOKEN;
     const password = cli.flags.password ?? process.env.OPENBOARD_DASHBOARD_PASSWORD;
-    const gmailClientId = cli.flags.gmailClientId ?? process.env.OPENBOARD_GMAIL_CLIENT_ID;
-    const gmailClientSecret = cli.flags.gmailClientSecret ?? process.env.OPENBOARD_GMAIL_CLIENT_SECRET;
-    const gmailInput = {
-      clientId: gmailClientId,
-      clientSecret: gmailClientSecret,
-      query: cli.flags.gmailQuery,
-      syncIntervalMinutes: cli.flags.gmailSyncInterval,
-    };
     const billerInput = {
       scriptsDir: cli.flags.scriptsDir,
       email: cli.flags.billerEmail,
@@ -507,11 +479,6 @@ if (!command || command === 'start') {
           console.log('GitHub/Vercel: not used in this mode (local preview only)');
         }
         console.log(`Dashboard login: ${status.dashboardAuth ? 'configured' : 'not configured'}`);
-        console.log(`Gmail: ${status.gmail
-          ? status.gmail.connected
-            ? `connected${status.gmail.email ? ` as ${status.gmail.email}` : ''}`
-            : 'OAuth client saved, account not connected'
-          : 'not configured'}`);
         console.log(`Invoice fetchers: ${status.billers
           ? `${status.billers.ready ? 'ready' : 'incomplete'} — ${status.billers.enabled.length} biller(s) enabled`
           : 'not configured'}`);
@@ -529,8 +496,6 @@ if (!command || command === 'start') {
       report({ vercel: await setup.configureVercel(vercelToken) });
     } else if (target === 'dashboard' || target === 'dashboard-auth') {
       report({ dashboard: await setup.configureDashboardAuth(cli.flags.username, password) });
-    } else if (target === 'gmail') {
-      report({ gmail: setup.configureGmail(gmailInput) });
     } else if (target === 'billers') {
       report({ billers: setup.configureBillers(billerInput) });
     } else if (target === 'all') {
@@ -542,19 +507,18 @@ if (!command || command === 'start') {
       if (githubToken) results.github = await setup.configureGitHub(githubToken);
       if (vercelToken) results.vercel = await setup.configureVercel(vercelToken);
       if (cli.flags.username || password) results.dashboard = await setup.configureDashboardAuth(cli.flags.username, password);
-      if (gmailClientId || gmailClientSecret) results.gmail = setup.configureGmail(gmailInput);
       if (billerInput.scriptsDir || billerInput.email || billerInput.appPassword) {
         results.billers = setup.configureBillers(billerInput);
       }
       if (Object.keys(results).length === 0) {
-        const error = 'Nothing to configure. Pass --mode, --provider, --github-token, --vercel-token, --gmail-client-id/--gmail-client-secret, and/or --username/--password (or the matching OPENBOARD_* env vars).';
+        const error = 'Nothing to configure. Pass --mode, --provider, --github-token, --vercel-token, --scripts-dir/--biller-email/--biller-app-password, and/or --username/--password (or the matching OPENBOARD_* env vars).';
         if (jsonMode) printJson({ success: false, action: 'setup', target: 'all', error, errorCode: 'E_VALIDATION' });
         else console.error(error);
         process.exit(1);
       }
       report(results);
     } else {
-      const error = `Unknown setup target "${target}". Use: mode | llm | github | vercel | dashboard | gmail | status | all.`;
+      const error = `Unknown setup target "${target}". Use: mode | llm | github | vercel | dashboard | billers | status | all.`;
       if (jsonMode) printJson({ success: false, action: 'setup', target, error, errorCode: 'E_VALIDATION' });
       else console.error(error);
       process.exit(1);
@@ -844,66 +808,6 @@ if (!command || command === 'start') {
     process.exit(0);
   }
 
-  if (action === 'mail') {
-    const sub = (cli.input[2] ?? 'status').toLowerCase();
-    const { GmailAuthService } = await import('./services/mail/GmailAuthService.js');
-    const { MailCacheService } = await import('./services/mail/MailCacheService.js');
-    const auth = new GmailAuthService();
-    const cache = new MailCacheService();
-
-    if (sub === 'status') {
-      const authStatus = auth.status();
-      const state = cache.readSyncState();
-      const payload = {
-        success: true,
-        action: 'mail-status',
-        connected: authStatus.connected,
-        needsReauth: authStatus.needsReauth,
-        email: authStatus.email,
-        cachePath: cache.cachePath,
-        totalCached: state.totalCached ?? cache.readMessages().length,
-        lastSyncAt: state.lastSyncAt,
-        lastError: state.lastError,
-      };
-      if (jsonMode) printJson(payload);
-      else {
-        console.log(`Gmail: ${authStatus.needsReauth
-          ? 're-auth needed — reconnect in the TUI (Settings › Gmail integration)'
-          : authStatus.connected ? `connected as ${authStatus.email ?? 'unknown'}` : 'not connected'}`);
-        console.log(`Cached messages: ${payload.totalCached}`);
-        console.log(`Last sync: ${state.lastSyncAt ?? 'never'}`);
-        console.log(`Cache file: ${cache.cachePath}`);
-        if (state.lastError) console.log(`Last error: ${state.lastError}`);
-      }
-      process.exit(0);
-    }
-
-    if (sub === 'sync') {
-      if (!auth.isConfigured()) {
-        const error = 'Gmail is not connected. Save credentials with `openboard agent setup gmail ...`, then finish the browser consent in the TUI (Settings › Gmail integration).';
-        if (jsonMode) printJson({ success: false, action: 'mail-sync', error, errorCode: 'E_VALIDATION' });
-        else console.error(error);
-        process.exit(1);
-      }
-      const { MailSyncService } = await import('./services/mail/MailSyncService.js');
-      const result = await new MailSyncService({ auth }).sync();
-      if (jsonMode) printJson({ success: result.ok, action: 'mail-sync', ...result, cachePath: cache.cachePath });
-      else if (result.ok) {
-        console.log(`Fetched ${result.fetched} message(s) — ${result.totalCached} cached.`);
-        console.log(`Cache file: ${cache.cachePath}`);
-      } else {
-        console.error(`Gmail sync failed: ${result.error}`);
-        if (result.needsReauth) console.error('Reconnect in the TUI: Settings › Gmail integration.');
-      }
-      process.exit(result.ok ? 0 : 1);
-    }
-
-    const error = `Unknown mail action "${sub}". Use: openboard agent mail <sync|status>.`;
-    if (jsonMode) printJson({ success: false, action: 'mail', error, errorCode: 'E_VALIDATION' });
-    else console.error(error);
-    process.exit(1);
-  }
-
   if (action === 'billers') {
     const sub = (cli.input[2] ?? 'status').toLowerCase();
     const { TypedConfigRepository } = await import('./services/config/TypedConfigRepository.js');
@@ -987,13 +891,12 @@ if (!command || command === 'start') {
   if (jsonMode) {
     printJson({ success: false, action: action ?? null, error, errorCode: 'E_VALIDATION' });
   } else {
-    console.error('Unknown agent action. Use: openboard agent setup <llm|github|vercel|dashboard|gmail|billers|status|all> [flags]');
+    console.error('Unknown agent action. Use: openboard agent setup <llm|github|vercel|dashboard|billers|status|all> [flags]');
     console.error('Or: openboard agent create --data <file> [--name "..."] [--prompt "..."]');
     console.error('Or: openboard agent update --dashboard <selector> --prompt "..." [--data <file>]');
     console.error('Or: openboard agent update --all --prompt "..."   (modify every dashboard)');
     console.error('Or: openboard agent remove --all                  (remove every dashboard)');
     console.error('Or: openboard agent list | status | runs | resume <run-id> | rollback');
-    console.error('Or: openboard agent mail <sync|status>');
     console.error('Or: openboard agent billers <sync|status> [--biller <key>]');
   }
   process.exit(1);

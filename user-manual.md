@@ -111,7 +111,7 @@ to Local only requires either the Ollama or LM Studio provider.
 4. Choose UI complexity: **High quality** (default, full-featured) or **Low quality**
    (lightweight — recommended for local/small-context models). Low is
    pre-highlighted when your configured provider is Ollama or LM Studio.
-5. Enter a CSV/XLSX/JSON file path (or type `gmail` to use your synced Gmail inbox, once Gmail is connected in Settings). Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
+5. Enter a CSV/XLSX/JSON file path. Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
 6. Enter the dashboard name.
 7. Confirm after data analysis.
 8. OpenBoard enters the internal LLM chat.
@@ -182,7 +182,6 @@ Commands must start with `/`.
 | `/build` | Build generated app |
 | `/update` | Regenerate from latest linked data using saved prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
-| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links your inbox as this board's data |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
 | `/billers` | Invoice fetcher status; `/billers sync` runs them; `/billers enable\|disable <key>` toggles one |
@@ -261,26 +260,11 @@ Settings supports:
 - Update LLM provider
 - Re-enter GitHub token
 - Re-enter Vercel token
-- Gmail integration (connect account, sync options, disconnect)
 - Invoice fetchers (per-biller invoice scripts, schedule, enable/disable)
 - Reset dashboard login
 - Run full setup wizard
 
 Use Settings when tokens cannot be decrypted or external auth fails.
-
-### Gmail Integration
-
-Connect your Gmail inbox as a live data source:
-
-1. Create a Google Cloud OAuth client of type **Desktop app** and copy its client ID + secret.
-2. Settings → Gmail integration → enter the OAuth client, then **Connect Google account**. Your browser opens Google's consent page (read-only scope); approve and return to the terminal.
-3. While the TUI is open, OpenBoard syncs new mail in the background (default every 5 minutes; configurable per query and interval). Closing the terminal stops the sync — it restarts automatically on the next launch. The Welcome screen shows a `✉ Gmail: … cached · last sync …` line.
-4. Use the inbox as data: type `gmail` as the file path when creating a dashboard, or `/mail use` in chat. `/update` refreshes charts from the newest mail.
-
-If the status shows **re-auth needed** (Google expired or revoked the token), open Settings → Gmail integration and reconnect. Disconnecting removes the stored tokens; the local cache file stays until you delete `~/.openboard/mail/`.
-
-Note: the account here is chosen on Google's own consent screen, so OpenBoard
-learns which address you connected only after you approve it.
 
 ### Invoice Fetchers
 
@@ -288,10 +272,6 @@ This is for people who already have their own per-biller invoice scripts: one
 dedicated `fetch_<biller>.py` per biller, reading Gmail over IMAP and appending
 rows to `data/invoices/<biller>.csv`. OpenBoard can enable them, run them on a
 schedule, and turn each biller's invoices into its own dashboard.
-
-It is **separate from Gmail integration above**: those scripts sign in with a
-Gmail App Password over IMAP, not OAuth. You do not need Gmail integration
-connected to use this, or the other way round.
 
 Settings → Invoice fetchers, in this order:
 
@@ -312,8 +292,7 @@ Settings → Invoice fetchers, in this order:
    min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
    ones immediately. **Rescan billers folder** picks up newly added scripts.
 
-Fetching runs in-process, only while OpenBoard is open — the same tradeoff as the
-Gmail sync, no background daemon. The last run time is remembered between
+Fetching runs in-process, only while OpenBoard is open — no background daemon. The last run time is remembered between
 sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
 starts shortly after launch.
 
@@ -328,15 +307,14 @@ file is necessarily plain text on your machine (OpenBoard keeps its own copy of
 the password encrypted). It is written with owner-only permissions on
 macOS/Linux; on Windows those bits are ignored, so the file is only as protected
 as the folder holding it. An App Password also
-grants full mailbox read access, which is broader than the read-only OAuth scope
-used by Gmail integration — revoke it in your Google account to cut access off.
+grants full mailbox read access — revoke it in your Google account to cut access
+off.
 
 ## Files OpenBoard Uses
 
 ```text
 ~/.openboard/config.json
 ~/.openboard/prompt-history/<dashboard-id>.json
-~/.openboard/mail/messages.json      (synced Gmail cache, when connected)
 projects/openboard-app-workspace-<id>/
 ```
 

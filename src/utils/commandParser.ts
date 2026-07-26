@@ -16,7 +16,6 @@
  *   /history                                     - Show dashboard prompt history
  *   /logs                                        - Show latest operation log
  *   /data                                        - Show linked data source summary
- *   /mail [sync|use]                             - Gmail sync status / fetch now / link inbox as data
  *   /billers [sync|enable <key>|disable <key>]   - Invoice fetcher status / run now / toggle one biller
  *   /help                                        - Show available commands
  *   /unknown                                     - Show command suggestions
@@ -38,7 +37,6 @@ export type Command =
   | { type: 'history' }
   | { type: 'logs' }
   | { type: 'data' }
-  | { type: 'mail'; args: string[] }
   | { type: 'billers'; args: string[] }
   | { type: 'model'; args: string[] }
   | { type: 'help' }
@@ -66,7 +64,6 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/stop', category: 'local', color: 'cyan', description: 'Cancel the current in-flight operation (generation, build, push, or deploy)' },
   { command: '/resume', category: 'local', color: 'cyan', description: "Resume this dashboard's last stopped or failed task" },
   { command: '/data', category: 'data', color: 'magenta', description: 'Show linked data file summary' },
-  { command: '/mail', category: 'data', color: 'magenta', description: 'Gmail sync status; /mail sync fetches now, /mail use links the inbox as data' },
   { command: '/billers', category: 'data', color: 'magenta', description: 'Invoice fetcher status; /billers sync runs them, enable/disable toggles one' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
@@ -131,9 +128,6 @@ export function parseCommand(input: string): Command {
   if (/^\/model(\s|$)/i.test(trimmed)) {
     return { type: 'model', args: input.trim().split(/\s+/).slice(1) };
   }
-  if (/^\/mail(\s|$)/i.test(trimmed)) {
-    return { type: 'mail', args: input.trim().split(/\s+/).slice(1) };
-  }
   if (/^\/billers(\s|$)/i.test(trimmed)) {
     return { type: 'billers', args: input.trim().split(/\s+/).slice(1) };
   }
@@ -197,7 +191,6 @@ export const HELP_TEXT = `Available commands:
   /stop         - Cancel the current in-flight operation (generation, build, push, or deploy)
   /resume       - Resume this dashboard's last stopped or failed task
   /data         - Show linked data source summary
-  /mail         - Show Gmail sync status; /mail sync fetches now; /mail use links the inbox as this board's data
   /billers      - Show invoice fetcher status; /billers sync runs them; /billers enable|disable <key> toggles one
   /history      - Show this dashboard's prompt history
   /logs         - Show latest operation log

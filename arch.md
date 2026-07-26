@@ -84,7 +84,6 @@ src/
     BoardCreationScreen.tsx
     ManageBoardsScreen.tsx
     ChatScreen.tsx
-    GmailSettingsScreen.tsx
     BillerSettingsScreen.tsx
   components/
     ChatMessage.tsx
@@ -120,12 +119,6 @@ src/
     llm/heartbeat.ts                     liveness lines during long LLM calls
     llm/localModelDiscovery.ts           live installed-model listing for Ollama/LM Studio
     llm/prompts/systemPrompt.ts           SYSTEM_PROMPT (high) + SYSTEM_PROMPT_LOW
-    mail/GmailAuthService.ts             OAuth desktop-app client + token storage
-    mail/GmailClient.ts                  Gmail API read-only fetch
-    mail/MailSyncService.ts              orchestrates fetch -> normalize -> cache
-    mail/MailNormalizer.ts               raw message -> flat row shape
-    mail/MailCacheService.ts             ~/.openboard/mail/messages.json cache
-    mail/mailScheduler.ts                in-process interval sync while the TUI is open
     billers/BillerDiscoveryService.ts    scan a folder for fetch_<biller>.py, read KEY/DISPLAY_NAME
     billers/BillerFetcherService.ts      credentials file, safe python spawn, CSV hash gate, dashboard sync
     billers/billerScheduler.ts           in-process interval fetch, due-based (persisted lastRunAt)
@@ -166,12 +159,11 @@ openboard update --dashboard <selector>
 openboard update --all
 openboard update --all --prompt "..."           # modify every dashboard with one prompt
 openboard rollback --dashboard <selector>
-openboard agent setup <llm|github|vercel|dashboard|gmail|status|all> [flags]   # headless configuration
+openboard agent setup <llm|github|vercel|dashboard|billers|status|all> [flags]   # headless configuration
 openboard agent create --data <file> --name <title> [--type custom] [--quality high|low] [--prompt "..."] [--json]
 openboard agent update --dashboard <selector> --prompt "..." [--data <file>] [--json]
 openboard agent update --all --prompt "..." [--json]    # modify every dashboard
 openboard agent remove --all [--json]                   # remove every dashboard (empty the app)
-openboard agent mail <sync|status> [--json]             # headless Gmail sync
 openboard agent setup billers --scripts-dir <dir> --biller-email <addr> --biller-app-password <pw> [--biller-key <key>]...
 openboard agent billers <sync|status> [--biller <key>] [--json]   # headless invoice fetch
 openboard agent list | status | runs | resume <run-id> | rollback [--json]
@@ -200,7 +192,6 @@ settings-llm
 settings-github
 settings-vercel
 settings-dashboard-auth
-settings-gmail
 settings-billers
 deploy
 ```
@@ -266,7 +257,6 @@ against the running operation's phase list, not the full create pipeline.
 | `/build` | Build generated app |
 | `/update` | Regenerate using latest data and saved prompt history, then build/push/deploy |
 | `/data` | Parse and summarize linked data source |
-| `/mail` | Gmail sync status; `/mail sync` fetches now; `/mail use` links the synced inbox as this board's data |
 | `/billers` | Invoice fetcher status; `/billers sync` runs the enabled ones; `/billers enable\|disable <key>` toggles one |
 | `/history` | Show prompt history |
 | `/logs` | Show latest operation log |
@@ -444,24 +434,6 @@ flowchart TD
 
 If GitHub push succeeds but direct Vercel CLI auth fails, OpenBoard reports that Vercel Git integration may still deploy the pushed commit.
 
-## Gmail (Mail) Integration
-
-Gmail can act as a live, refreshable data source instead of a static CSV/JSON file:
-
-```mermaid
-flowchart LR
-    A["GmailSettingsScreen: OAuth Desktop-app client + consent (localhost loopback, gmail.readonly)"] --> B["GmailAuthService: encrypted client secret + refresh token"]
-    B --> C["mailScheduler: interval sync while the TUI is open"]
-    C --> D["MailSyncService: GmailClient fetch -> MailNormalizer -> flat rows"]
-    D --> E["MailCacheService: ~/.openboard/mail/messages.json"]
-    E --> F["DataParserService reads the cache like any .json data file"]
-```
-
-- `agent setup gmail` stores the OAuth client headlessly; the browser consent step is interactive-only (`GmailSettingsScreen`, once).
-- `agent mail sync|status` drives `MailSyncService`/`MailCacheService` without the TUI; `mail sync` exits 1 with `needsReauth: true` if Google revoked the refresh token.
-- Typing `gmail` as a data path, or `/mail use` in chat, links `~/.openboard/mail/messages.json` as the board's `dataFiles[0]` — after that it flows through the normal parse/analyze/generate pipeline like any other file.
-- `WelcomeScreen`'s `mailStatusLine()` and `/mail` render the same `MailSchedulerStatus` shape (`not-configured | syncing | connected | needs-reauth | error`).
-
 ## Invoice Fetchers (per-biller)
 
 A second, **independent** mail-derived data path for users who keep their own
@@ -506,9 +478,10 @@ flowchart TD
   `billers.lastRunAt` is persisted and `msUntilDue()` only fires at startup when a
   full interval has elapsed — otherwise the 6-hour default would rarely be reached
   inside one TUI session.
-- **Credential model**: an IMAP **App Password**, not OAuth — unrelated to
-  `GmailAuthService`. `BillerSettingsScreen` asks for the folder, then the email,
-  then the password, in that order. The materialized JSON for the scripts is
+- **Credential model**: an IMAP **App Password**, which is what the fetchers use.
+  `BillerSettingsScreen` asks for the folder, then the email, then the password,
+  in that order — you know which account you are authorizing before typing a
+  secret for it. The materialized JSON for the scripts is
   necessarily plaintext (they cannot decrypt); OpenBoard's own copy uses
   `setEncrypted`. `0600` is requested on write but is POSIX-only — Node ignores
   mode bits on Windows, so there the file is only as protected as its folder.
