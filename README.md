@@ -273,4 +273,4 @@ Issues and pull requests are welcome. Please run `npm run lint` and `npm run tes
 
 ## License
 
-[MIT](./LICENSE) © Syed Ateebul Islam
+[Apache 2.0](./LICENSE) © Syed Ateebul Islam
