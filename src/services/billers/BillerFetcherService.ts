@@ -32,6 +32,7 @@ import {
   credentialsPathFor,
   discoverBillers,
   isInsideScriptsDir,
+  migrateInstalledFetchers,
 } from './BillerDiscoveryService.js';
 
 export type ProgressCallback = (line: string) => void;
@@ -86,6 +87,20 @@ export function hashFile(path: string): Promise<string | undefined> {
 /** Turn a raw script/spawn failure into something a user can act on. */
 export function describeFetchError(raw: string): string {
   const text = raw.trim();
+
+  // Order matters. A Python traceback ending in FileNotFoundError also contains
+  // "No such file or directory", so the interpreter check below used to claim
+  // Python was missing whenever a script could not open a file — which sent a
+  // real credentials bug looking like a broken PATH.
+  if (/FileNotFoundError.*gmail_app_credentials|gmail_app_credentials.*No such file/is.test(text)) {
+    return 'This fetcher still reads the old plaintext credentials file, which OpenBoard no longer creates. It will be upgraded automatically on the next run — if you keep seeing this, use "Rescan billers folder" or reinstall the bundled fetchers.';
+  }
+  if (/Traceback \(most recent call last\)/.test(text)) {
+    const lastLine = text.split(/\r?\n/).filter(Boolean).pop() ?? '';
+    return `The fetcher crashed: ${lastLine.slice(0, 240)}`;
+  }
+  // Only a spawn failure means the interpreter itself is missing; by this point
+  // anything matching is coming from the launcher, not from script output.
   if (/ENOENT|not recognized|No such file or directory/i.test(text)) {
     return 'Python was not found on PATH. Install Python 3 (or make `python` available) and try again.';
   }
@@ -172,6 +187,21 @@ export class BillerFetcherService {
     }
   }
 
+  /**
+   * Move this install fully onto environment credentials.
+   *
+   * Both halves must happen together. Deleting the plaintext file while the
+   * installed fetchers still read it breaks every one of them with a
+   * FileNotFoundError, which is exactly what shipping only the delete did.
+   *
+   * Returns the fetchers that were upgraded, so the UI can say what changed.
+   */
+  migrateToEnvCredentials(settings: BillerSettings = this.settings()): string[] {
+    const migrated = migrateInstalledFetchers(settings.scriptsDir);
+    this.removeLegacyCredentialsFile(settings);
+    return migrated;
+  }
+
   /** Spawn one fetcher. Only the interpreter and numeric/enum args reach argv. */
   private async runScript(
     biller: BillerScript,
@@ -235,14 +265,18 @@ export class BillerFetcherService {
       changed: false,
     };
 
-    // Validate before doing any work, and clear any plaintext file an older
-    // version left behind.
+    // Validate before doing any work, then make sure the script we are about to
+    // run reads its credentials from the environment rather than a file that no
+    // longer exists.
     try {
       this.credentialEnv(settings);
     } catch (error: any) {
       return { ...base, error: error.message };
     }
-    this.removeLegacyCredentialsFile(settings);
+    const migrated = this.migrateToEnvCredentials(settings);
+    if (migrated.length) {
+      options.onProgress?.(`Upgraded ${migrated.length} fetcher(s) to environment credentials: ${migrated.join(', ')}`);
+    }
 
     const before = await hashFile(biller.csvPath);
     let run: { code: number; output: string };
