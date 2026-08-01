@@ -107,6 +107,30 @@ describe('runPython argument guard', () => {
       await expect(runPython([arg], { ...options(), timeoutMs: 3_000 })).resolves.toBeDefined();
     }
   });
+
+  it('accepts a real path whose punctuation the charset omits', async () => {
+    // Windows 8.3 short names (C:\Users\RUNNER~1), "Program Files (x86)" and
+    // user folders with spaces all contain characters SAFE_ARG excludes.
+    // Rejecting them broke every Python call on such a machine — green on a
+    // dev box with a short user name, red on CI.
+    const awkward = join(root, "Program Files (x86) ~ user's dir");
+    mkdirSync(awkward, { recursive: true });
+    const script = join(awkward, 'fetch_x.py');
+    writeFileSync(script, 'print(1)\n', 'utf-8');
+
+    await expect(runPython([script], { ...options(), timeoutMs: 10_000 })).resolves.toBeDefined();
+  });
+
+  it('still rejects awkward punctuation when the path does not exist', async () => {
+    // The exemption is "this file is really there", not "anything goes".
+    await expect(
+      runPython([join(root, 'no~such (dir)', 'ghost.py')], options()),
+    ).rejects.toThrow(/Unsafe argument/);
+  });
+
+  it('rejects control characters even in something that looks like a path', async () => {
+    await expect(runPython(['/tmp/a\nrm -rf b'], options())).rejects.toThrow(/control characters/);
+  });
 });
 
 describe('isMissingInterpreter', () => {

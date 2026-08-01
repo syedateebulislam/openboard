@@ -8,13 +8,43 @@
  * here instead of being copied.
  */
 
+import { existsSync } from 'node:fs';
 import { crossSpawn } from '../../utils/crossSpawn.js';
 
 /** Interpreters we are willing to spawn. Distinct from BuildService's npm/npx list. */
 export const PYTHON_COMMANDS = ['python', 'python3', 'py'] as const;
 
-/** Only numeric/enum/path args ever reach argv — no user free-text is passed through. */
+/**
+ * Shape of a plain flag, number or simple path.
+ *
+ * This is a tripwire, not a shell defence — runPython pins `useShell: false`,
+ * so argv reaches the OS untouched and there is nothing to inject into. Its job
+ * is to make undeclared free text (an email subject, a merchant name) fail
+ * loudly instead of being passed through by accident.
+ */
 const SAFE_ARG = /^[A-Za-z0-9._:@\\/-]+$/;
+
+/** Control characters are the only thing argv genuinely cannot carry. */
+const CONTROL_CHARS = /[\u0000-\u001f]/;
+
+/**
+ * Is this argument a real path on disk?
+ *
+ * Windows paths routinely contain characters SAFE_ARG omits: `~` in 8.3 short
+ * names (C:\Users\RUNNER~1), parentheses in "Program Files (x86)", and spaces
+ * in ordinary user folders. Rejecting those broke every Python call on such a
+ * machine — caught by CI on Windows, invisible on a dev box with a short user
+ * name. Resolving the path is exact and unspoofable: either the file is there
+ * or it is not, and with no shell involved its punctuation is inert.
+ */
+function isExistingPath(arg: string): boolean {
+  if (CONTROL_CHARS.test(arg)) return false;
+  try {
+    return existsSync(arg);
+  } catch {
+    return false;
+  }
+}
 
 export interface RunPythonOptions {
   cwd: string;
@@ -52,7 +82,11 @@ export async function runPython(args: string[], options: RunPythonOptions): Prom
   const exempt = new Set(options.freeTextArgs ?? []);
   for (const arg of args) {
     if (exempt.has(arg)) continue;
-    if (!SAFE_ARG.test(arg)) throw new Error(`Unsafe argument for the Python runner: ${arg}`);
+    if (CONTROL_CHARS.test(arg)) {
+      throw new Error('Unsafe argument for the Python runner: contains control characters');
+    }
+    if (SAFE_ARG.test(arg) || isExistingPath(arg)) continue;
+    throw new Error(`Unsafe argument for the Python runner: ${arg}`);
   }
 
   let lastError: Error | undefined;
