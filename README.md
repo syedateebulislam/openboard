@@ -274,3 +274,5 @@ Issues and pull requests are welcome. Please run `npm run lint` and `npm run tes
 ## License
 
 [Apache 2.0](./LICENSE) © Syed Ateebul Islam
+
+Versions 1.8.0 and earlier were released under the MIT License. Versions 1.9.0 and later are licensed under Apache-2.0.
