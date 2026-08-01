@@ -20,6 +20,7 @@ import type { BoardConfig } from './types/board.js';
 import { startBillerScheduler } from './services/billers/billerScheduler.js';
 import type { BillerSchedulerStatus } from './types/billers.js';
 import { BillerSettingsScreen } from './screens/BillerSettingsScreen.js';
+import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -47,7 +48,8 @@ export type Screen =
   | 'settings-github'
   | 'settings-llm'
   | 'settings-dashboard-auth'
-  | 'settings-billers';
+  | 'settings-billers'
+  | 'biller-studio';
 
 // Placeholder components with "Go Back" option
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
@@ -712,6 +714,14 @@ export function App() {
         <BillerSettingsScreen
           onNavigate={navigate}
           onBillersConfigured={() => setBillerConfigVersion((n) => n + 1)}
+        />
+      );
+
+    case 'biller-studio':
+      return (
+        <BillerStudioScreen
+          onNavigate={navigate}
+          onBillerCreated={() => setBillerConfigVersion((n) => n + 1)}
         />
       );
 

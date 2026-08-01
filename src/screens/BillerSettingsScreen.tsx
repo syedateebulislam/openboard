@@ -231,6 +231,9 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
             label: `${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.displayName}${existsSync(biller.csvPath) ? '' : ' (no data yet)'}`,
             value: `toggle:${biller.key}`,
           })),
+          // Sits directly under the list it adds to, the way ManageBoardsScreen
+          // puts "Add new dashboard" beside the dashboards.
+          { label: '✚ Add a new biller (Biller Studio)', value: 'add-biller' },
           { label: `Fetch interval (current: ${settings.syncIntervalMinutes} min)`, value: 'interval' },
           { label: 'Fetch now', value: 'sync' },
           { label: 'Rescan billers folder', value: 'rescan' },
@@ -250,6 +253,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     else if (item.value === 'email') { setEmailInput(settings.email ?? ''); setStep('email'); }
     else if (item.value === 'password') setStep('app-password');
     else if (item.value === 'interval') { setIntervalInput(String(settings.syncIntervalMinutes)); setStep('interval'); }
+    else if (item.value === 'add-biller') onNavigate('biller-studio');
     else if (item.value === 'sync') void syncNow();
     else if (item.value === 'rescan') { setStatus(`Found ${discoverBillers(settings.scriptsDir).length} biller fetcher(s).`); refresh(); }
     else if (item.value === 'clear') clearCredentials();
@@ -367,10 +371,10 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
 
       <Box marginTop={1} flexDirection="column">
         <Text color={UI_COLORS.subtitle}>
-          The fetchers read Gmail over IMAP, so they need their credentials in a plain file
-          on this machine — protected only as well as the folder it sits in (owner-only
-          permissions apply on macOS/Linux; Windows uses the folder's ACLs). An App Password
-          grants full mailbox read access — revoke it in your Google account to cut access off.
+          The fetchers read Gmail over IMAP. Your App Password is stored encrypted and handed
+          to each fetcher through its environment at run time — it is never written to disk.
+          An App Password grants full mailbox read access, so revoke it in your Google account
+          to cut access off. Fetchers need Python 3 with beautifulsoup4 installed.
         </Text>
         <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open. Press ESC to go back</Text>
       </Box>
