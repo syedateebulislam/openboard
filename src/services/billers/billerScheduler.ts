@@ -1,22 +1,25 @@
 /**
  * billerScheduler — in-process invoice-fetch loop for the TUI session.
  *
- * Same lifecycle contract as mailScheduler (services/mail/mailScheduler.ts):
- * the interval lives inside this Node process, so it starts with the CLI and
- * dies with the terminal — no daemon, no leftover processes — and the timer is
- * unref'd so it never keeps the process alive on exit.
+ * Lifecycle contract: the interval lives inside this Node process, so it starts
+ * with the CLI and dies with the terminal — no daemon, no leftover processes —
+ * and the timer is unref'd so it never keeps the process alive on exit.
  *
- * It differs from the mail loop in one important way. A mail tick is a cheap
- * API call, so that loop syncs immediately on every launch. A biller tick
- * spawns Python IMAP scans and can trigger LLM dashboard builds, so running one
- * on every launch would be both slow and expensive. Instead the last run time
- * is persisted and the loop only fires on startup when a full interval has
- * actually elapsed — otherwise the default 6-hour interval would practically
- * never be reached inside a single TUI session.
+ * A tick is expensive: it spawns Python IMAP scans and can trigger LLM
+ * dashboard builds, so running one on every launch would be both slow and
+ * costly. Instead the last run time is persisted and the loop only fires on
+ * startup when a full interval has actually elapsed — otherwise the default
+ * 6-hour interval would practically never be reached inside a single TUI
+ * session.
+ *
+ * Because the loop is silent by construction, App wires its status into the
+ * chat header: an interval nobody can see is indistinguishable from a broken
+ * one, which is exactly how this last read to users.
  */
 
-import type { BillerSchedulerStatus, BillerSettings } from '../../types/billers.js';
+import type { BillerRunResult, BillerSchedulerStatus, BillerSettings } from '../../types/billers.js';
 import { BillerFetcherService } from './BillerFetcherService.js';
+import { appendBillerActivity } from './billerActivityLog.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 
@@ -28,6 +31,12 @@ export interface BillerSchedulerDeps {
   settings?: () => BillerSettings;
   /** Persist the completed-run timestamp. Injected in tests. */
   recordRun?: (isoTime: string) => void;
+  /**
+   * Where a scheduled run's output goes. Defaults to the shared activity log so
+   * the settings screen can show it — a scheduled fetch used to run completely
+   * silently, leaving "Last run" advancing above an empty log pane.
+   */
+  onProgress?: (line: string) => void;
 }
 
 /**
@@ -42,10 +51,42 @@ export function recordBillerRun(isoTime: string = new Date().toISOString()): str
   return isoTime;
 }
 
+/**
+ * Whether a finished manual fetch should re-anchor the schedule.
+ *
+ * An empty result set means no fetcher ran at all — nothing was enabled, or the
+ * scripts folder went missing. Stamping lastRunAt there pushed the next
+ * scheduled run out by a full interval for work that never happened, so pressing
+ * "Fetch now" on a misconfigured setup quietly suppressed the loop.
+ *
+ * Failed runs still anchor, matching the scheduler's own tick: a biller that is
+ * broken today must not make every launch retry it forever.
+ */
+export function shouldAnchorRun(results: BillerRunResult[]): boolean {
+  return results.length > 0;
+}
+
 /** True when a scheduled run could actually do something. */
 export function isBillerSyncConfigured(settings: BillerSettings): boolean {
   return Boolean(settings.scriptsDir && settings.email && settings.appPassword)
     && settings.enabledKeys.length > 0;
+}
+
+/**
+ * Delay until the next run, measured from when the previous run STARTED.
+ *
+ * The configured interval is the period between runs, not the gap between one
+ * finishing and the next starting. Scheduling a full interval from completion
+ * made every cycle drift by however long the fetch took, so "every 7 minutes"
+ * actually fetched every 7 minutes plus a fetch — and the drift compounded for
+ * as long as the session stayed open.
+ *
+ * Returns 0 when the run already outlasted its own interval: the next one is
+ * due the moment this one ends, which is the honest answer when the work takes
+ * longer than the period asked for.
+ */
+export function msUntilNextRun(startedAt: number, intervalMs: number, now = Date.now()): number {
+  return Math.max(0, intervalMs - (now - startedAt));
 }
 
 /** Milliseconds until the next run is due; 0 when it is already overdue. */
@@ -72,6 +113,7 @@ export function startBillerScheduler(
 
   const fetcher = deps.fetcher ?? new BillerFetcherService({ settings });
   const recordRun = deps.recordRun ?? ((isoTime: string) => { recordBillerRun(isoTime); });
+  const onProgress = deps.onProgress ?? appendBillerActivity;
 
   const baseIntervalMs = initial.syncIntervalMinutes * 60 * 1000;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -123,27 +165,43 @@ export function startBillerScheduler(
   const tick = async () => {
     if (isRunning || stopped) return;
     isRunning = true;
+    // The schedule anchors on this, not on when the fetch finishes — see
+    // msUntilNextRun for why the difference compounds.
+    const startedAt = Date.now();
     emit('running');
+    onProgress(`Scheduled fetch started ${new Date(startedAt).toLocaleTimeString()}`);
     try {
-      const results = await fetcher.syncEnabled();
+      // Forward the per-biller output: without this a scheduled run produced no
+      // lines at all and the settings screen's log pane stayed empty.
+      const results = await fetcher.syncEnabled({ onProgress });
       if (stopped) return;
-      lastRunAt = new Date().toISOString();
+      lastRunAt = new Date(startedAt).toISOString();
       recordRun(lastRunAt);
 
       const failed = results.filter((result) => !result.ok);
       const changedKeys = results.filter((result) => result.changed).map((result) => result.key);
 
+      onProgress(
+        results.length === 0
+          ? 'Scheduled fetch finished — no billers are enabled.'
+          : failed.length > 0
+            ? `Scheduled fetch finished with ${failed.length} failure(s): ${failed.map((r) => `${r.displayName} (${r.error})`).join(' · ')}`
+            : changedKeys.length > 0
+              ? `Scheduled fetch finished — new invoices for ${changedKeys.join(', ')}; dashboards refreshed.`
+              : `Scheduled fetch finished — ran ${results.length} fetcher(s), no new invoices.`,
+      );
+
       if (failed.length === 0) {
         consecutiveFailures = 0;
         intervalMs = baseIntervalMs;
-        scheduleNext(intervalMs);
+        scheduleNext(msUntilNextRun(startedAt, intervalMs));
         emit('idle', { changedKeys });
         return;
       }
 
       consecutiveFailures += 1;
       intervalMs = intervalAfterFailure();
-      scheduleNext(intervalMs);
+      scheduleNext(msUntilNextRun(startedAt, intervalMs));
       emit('error', {
         changedKeys,
         error: failed.map((result) => `${result.displayName}: ${result.error}`).join(' · '),
@@ -152,7 +210,8 @@ export function startBillerScheduler(
       if (stopped) return;
       consecutiveFailures += 1;
       intervalMs = intervalAfterFailure();
-      scheduleNext(intervalMs);
+      scheduleNext(msUntilNextRun(startedAt, intervalMs));
+      onProgress(`Scheduled fetch failed: ${error?.message ?? String(error)}`);
       emit('error', { error: error?.message ?? String(error) });
     } finally {
       isRunning = false;

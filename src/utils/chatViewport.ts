@@ -148,8 +148,13 @@ export function pageStep(viewportHeight: number): number {
   return Math.max(1, viewportHeight - 1);
 }
 
-/** The window of lines to render, given how many lines are hidden below it. */
-export function visibleLines(lines: ChatLine[], viewportHeight: number, offset: number): ChatLine[] {
+/**
+ * The window of lines to render, given how many lines are hidden below it.
+ *
+ * Generic over the line type: the chat log passes ChatLine[], the progress-log
+ * pane passes plain strings, and both want identical bottom-anchored windowing.
+ */
+export function visibleLines<T>(lines: T[], viewportHeight: number, offset: number): T[] {
   const height = Math.max(1, viewportHeight);
   const safeOffset = clampOffset(offset, lines.length, height);
   const end = lines.length - safeOffset;

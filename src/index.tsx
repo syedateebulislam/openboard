@@ -812,7 +812,7 @@ if (!command || command === 'start') {
     const sub = (cli.input[2] ?? 'status').toLowerCase();
     const { TypedConfigRepository } = await import('./services/config/TypedConfigRepository.js');
     const { BillerFetcherService } = await import('./services/billers/BillerFetcherService.js');
-    const { recordBillerRun } = await import('./services/billers/billerScheduler.js');
+    const { recordBillerRun, shouldAnchorRun } = await import('./services/billers/billerScheduler.js');
     const settings = new TypedConfigRepository().getBillerSettings();
     const fetcher = new BillerFetcherService();
 
@@ -871,7 +871,8 @@ if (!command || command === 'start') {
       const results = await fetcher.syncEnabled({ onProgress, only });
       // Re-anchor the in-TUI schedule: a CLI sync is a real run, and leaving
       // lastRunAt stale would make the next TUI launch fetch everything again.
-      recordBillerRun();
+      // A run that matched no biller is not a run, and must not move the anchor.
+      if (shouldAnchorRun(results)) recordBillerRun();
       const ok = results.every((result) => result.ok);
       if (jsonMode) printJson({ success: ok, action: 'billers-sync', results });
       else {

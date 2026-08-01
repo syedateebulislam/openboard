@@ -472,12 +472,32 @@ flowchart TD
   decides between `createFromDataSource` (first data, typed via
   `BILLER_PRESET_MAP` in `types/billers.ts`) and `updateBySelector` (refresh) —
   both reuse the normal build → push → deploy pipeline and its app-mode gating.
-- **Due-based scheduling** (`services/billers/billerScheduler.ts`): same lifecycle as
-  `mailScheduler` (unref'd interval, failure backoff, disposer) but it does **not**
-  tick on every launch. A tick spawns Python and can trigger LLM builds, so
-  `billers.lastRunAt` is persisted and `msUntilDue()` only fires at startup when a
-  full interval has elapsed — otherwise the 6-hour default would rarely be reached
-  inside one TUI session.
+- **Due-based scheduling** (`services/billers/billerScheduler.ts`): an unref'd,
+  self-rescheduling timeout with failure backoff and a disposer, living in the TUI
+  process. It does **not** tick on every launch: a tick spawns Python and can
+  trigger LLM builds, so `billers.lastRunAt` is persisted and `msUntilDue()` only
+  fires at startup when a full interval has elapsed — otherwise the 6-hour default
+  would rarely be reached inside one TUI session. Each run re-anchors on the run's
+  **start**, so the configured interval is the period between runs. Anchoring on
+  completion instead added the fetch duration to every cycle — a 34-second fetch on
+  a 7-minute interval ran every 7m34s, and the drift compounded across a session.
+  `msUntilNextRun()` returns 0 when a fetch outlasts its own interval, so a run that
+  overruns starts the next one as soon as it ends rather than skipping a slot.
+- **Manual fetches re-anchor too** — all three of them ("Fetch now", `/billers sync`,
+  `openboard agent billers sync`) — but only via `shouldAnchorRun()`, which rejects an
+  empty result set. A fetch that ran nothing must not move the anchor, or it silently
+  delays the next scheduled run by a full interval.
+- **The loop reports to the UI**: `App` holds `BillerSchedulerStatus` and passes it to
+  `ChatScreen`, which shows a header line (`next fetch HH:MM` / `fetching…` / error)
+  and posts a message when a scheduled run it watched start finishes. A silent
+  interval is indistinguishable from a broken one, which is how it first read.
+- **Fetcher output goes to `services/billers/billerActivityLog.ts`**, a buffered store
+  outside React that both the scheduler and "Fetch now" write to and
+  `BillerSettingsScreen`'s log pane subscribes to via `useProgressLog({ store })`.
+  It cannot be component state: scheduled runs fire with no screen mounted, so their
+  output has to survive until someone opens the screen. The scheduler also has to pass
+  `onProgress` into `syncEnabled` — without it a scheduled run emitted nothing at all,
+  and "Last run"/"Next run" advanced above an empty pane.
 - **Credential model**: an IMAP **App Password**, which is what the fetchers use.
   `BillerSettingsScreen` asks for the folder, then the email, then the password,
   in that order — you know which account you are authorizing before typing a

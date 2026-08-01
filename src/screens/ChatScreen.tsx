@@ -52,6 +52,8 @@ import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
 import { TypedConfigRepository } from '../services/config/TypedConfigRepository.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
+import { recordBillerRun, shouldAnchorRun } from '../services/billers/billerScheduler.js';
+import type { BillerSchedulerStatus } from '../types/billers.js';
 
 const projectManager = new ProjectManager();
 const projectCommands = new ProjectCommandHandlers(projectManager);
@@ -112,6 +114,8 @@ interface Props {
   autoGenerateInitial?: boolean;
   /** All-boards mode: each prompt is applied to every dashboard, deployed once. */
   allBoards?: boolean;
+  /** Live invoice-fetch scheduler state, owned by App. Null until it reports. */
+  billerStatus?: BillerSchedulerStatus | null;
 }
 
 interface SendToLLMOptions {
@@ -135,6 +139,25 @@ const MAX_CONTEXT_MESSAGES = 20;
 // takes what is left, never a fixed fraction of the screen.
 const CHROME_ROWS = 16;
 const MIN_LOG_HEIGHT = 5;
+
+/**
+ * The invoice scheduler's one-line header readout.
+ *
+ * Returns null when there is nothing worth a row, because the line is counted
+ * against the chat log's height — an unconfigured loop must not cost the user a
+ * line of history. The loop is otherwise entirely silent, which is why a
+ * correctly-spaced interval was indistinguishable from a dead one.
+ */
+function describeBillerStatus(status: BillerSchedulerStatus | null | undefined): string | null {
+  if (!status || status.state === 'not-configured') return null;
+  if (status.state === 'running') return '🧾 Invoices: fetching…';
+  if (status.state === 'error') {
+    return `🧾 Invoices: ${(status.error ?? 'last fetch failed').slice(0, 60)}`;
+  }
+  if (!status.nextRunAt) return null;
+  const at = new Date(status.nextRunAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `🧾 Invoices: next fetch ${at}`;
+}
 
 function isVercelAuthError(error: string | undefined): boolean {
   if (!error) return false;
@@ -179,6 +202,7 @@ export function ChatScreen({
   messages: initialMessages = [],
   autoGenerateInitial = false,
   allBoards = false,
+  billerStatus = null,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     newMsg(
@@ -883,6 +907,38 @@ For the current board "${board.title}":
     [llmProvider, llmError, addMsg, updateStreamingMsg, buildLLMContext, writeExtractedFiles, board, getActiveProjectDir],
   );
 
+  // ── Announce scheduled invoice fetches ────────────────────────────────────
+  // A scheduled fetch is the only work here the user did not trigger, so it has
+  // to announce itself. Only runs whose start was observed in this session are
+  // announced — the scheduler emits the persisted lastRunAt on startup, and
+  // reporting that would claim a previous session's fetch as a fresh one.
+  const sawBillerRunRef = useRef(false);
+  const announcedBillerRunRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!billerStatus) return;
+    if (billerStatus.state === 'running') {
+      sawBillerRunRef.current = true;
+      return;
+    }
+    if (!sawBillerRunRef.current) return;
+
+    if (billerStatus.state === 'error') {
+      const stamp = billerStatus.lastRunAt ?? billerStatus.error;
+      if (!stamp || stamp === announcedBillerRunRef.current) return;
+      announcedBillerRunRef.current = stamp;
+      addMsg(newMsg('error', `Scheduled invoice fetch failed: ${billerStatus.error ?? 'unknown error'}`));
+      return;
+    }
+
+    const runAt = billerStatus.lastRunAt;
+    if (!runAt || runAt === announcedBillerRunRef.current) return;
+    announcedBillerRunRef.current = runAt;
+    const changed = billerStatus.changedKeys ?? [];
+    addMsg(newMsg('system', changed.length > 0
+      ? `Scheduled invoice fetch finished — new invoices for ${changed.join(', ')}; dashboards refreshed.`
+      : 'Scheduled invoice fetch finished — no new invoices.'));
+  }, [billerStatus, addMsg]);
+
   // ── Auto-generate initial dashboard when entering chat with data ──────────
   useEffect(() => {
     if (!autoGenerateInitial) return;
@@ -1278,6 +1334,10 @@ For the current board "${board.title}":
             if (results.length === 0) {
               onProgress('No billers are enabled — use /billers enable <key> first.');
             }
+            // Same work a scheduled tick does, so it re-anchors the schedule.
+            // Without this the running scheduler still judged itself overdue and
+            // fired a duplicate fetch moments after this one finished.
+            if (shouldAnchorRun(results)) recordBillerRun();
             for (const result of results) {
               onProgress(result.ok
                 ? `${result.displayName}: ${result.changed ? 'new invoices' + (result.dashboardUpdated ? ' — dashboard refreshed' : '') : 'no new invoices'}`
@@ -1699,7 +1759,8 @@ Requirements:
   // scrollbar gutter (gap 1 + bar 1).
   const logWidth = Math.max(20, termWidth - 6);
   // Conditional chrome shrinks the log instead of overflowing the screen.
-  const reserved = CHROME_ROWS + (llmError ? 2 : 0) + commandSuggestions.length;
+  const billerLine = describeBillerStatus(billerStatus);
+  const reserved = CHROME_ROWS + (llmError ? 2 : 0) + commandSuggestions.length + (billerLine ? 1 : 0);
   const logHeight = Math.max(MIN_LOG_HEIGHT, termHeight - reserved);
 
   // Re-wrapping every message on every streamed token is the one hot path here,
@@ -1764,6 +1825,7 @@ Requirements:
       >
         <Text bold color={UI_COLORS.logo}>{headerTitle}</Text>
         <Text color={UI_COLORS.subtitle}>{headerLLMInfo} · Mode: {appModeInfo(getAppMode()).label}</Text>
+        {billerLine && <Text color={UI_COLORS.subtitle}>{billerLine}</Text>}
         <Text color={UI_COLORS.subtitle}>Chat to create or modify this dashboard</Text>
       </Box>
 
