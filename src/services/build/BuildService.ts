@@ -49,9 +49,27 @@ function runCommand(
 
 export class BuildService {
   static async install(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<BuildResult> {
+    // Every generated dashboard gets its own node_modules, so the same React,
+    // Vite and Recharts trees are installed again per project. npm has no
+    // shared store to opt into, but it does have a local cache — these flags
+    // make it use it and stop it doing work nobody asked for:
+    //
+    //   --prefer-offline  take a package from the cache whenever the cache has
+    //                     it, instead of revalidating against the registry
+    //   --no-audit        skip the vulnerability report; it is a separate
+    //                     network round trip on a generated scaffold
+    //   --no-fund         skip the funding message
+    //
     // Cold-cache installs on slow machines/CI runners routinely exceed 2
     // minutes; npm itself reports real failures well before this ceiling.
-    const { code, stderr } = await runCommand('npm', ['install'], projectDir, 600_000, onProgress, signal);
+    const { code, stderr } = await runCommand(
+      'npm',
+      ['install', '--prefer-offline', '--no-audit', '--no-fund'],
+      projectDir,
+      600_000,
+      onProgress,
+      signal,
+    );
     if (code !== 0) return { success: false, error: stderr };
     return { success: true };
   }
