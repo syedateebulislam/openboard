@@ -337,9 +337,19 @@ describe.skipIf(!hasPython)('parse_sample.py CLI', () => {
   const helper = join(bundledScriptsDir(), 'parse_sample.py');
 
   it('reports a missing target as JSON', async () => {
-    const result = await runPython([helper, join(root, 'nope.py'), join(root, 'nope.txt'), 'Subject'], {
+    const missingScript = join(root, 'nope.py');
+    const missingSample = join(root, 'nope.txt');
+
+    // Declared as free text purely to reach the helper. This asserts what
+    // parse_sample.py does with a target that is not there; the runner's own
+    // guard rejects a non-existent path whose punctuation is unusual, which on
+    // Windows includes any temp dir under an 8.3 short name (C:\Users\RUNNER~1).
+    // No production call passes a missing path — every one writes or verifies
+    // the file first — so this is a property of the fixture, not of the caller.
+    const result = await runPython([helper, missingScript, missingSample, 'Subject'], {
       cwd: bundledScriptsDir(),
       timeoutMs: 30_000,
+      freeTextArgs: [missingScript, missingSample],
     });
     const parsed = JSON.parse(result.stdout.trim());
     expect(parsed.error).toBeTruthy();
