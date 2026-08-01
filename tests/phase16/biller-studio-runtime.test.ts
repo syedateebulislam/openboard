@@ -27,13 +27,28 @@ import { BillerScriptWriter } from '../../src/services/billers/BillerScriptWrite
 import { bundledScriptsDir } from '../../src/services/billers/BillerDiscoveryService.js';
 import { formatSamplePreview } from '../../src/screens/BillerStudioScreen.js';
 
-const hasPython = (() => {
+/** First interpreter name that starts, or undefined. */
+const pythonCommand = (() => {
   for (const command of ['python', 'python3', 'py']) {
     const probe = spawnSync(command, ['--version'], { encoding: 'utf-8' });
-    if (!probe.error && probe.status === 0) return true;
+    if (!probe.error && probe.status === 0) return command;
   }
-  return false;
+  return undefined;
 })();
+
+const hasPython = pythonCommand !== undefined;
+
+/**
+ * Whether beautifulsoup4 is importable.
+ *
+ * Separate from hasPython on purpose: probe_biller.py imports bs4 at module
+ * scope, so merely having an interpreter is not enough to load it. GitHub
+ * runners ship Python without bs4, and gating those tests on hasPython alone
+ * turned "dependency absent" into a red build on all eight matrix jobs.
+ */
+const hasBs4 =
+  hasPython &&
+  spawnSync(pythonCommand!, ['-c', 'import bs4'], { encoding: 'utf-8' }).status === 0;
 
 let root: string;
 let scriptsDir: string;
@@ -262,7 +277,9 @@ describe.skipIf(!hasPython)('dryRun output scanning', () => {
 
 // ── the probe script's own contract ──────────────────────────────────────────
 
-describe.skipIf(!hasPython)('probe_biller.py CLI', () => {
+// probe_biller.py imports bs4 at module scope, so these need the dependency,
+// not just an interpreter.
+describe.skipIf(!hasBs4)('probe_biller.py CLI', () => {
   const probe = join(bundledScriptsDir(), 'probe_biller.py');
 
   it('reports a bad sender as JSON rather than a stack trace', async () => {
@@ -320,7 +337,7 @@ describe.skipIf(!hasPython)('parse_sample.py CLI', () => {
 
 // ── the probe's text extraction ──────────────────────────────────────────────
 
-describe.skipIf(!hasPython)('probe_biller.py text extraction', () => {
+describe.skipIf(!hasBs4)('probe_biller.py text extraction', () => {
   let results: any;
 
   beforeEach(async () => {

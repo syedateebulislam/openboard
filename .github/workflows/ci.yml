@@ -23,6 +23,13 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      # The invoice fetchers are Python and the phase16 suite runs them for
+      # real. Without beautifulsoup4 those tests skip themselves, so install it
+      # to keep them exercised rather than silently sitting out on CI.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --quiet beautifulsoup4
       # Some unit tests commit inside scaffolded projects; runners ship with
       # no git identity, which ensureCommitAuthor correctly rejects.
       - run: |
