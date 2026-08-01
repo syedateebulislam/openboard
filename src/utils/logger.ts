@@ -6,7 +6,7 @@
  *  - Log file (~/.openboard/openboard.log) for persistent debugging
  */
 
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -31,13 +31,35 @@ function formatEntry(level: LogLevel, message: string, context?: unknown): strin
   const ts = new Date().toISOString();
   const sym = LEVEL_SYMBOLS[level];
   const ctx = context !== undefined ? ` ${JSON.stringify(context)}` : '';
-  return `${ts} ${sym} ${message}${ctx}`;
+  // Redact here rather than at call sites. Sanitizing was previously opt-in,
+  // which only works as long as every author remembers — and a log line is
+  // written once but read from disk indefinitely.
+  return sanitizeErrorMessage(`${ts} ${sym} ${message}${ctx}`);
+}
+
+/** Rotate at 5 MB, keeping one previous generation. */
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Roll the log over once it passes the size cap, so a long-lived install does
+ * not accumulate an unbounded file of operational detail on disk.
+ */
+async function rotateIfOversized(logFile: string): Promise<void> {
+  try {
+    const { size } = await stat(logFile);
+    if (size < MAX_LOG_BYTES) return;
+    await rename(logFile, `${logFile}.1`); // replaces any previous generation
+  } catch {
+    // No file yet, or the rename lost a race with another process — either way
+    // appending is still the right next step.
+  }
 }
 
 async function writeToFile(entry: string): Promise<void> {
   try {
     const logFile = getLogFile();
     await mkdir(dirname(logFile), { recursive: true });
+    await rotateIfOversized(logFile);
     await appendFile(logFile, entry + '\n', 'utf-8');
   } catch {
     // Silently ignore log write failures — never crash the app due to logging
@@ -107,6 +129,13 @@ export function createLogger(name: string): Logger {
  */
 export function sanitizeErrorMessage(message: string): string {
   return message
+    // Gmail App Passwords: 16 lowercase letters, often shown in groups of four.
+    // No prefix to anchor on, so anchor on the surrounding key name instead —
+    // a bare 16-letter word is far too common to redact on sight.
+    .replace(
+      /(app[_-]?password["']?\s*[=:]\s*["']?)[a-z]{4}[\s-]?[a-z]{4}[\s-]?[a-z]{4}[\s-]?[a-z]{4}/gi,
+      '$1***REDACTED***',
+    )
     // Anthropic API keys (sk-ant-...) — must come before generic sk- pattern
     .replace(/sk-ant-[A-Za-z0-9_-]{20,}/g, 'sk-ant-***REDACTED***')
     // OpenAI API keys (sk-...)

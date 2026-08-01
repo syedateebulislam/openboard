@@ -15,13 +15,61 @@
  * the scripts stay unmodified.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NON_BILLER_SCRIPTS, type BillerScript } from '../../types/billers.js';
 
 const KEY_PATTERN = /^KEY\s*=\s*["'](.+?)["']/m;
 const DISPLAY_NAME_PATTERN = /^DISPLAY_NAME\s*=\s*["'](.+?)["']/m;
+
+/**
+ * Bundled scripts that are not fetchers but still have to reach the user's
+ * folder. They deliberately do not start with `fetch_`, so `discoverBillers`
+ * skips them and they never appear as billers.
+ */
+export const BUNDLED_SUPPORT_SCRIPTS = ['probe_biller.py', 'parse_sample.py'] as const;
+
+/** Does this filename belong in the scripts folder? */
+function isInstallableScript(entry: string): boolean {
+  if ((BUNDLED_SUPPORT_SCRIPTS as readonly string[]).includes(entry)) return true;
+  return entry.startsWith('fetch_') && entry.endsWith('.py');
+}
+
+/** Absolute path of the probe helper inside the user's scripts folder. */
+export function probeScriptPath(scriptsDir: string): string {
+  return join(resolve(scriptsDir), 'probe_biller.py');
+}
+
+/** Absolute path of the parse-grading helper inside the user's scripts folder. */
+export function parseSampleScriptPath(scriptsDir: string): string {
+  return join(resolve(scriptsDir), 'parse_sample.py');
+}
+
+/**
+ * Copy any missing support scripts into the user's folder.
+ *
+ * installBundledScripts never overwrites and its menu entry only appears before
+ * a folder is configured, so anyone who set billers up on an earlier version
+ * has a folder with no helpers in it. Without this the parse gate would find no
+ * helper and wave the script through — a silently weakened check is worse than
+ * a missing feature, so this runs before the Studio needs them.
+ */
+export function ensureSupportScripts(scriptsDir: string): string[] {
+  const source = bundledScriptsDir();
+  const copied: string[] = [];
+  mkdirSync(resolve(scriptsDir), { recursive: true });
+
+  for (const name of BUNDLED_SUPPORT_SCRIPTS) {
+    const target = join(resolve(scriptsDir), name);
+    if (existsSync(target)) continue;
+    const origin = join(source, name);
+    if (!existsSync(origin)) continue;
+    copyFileSync(origin, target);
+    copied.push(name);
+  }
+  return copied;
+}
 
 /** The scripts' REPO_ROOT: two directories above the fetchers folder. */
 export function repoRootFor(scriptsDir: string): string {
@@ -151,7 +199,7 @@ export function installBundledScripts(targetDir: string): InstallResult {
   try {
     mkdirSync(targetDir, { recursive: true });
     for (const entry of readdirSync(source)) {
-      if (!entry.startsWith('fetch_') || !entry.endsWith('.py')) continue;
+      if (!isInstallableScript(entry)) continue;
       const destination = join(targetDir, entry);
       if (existsSync(destination)) {
         skipped.push(entry);
@@ -164,6 +212,107 @@ export function installBundledScripts(targetDir: string): InstallResult {
     return { installed, skipped, error: error.message };
   }
   return { installed, skipped };
+}
+
+/**
+ * The helper that reads credentials from the environment, inserted into
+ * fetchers written before OpenBoard stopped using a plaintext file.
+ */
+const LOAD_CREDENTIALS_HELPER = `
+
+def load_credentials() -> dict:
+    """Gmail IMAP credentials, preferring the environment over the disk.
+
+    OpenBoard passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
+    this process so the App Password never has to be written to a file. Running
+    the script by hand still works: it falls back to the credentials JSON this
+    fetcher has always read.
+    """
+    email = os.environ.get("OPENBOARD_GMAIL_EMAIL")
+    app_password = os.environ.get("OPENBOARD_GMAIL_APP_PASSWORD")
+    if email and app_password:
+        return {"email": email, "app_password": app_password}
+    return read_json(CREDENTIALS_PATH)
+`;
+
+const READ_JSON_BLOCK = `def read_json(path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+`;
+
+/**
+ * Bring one fetcher's source up to environment-based credentials.
+ *
+ * Returns undefined when no change is needed. Surgical on purpose: it inserts
+ * one helper and redirects one call, leaving any edits the user has made to
+ * parse() or the config block untouched. Replacing the whole file would be
+ * simpler and would silently discard their work.
+ */
+export function migrateFetcherSource(source: string): string | undefined {
+  const crlf = source.includes('\r\n');
+  const eol = (text: string) => (crlf ? text.replaceAll('\n', '\r\n') : text);
+
+  // Repair a fetcher damaged by the first version of this migration, which
+  // rewrote the call sites *after* inserting the helper and so rewrote the
+  // helper's own fallback into a call to itself. Harmless under OpenBoard,
+  // which sets the environment and returns before reaching it — but a
+  // standalone run would recurse until it blew the stack.
+  if (/return\s+load_credentials\(\)/.test(source)) {
+    return source.replace(/return\s+load_credentials\(\)/g, 'return read_json(CREDENTIALS_PATH)');
+  }
+
+  if (source.includes('def load_credentials(')) return undefined;
+  if (!source.includes('read_json(CREDENTIALS_PATH)')) return undefined;
+
+  const readJson = eol(READ_JSON_BLOCK);
+  if (!source.includes(readJson)) return undefined;
+
+  // Redirect the call sites FIRST, then insert the helper. The other order
+  // catches the helper's own `return read_json(CREDENTIALS_PATH)` fallback.
+  return source
+    .replaceAll('read_json(CREDENTIALS_PATH)', 'load_credentials()')
+    .replace(readJson, readJson + eol(LOAD_CREDENTIALS_HELPER));
+}
+
+/**
+ * Upgrade every installed fetcher that still expects the plaintext credentials
+ * file.
+ *
+ * OpenBoard <= 1.9.0 wrote secrets/gmail_app_credentials.json and the fetchers
+ * read it directly. That file is now deleted on sight, so a fetcher installed
+ * before the change fails on every run with FileNotFoundError. installBundled
+ * Scripts cannot help: it never overwrites, precisely so hand-edited fetchers
+ * survive upgrades. Hence an in-place patch instead of a recopy.
+ *
+ * Returns the filenames changed. Best-effort per file: one unreadable script
+ * must not stop the rest from being repaired.
+ */
+export function migrateInstalledFetchers(scriptsDir: string | undefined): string[] {
+  if (!scriptsDir) return [];
+  const dir = resolve(scriptsDir);
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+
+  const migrated: string[] = [];
+  for (const entry of entries) {
+    if (!entry.startsWith('fetch_') || !entry.endsWith('.py')) continue;
+    const path = join(dir, entry);
+    try {
+      const source = readFileSync(path, 'utf-8');
+      const updated = migrateFetcherSource(source);
+      if (!updated) continue;
+      writeFileSync(path, updated, 'utf-8');
+      migrated.push(entry);
+    } catch {
+      // Unreadable or read-only: leave it and carry on with the others.
+    }
+  }
+  return migrated;
 }
 
 /**

@@ -5,6 +5,10 @@ import jwt from 'jsonwebtoken'
 
 type LocalEnvironment = Record<string, string>
 
+// Real cost-12 bcrypt hash of a random value, used as the comparison target
+// when the submitted username is unknown so both paths cost the same.
+const DUMMY_PASSWORD_HASH = '$2a$12$W92ySjltBQ9DVXohMSLK0uqzKDN8dHd3T8qhx0oB.s8HHQWQWA6Ia'
+
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -45,7 +49,7 @@ function authenticated(req: IncomingMessage, env: LocalEnvironment): { username:
   const token = cookie(req, 'auth_token')
   if (!token || !env.JWT_SECRET) return null
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as { username?: string }
+    const payload = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }) as { username?: string }
     return payload.username ? { username: payload.username } : null
   } catch {
     return null
@@ -79,7 +83,11 @@ async function handleAuth(req: IncomingMessage, res: ServerResponse, env: LocalE
     return
   }
 
-  if (username !== env.DASHBOARD_USERNAME || !(await bcrypt.compare(password, hash))) {
+  // Compare a hash either way so an unknown username costs the same as a known
+  // one — `||` would short-circuit and make the two distinguishable by timing.
+  const usernameMatches = username === env.DASHBOARD_USERNAME
+  const passwordMatches = await bcrypt.compare(password, usernameMatches ? hash : DUMMY_PASSWORD_HASH)
+  if (!usernameMatches || !passwordMatches) {
     send(res, 401, { error: 'Invalid credentials' })
     return
   }

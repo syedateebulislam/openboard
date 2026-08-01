@@ -9,3 +9,6 @@ logs/
 Thumbs.db
 .claude/
 coverage/
+# The invoice fetchers are Python and the phase16 suite executes them.
+__pycache__/
+*.pyc

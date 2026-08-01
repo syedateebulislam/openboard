@@ -18,7 +18,9 @@ import { AuthService } from './services/auth/AuthService.js';
 import type { LLMConfig, LLMProviderName } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
 import { startBillerScheduler } from './services/billers/billerScheduler.js';
+import type { BillerSchedulerStatus } from './types/billers.js';
 import { BillerSettingsScreen } from './screens/BillerSettingsScreen.js';
+import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -46,7 +48,8 @@ export type Screen =
   | 'settings-github'
   | 'settings-llm'
   | 'settings-dashboard-auth'
-  | 'settings-billers';
+  | 'settings-billers'
+  | 'biller-studio';
 
 // Placeholder components with "Go Back" option
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
@@ -603,11 +606,16 @@ export function App() {
   const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
   const [billerConfigVersion, setBillerConfigVersion] = useState(0);
-
+  const [billerStatus, setBillerStatus] = useState<BillerSchedulerStatus | null>(null);
 
   // Same lifecycle for the invoice fetchers, but it only fires when a full
   // interval has elapsed since the last run — see billerScheduler for why.
-  useEffect(() => startBillerScheduler(() => {}), [billerConfigVersion]);
+  //
+  // The status is held in state rather than dropped: the loop is otherwise
+  // completely silent, so a working interval and a broken one looked identical
+  // from the TUI. Only billerConfigVersion re-arms the scheduler, so status
+  // updates re-render without restarting it.
+  useEffect(() => startBillerScheduler(setBillerStatus), [billerConfigVersion]);
 
   const navigate = (s: Screen) => setScreen(s);
 
@@ -679,6 +687,7 @@ export function App() {
           onNavigate={navigate}
           autoGenerateInitial={shouldAutoGenerate}
           allBoards={allBoardsMode}
+          billerStatus={billerStatus}
         />
       );
     
@@ -705,6 +714,14 @@ export function App() {
         <BillerSettingsScreen
           onNavigate={navigate}
           onBillersConfigured={() => setBillerConfigVersion((n) => n + 1)}
+        />
+      );
+
+    case 'biller-studio':
+      return (
+        <BillerStudioScreen
+          onNavigate={navigate}
+          onBillerCreated={() => setBillerConfigVersion((n) => n + 1)}
         />
       );
 

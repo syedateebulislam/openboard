@@ -66,6 +66,21 @@ def read_json(path) -> dict:
         return json.load(f)
 
 
+def load_credentials() -> dict:
+    """Gmail IMAP credentials, preferring the environment over the disk.
+
+    OpenBoard passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
+    this process so the App Password never has to be written to a file. Running
+    the script by hand still works: it falls back to the credentials JSON this
+    fetcher has always read.
+    """
+    email = os.environ.get("OPENBOARD_GMAIL_EMAIL")
+    app_password = os.environ.get("OPENBOARD_GMAIL_APP_PASSWORD")
+    if email and app_password:
+        return {"email": email, "app_password": app_password}
+    return read_json(CREDENTIALS_PATH)
+
+
 def load_state(path) -> List[str]:
     if not os.path.exists(path):
         return []
@@ -260,7 +275,7 @@ def run(args) -> Tuple[int, int]:
     Path(RAW_DIR).mkdir(parents=True, exist_ok=True)
     Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)
 
-    credentials = read_json(CREDENTIALS_PATH)
+    credentials = load_credentials()
     processed_uids = set(load_state(STATE_PATH))
 
     try:

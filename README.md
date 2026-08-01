@@ -229,6 +229,8 @@ Shell-owned files (`App.tsx`, App.css, header components, api handlers, hooks) a
 - Because the raw data is not in the GitHub repo, deploys must go through OpenBoard (Vercel CLI upload). A Vercel *Git-integration* build from the GitHub repo will not contain your data.
 - Data pushed to GitHub before this protection existed remains in old commits; rewrite history or recreate the repo if that matters to you.
 - Generated repos are created **private** by default. Anyone you grant repo access to can see everything that is committed.
+- **Your data is sent to the LLM provider you choose.** Generating or updating a dashboard puts a summary of your dataset *and a sample of real rows* into the prompt, which is transmitted to whichever provider is configured (Anthropic, OpenAI, Google, Moonshot). The prompts instruct the model never to embed that data in the generated code, but the transmission itself is inherent to how generation works. If your invoices or financial records must not leave your machine, use local mode (Ollama) — no dashboard content is sent anywhere in that mode.
+- Your Gmail App Password for the invoice fetchers is stored AES-256-GCM-encrypted alongside the other secrets and is handed to each fetcher through its process environment at run time. It is never written to disk. Versions up to 1.8.0 wrote it in plaintext to `<scripts>/../../secrets/gmail_app_credentials.json`; that file is deleted automatically on the next fetch or password save. **If you are on 1.9.0 and your fetchers stopped working, upgrade to 2.0.0** — 1.9.0 removed that file without updating fetchers installed before it, so they failed trying to read it (reported misleadingly as a missing Python). 2.0.0 repairs installed fetchers in place on the next run, keeping any edits you have made to them. If you have stopped using the fetchers, delete it by hand — and treat the App Password as exposed if that file was ever backed up or synced, revoking it at myaccount.google.com/apppasswords.
 - Provider keys and tokens are stored AES-256-GCM-encrypted in `~/.openboard/config.json`. The encryption key is derived from `OPENBOARD_ENCRYPTION_SECRET`, or from a generated per-machine secret stored at `~/.openboard/.encryption-secret` (file mode 0600). Note: an attacker with full access to your home directory can read both files — set `OPENBOARD_ENCRYPTION_SECRET` (e.g. from an OS keychain) if you need stronger protection. Legacy plaintext secrets are re-encrypted automatically on first read.
 - Dashboard login rate limiting in the deployed app is per serverless instance (best-effort). For a hard global limit, put the deployment behind Vercel's attack challenge / a WAF, or back the limiter with Vercel KV.
 
@@ -273,4 +275,6 @@ Issues and pull requests are welcome. Please run `npm run lint` and `npm run tes
 
 ## License
 
-[MIT](./LICENSE) © Syed Ateebul Islam
+[Apache 2.0](./LICENSE) © Syed Ateebul Islam
+
+Versions 1.8.0 and earlier were released under the MIT License. Versions 1.9.0 and later are licensed under Apache-2.0.

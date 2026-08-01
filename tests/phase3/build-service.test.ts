@@ -225,7 +225,14 @@ Found 1 error.`;
       mockCrossSpawn.mockResolvedValueOnce(mockSuccess());
       const result = await BuildService.install('/test');
       expect(result.success).toBe(true);
-      expect(mockCrossSpawn).toHaveBeenCalledWith('npm', ['install'], expect.any(Object));
+      // Every generated dashboard installs its own copy of the same React/Vite
+      // tree, so the install leans on npm's cache and skips the audit/funding
+      // round trips.
+      expect(mockCrossSpawn).toHaveBeenCalledWith(
+        'npm',
+        ['install', '--prefer-offline', '--no-audit', '--no-fund'],
+        expect.any(Object),
+      );
     });
   });
 });

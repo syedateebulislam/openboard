@@ -12,9 +12,11 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
 import {
+  BUNDLED_SUPPORT_SCRIPTS,
   bundledScriptsDir,
   credentialsPathFor,
   discoverBillers,
+  probeScriptPath,
   installBundledScripts,
   isInsideScriptsDir,
   repoRootFor,
@@ -29,6 +31,8 @@ import {
 import {
   isBillerSyncConfigured,
   msUntilDue,
+  msUntilNextRun,
+  shouldAnchorRun,
   startBillerScheduler,
 } from '../../src/services/billers/billerScheduler.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
@@ -203,43 +207,53 @@ describe('Biller invoice fetchers', () => {
       updateBySelector: vi.fn(async () => ({ success: true })),
     });
 
-    it('writes the credentials file the scripts expect', () => {
+    it('passes credentials to the fetchers through the environment', () => {
       const service = new BillerFetcherService({ settings: () => settings() });
-      const path = service.writeCredentialsFile();
-      expect(path).toBe(credentialsPathFor(scriptsDir));
-      expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({
-        email: 'user@gmail.com',
-        app_password: 'abcdefghijklmnop',
+      expect(service.credentialEnv()).toEqual({
+        OPENBOARD_GMAIL_EMAIL: 'user@gmail.com',
+        OPENBOARD_GMAIL_APP_PASSWORD: 'abcdefghijklmnop',
       });
     });
 
-    it('refuses to write credentials when the account is incomplete', () => {
+    it('refuses to build credentials when the account is incomplete', () => {
       const service = new BillerFetcherService({ settings: () => settings({ appPassword: undefined }) });
-      expect(() => service.writeCredentialsFile()).toThrow(/App Password/i);
+      expect(() => service.credentialEnv()).toThrow(/App Password/i);
       const noDir = new BillerFetcherService({ settings: () => settings({ scriptsDir: undefined }) });
-      expect(() => noDir.writeCredentialsFile()).toThrow(/folder/i);
+      expect(() => noDir.credentialEnv()).toThrow(/folder/i);
     });
 
-    it('replaces an existing credentials file cleanly when the password changes', () => {
-      // Rewritten before every run, so a stale password must not survive and the
-      // file must never end up with two JSON documents concatenated.
-      const first = new BillerFetcherService({ settings: () => settings() });
-      const path = first.writeCredentialsFile();
-      const second = new BillerFetcherService({
-        settings: () => settings({ appPassword: 'zzzzzzzzzzzzzzzz', email: 'new@gmail.com' }),
+    it('never writes the App Password to disk', async () => {
+      // The whole point of the env-var handoff: a completed run must leave no
+      // plaintext credential behind anywhere under the scripts tree.
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: ['zomato'] }),
+        updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: 'ok' }),
       });
-      second.writeCredentialsFile();
-      const raw = readFileSync(path, 'utf-8');
-      expect(JSON.parse(raw)).toEqual({ email: 'new@gmail.com', app_password: 'zzzzzzzzzzzzzzzz' });
-      expect(raw.trim().endsWith('}')).toBe(true);
+      await service.syncEnabled();
+      expect(existsSync(credentialsPathFor(scriptsDir))).toBe(false);
     });
 
-    it('creates the secrets folder when it is missing', () => {
-      const fresh = join(root, 'fresh', 'scripts', 'invoice_fetchers');
-      mkdirSync(fresh, { recursive: true });
-      const service = new BillerFetcherService({ settings: () => settings({ scriptsDir: fresh }) });
-      const path = service.writeCredentialsFile();
-      expect(existsSync(path)).toBe(true);
+    it('deletes a plaintext credentials file left by an older version', async () => {
+      // Upgrading alone would otherwise strand a readable App Password on disk,
+      // since nothing reads that file any more.
+      const legacy = credentialsPathFor(scriptsDir);
+      mkdirSync(join(root, 'secrets'), { recursive: true });
+      writeFileSync(legacy, JSON.stringify({ email: 'old@gmail.com', app_password: 'oldoldoldoldold1' }));
+      expect(existsSync(legacy)).toBe(true);
+
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: ['zomato'] }),
+        updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: 'ok' }),
+      });
+      await service.syncEnabled();
+      expect(existsSync(legacy)).toBe(false);
+    });
+
+    it('reports nothing to remove when no legacy file exists', () => {
+      const service = new BillerFetcherService({ settings: () => settings() });
+      expect(service.removeLegacyCredentialsFile()).toBe(false);
     });
 
     it('keeps going when one biller fails, and preserves order', async () => {
@@ -653,6 +667,206 @@ describe('Biller invoice fetchers', () => {
       stop();
     });
 
+    // ── interval anchoring ───────────────────────────────────────────────────
+    // The loop used a fixed setInterval pinned to process start. After a
+    // startup catch-up the next tick landed a partial interval later, and
+    // because the scheduler is restarted on every biller settings change, that
+    // interval was reset to zero each time. Runs must be spaced from the run
+    // that actually happened, not from when the process booted.
+    describe('interval anchoring', () => {
+      const MIN = 60 * 1000;
+
+      beforeEach(() => vi.useFakeTimers());
+      afterEach(() => vi.useRealTimers());
+
+      const runSchedule = async (settings: BillerSettings, minutes: number) => {
+        const firedAt: number[] = [];
+        const start = Date.now();
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => settings,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              firedAt.push(Math.round((Date.now() - start) / MIN));
+              return [];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+        });
+        for (let i = 0; i < minutes; i++) await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+        return firedAt;
+      };
+
+      it('spaces every run a full interval apart after a startup catch-up', async () => {
+        // 50 min since the last run on a 60 min interval -> catch-up at +10,
+        // then a full 60 between each subsequent run.
+        const lastRunAt = new Date(Date.now() - 50 * MIN).toISOString();
+        const firedAt = await runSchedule({ ...ready, lastRunAt }, 180);
+        expect(firedAt).toEqual([10, 70, 130]);
+      });
+
+      it('spaces every run a full interval apart when overdue at startup', async () => {
+        const firedAt = await runSchedule(ready, 150);
+        expect(firedAt).toEqual([0, 60, 120]);
+      });
+
+      it('does not fire early when the interval is short', async () => {
+        const firedAt = await runSchedule({ ...ready, syncIntervalMinutes: 5 }, 20);
+        expect(firedAt).toEqual([0, 5, 10, 15, 20]);
+      });
+
+      // "Fetch now" stamped lastRunAt from a finally block, so a press that ran
+      // nothing — no billers enabled, or the scripts folder gone — still moved
+      // the anchor and pushed the next scheduled run out by a full interval.
+      // That is what made a correct interval look like it never fired.
+      it('only counts a manual fetch as a run when a fetcher actually ran', () => {
+        expect(shouldAnchorRun([])).toBe(false);
+        expect(shouldAnchorRun([
+          { key: 'z', displayName: 'Z', ok: true, changed: true },
+        ])).toBe(true);
+        // A failed run still anchors, matching tick(): a biller that is broken
+        // today must not make every launch retry it forever.
+        expect(shouldAnchorRun([
+          { key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' },
+        ])).toBe(true);
+      });
+
+      it('keeps the scheduled run on time when a manual fetch did nothing', () => {
+        const now = Date.parse('2026-07-26T12:00:00Z');
+        const lastRunAt = new Date(now - 50 * MIN).toISOString();
+        const settings = { ...ready, lastRunAt };
+        const before = msUntilDue(settings, now);
+
+        // A no-op "Fetch now" is gated by shouldAnchorRun, so lastRunAt is
+        // untouched and the pending run keeps its original time.
+        const anchored = shouldAnchorRun([]) ? new Date(now).toISOString() : settings.lastRunAt;
+        expect(msUntilDue({ ...settings, lastRunAt: anchored }, now)).toBe(before);
+        expect(before).toBe(10 * MIN);
+      });
+
+      // The interval is the period between runs. Scheduling a full interval
+      // from completion instead of from the start made every cycle drift by the
+      // fetch duration, and the drift compounded across a long session.
+      it('spaces runs by the interval, not the interval plus the fetch', async () => {
+        const FETCH_MS = 10 * MIN;
+        const firedAt: number[] = [];
+        const start = Date.now();
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              firedAt.push(Math.round((Date.now() - start) / MIN));
+              await new Promise((resolve) => setTimeout(resolve, FETCH_MS));
+              return [];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+        });
+
+        for (let i = 0; i < 150; i++) await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+        // A 10-minute fetch on a 60-minute interval must still start on the
+        // hour — not at 0, 70, 140.
+        expect(firedAt).toEqual([0, 60, 120]);
+      });
+
+      it('starts the next run immediately when a fetch outlasts its interval', async () => {
+        expect(msUntilNextRun(0, 5 * MIN, 2 * MIN)).toBe(3 * MIN);
+        expect(msUntilNextRun(0, 5 * MIN, 5 * MIN)).toBe(0);
+        // Overran the period: due the moment it ends, never a negative delay.
+        expect(msUntilNextRun(0, 5 * MIN, 9 * MIN)).toBe(0);
+      });
+
+      // A scheduled run used to call syncEnabled() with no onProgress at all,
+      // so it produced no output anywhere. "Last run" and "Next run" advanced on
+      // the settings screen while the log pane under them stayed empty, which
+      // read as the schedule never firing.
+      it('reports a scheduled run through the activity log', async () => {
+        const lines: string[] = [];
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: {
+            syncEnabled: vi.fn(async (options: any) => {
+              options?.onProgress?.('[zomato] fetching invoices…');
+              return [{ key: 'zomato', displayName: 'Zomato', ok: true, changed: true }];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+          onProgress: (line) => lines.push(line),
+        });
+
+        await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+
+        // The fetcher's own progress must reach the log, not just a summary.
+        expect(lines.some((line) => line.includes('[zomato] fetching invoices…'))).toBe(true);
+        expect(lines.some((line) => line.startsWith('Scheduled fetch started'))).toBe(true);
+        expect(lines.some((line) => line.includes('new invoices for zomato'))).toBe(true);
+      });
+
+      it('reports a scheduled failure through the activity log', async () => {
+        const lines: string[] = [];
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: { syncEnabled: vi.fn(async () => { throw new Error('IMAP down'); }) } as any,
+          recordRun: vi.fn(),
+          onProgress: (line) => lines.push(line),
+        });
+
+        await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+
+        expect(lines.some((line) => line.includes('Scheduled fetch failed: IMAP down'))).toBe(true);
+      });
+
+      it('advertises the time the pending timer really fires', async () => {
+        // nextRunAt used to be recomputed as "now + interval" on every emit, so
+        // it slid forward and never matched the run that was actually queued.
+        const seen: (string | undefined)[] = [];
+        const lastRunAt = new Date(Date.now() - 50 * MIN).toISOString();
+        const stop = startBillerScheduler((status) => seen.push(status.nextRunAt), {
+          settings: () => ({ ...ready, lastRunAt }),
+          fetcher: { syncEnabled: vi.fn(async () => []) } as any,
+          recordRun: vi.fn(),
+        });
+
+        const advertised = Date.parse(seen[seen.length - 1]!);
+        await vi.advanceTimersByTimeAsync(10 * MIN);
+        // The run fired when the status said it would.
+        expect(Math.abs(advertised - Date.now())).toBeLessThan(MIN);
+        stop();
+      });
+
+      it('backs off after repeated failures and recovers on success', async () => {
+        const results = [
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: false, changed: false, error: 'boom' }],
+          [{ key: 'z', displayName: 'Z', ok: true, changed: false }],
+        ];
+        const firedAt: number[] = [];
+        const start = Date.now();
+        let call = 0;
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              firedAt.push(Math.round((Date.now() - start) / MIN));
+              return results[Math.min(call++, results.length - 1)];
+            }),
+          } as any,
+          recordRun: vi.fn(),
+        });
+
+        for (let i = 0; i < 700; i++) await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+        // Two failures keep the normal 60; the third trips the backoff and
+        // pushes the next run out by 240 (120 -> 360); the success there drops
+        // the gap straight back to 60.
+        expect(firedAt.slice(0, 6)).toEqual([0, 60, 120, 360, 420, 480]);
+      });
+    });
+
     it('survives a fetcher that throws instead of returning results', async () => {
       const onStatus = vi.fn();
       const stop = startBillerScheduler(onStatus, {
@@ -766,7 +980,20 @@ describe('Biller invoice fetchers', () => {
       expect(result.error).toBeUndefined();
       expect(result.installed.length).toBeGreaterThan(0);
       expect(result.skipped).toEqual([]);
-      expect(discoverBillers(target).length).toBe(result.installed.length);
+      // Support scripts install alongside the fetchers but are not billers, so
+      // the discovered count is the installed count minus those.
+      expect(discoverBillers(target).length).toBe(result.installed.length - BUNDLED_SUPPORT_SCRIPTS.length);
+    });
+
+    it('installs the probe helper without listing it as a biller', () => {
+      const target = join(root, 'installed-probe');
+      const result = installBundledScripts(target);
+
+      // It has to reach the user's folder — Biller Studio spawns it from there.
+      expect(result.installed).toContain('probe_biller.py');
+      expect(existsSync(probeScriptPath(target))).toBe(true);
+      // ...but it must never show up beside the real billers.
+      expect(discoverBillers(target).map((b) => b.key)).not.toContain('probe_biller');
     });
 
     it('never overwrites a fetcher the user has edited', () => {

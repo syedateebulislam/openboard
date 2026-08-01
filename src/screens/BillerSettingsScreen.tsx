@@ -9,13 +9,21 @@ import { ConfigService } from '../services/config/ConfigService.js';
 import { TypedConfigRepository } from '../services/config/TypedConfigRepository.js';
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
 import {
-  credentialsPathFor,
   discoverBillers,
   installBundledScripts,
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
+import {
+  isBillerSyncConfigured,
+  msUntilDue,
+  recordBillerRun,
+  shouldAnchorRun,
+} from '../services/billers/billerScheduler.js';
 import { defaultScriptsDir } from '../types/billers.js';
+import { LogPane } from '../components/LogPane.js';
+import { useProgressLog } from '../hooks/useProgressLog.js';
+import { billerActivityLog } from '../services/billers/billerActivityLog.js';
 
 interface Props {
   onNavigate: (s: Screen) => void;
@@ -30,6 +38,16 @@ interface Props {
 // secret for it.
 type Step = 'menu' | 'scripts-dir' | 'email' | 'app-password' | 'interval';
 
+/** "in 4 min" / "in 2h 10m", or "due now" once the interval has elapsed. */
+function describeNextRun(msRemaining: number): string {
+  if (msRemaining <= 0) return 'due now';
+  const totalMinutes = Math.ceil(msRemaining / 60_000);
+  if (totalMinutes < 60) return `in ${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `in ${hours}h` : `in ${hours}h ${minutes}m`;
+}
+
 export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props) {
   const [step, setStep] = useState<Step>('menu');
   const [dirInput, setDirInput] = useState('');
@@ -40,11 +58,19 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   const [busy, setBusy] = useState(false);
   const [, setRefresh] = useState(0);
 
+  // Bound to the shared activity log, not local state: scheduled fetches run
+  // with no screen mounted, so their output has to survive until someone opens
+  // this screen. "Fetch now" writes to the same log.
+  // `status` stays for short inline form validation next to the input.
+  const log = useProgressLog({ store: billerActivityLog });
+
   useInput((_input, key) => {
     if (key.escape && !busy) {
       if (step === 'menu') onNavigate('settings');
       else setStep('menu');
     }
+    // PgUp/PgDn scroll the log without disturbing the menu's arrow keys.
+    log.onKey(key);
   });
 
   const config = new ConfigService();
@@ -94,12 +120,15 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     }
     config.setEncrypted('billers.appPassword', password);
     setPasswordInput('');
-    try {
-      const written = new BillerFetcherService().writeCredentialsFile();
-      setStatus(`App Password saved. Credentials written for the fetchers: ${written}`);
-    } catch (error: any) {
-      setStatus(`App Password saved, but the credentials file could not be written: ${error.message}`);
-    }
+    // Nothing is written to disk for the fetchers any more — the password is
+    // handed to each one through its environment at run time. Clear the
+    // plaintext file an older version may have left behind.
+    const removed = new BillerFetcherService().removeLegacyCredentialsFile();
+    setStatus(
+      removed
+        ? 'App Password saved (encrypted). Removed the old plaintext credentials file left by a previous version.'
+        : 'App Password saved (encrypted). It is passed to the fetchers at run time and never written to disk.',
+    );
     setStep('menu');
     changed();
   };
@@ -111,7 +140,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       return;
     }
     config.set('billers.syncIntervalMinutes', minutes);
-    setStatus(`Fetch interval set to ${minutes} min (${(minutes / 60).toFixed(1)}h). Applied on the next launch or after a toggle.`);
+    setStatus(`Fetch interval set to ${minutes} min (${(minutes / 60).toFixed(1)}h). The next run is now scheduled from the last fetch.`);
     setIntervalInput('');
     setStep('menu');
     changed();
@@ -128,29 +157,40 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
 
   const syncNow = async () => {
     setBusy(true);
-    setStatus('Running enabled invoice fetchers…');
+    setStatus('');
+    log.append('Running enabled invoice fetchers…');
     try {
+      // No truncation: the pane wraps, so a long fetcher line stays readable
+      // instead of being cut at 120 characters.
       const results = await new BillerFetcherService().syncEnabled({
-        onProgress: (line) => setStatus(line.slice(0, 120)),
+        onProgress: log.append,
       });
       if (results.length === 0) {
         // Distinguish "none switched on" from "the folder went missing".
-        setStatus(billers.length === 0
+        log.append(billers.length === 0
           ? `No biller scripts found in ${settings.scriptsDir}. Check the folder still exists, then use "Rescan billers folder".`
           : 'No billers are enabled yet — switch one on in the list above.');
         return;
       }
+      // A manual fetch is the same work a scheduled tick does, so a real run
+      // re-anchors the schedule. Without this the restart below still saw the
+      // old lastRunAt, judged the loop overdue, and fetched everything again.
+      if (shouldAnchorRun(results)) recordBillerRun();
+
       const failed = results.filter((r) => !r.ok);
       const updated = results.filter((r) => r.changed);
-      setStatus(failed.length > 0
+      log.append(failed.length > 0
         ? `Failed: ${failed.map((r) => `${r.displayName} (${r.error})`).join(' · ')}`
         : updated.length > 0
           ? `Fetched new invoices for ${updated.map((r) => r.displayName).join(', ')}; dashboards refreshed.`
           : `Ran ${results.length} fetcher(s) — no new invoices found.`);
     } catch (error: any) {
-      setStatus(`Sync failed: ${error.message}`);
+      log.append(`Sync failed: ${error.message}`);
     } finally {
       setBusy(false);
+      // Refresh the screen and restart the scheduler either way. When nothing
+      // was anchored above the restart re-arms from the unchanged lastRunAt, so
+      // the pending run keeps its original time.
       changed();
     }
   };
@@ -191,6 +231,9 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
             label: `${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.displayName}${existsSync(biller.csvPath) ? '' : ' (no data yet)'}`,
             value: `toggle:${biller.key}`,
           })),
+          // Sits directly under the list it adds to, the way ManageBoardsScreen
+          // puts "Add new dashboard" beside the dashboards.
+          { label: '✚ Add a new biller (Biller Studio)', value: 'add-biller' },
           { label: `Fetch interval (current: ${settings.syncIntervalMinutes} min)`, value: 'interval' },
           { label: 'Fetch now', value: 'sync' },
           { label: 'Rescan billers folder', value: 'rescan' },
@@ -210,6 +253,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     else if (item.value === 'email') { setEmailInput(settings.email ?? ''); setStep('email'); }
     else if (item.value === 'password') setStep('app-password');
     else if (item.value === 'interval') { setIntervalInput(String(settings.syncIntervalMinutes)); setStep('interval'); }
+    else if (item.value === 'add-biller') onNavigate('biller-studio');
     else if (item.value === 'sync') void syncNow();
     else if (item.value === 'rescan') { setStatus(`Found ${discoverBillers(settings.scriptsDir).length} biller fetcher(s).`); refresh(); }
     else if (item.value === 'clear') clearCredentials();
@@ -240,8 +284,18 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
             Last run: {new Date(settings.lastRunAt).toLocaleString()}
           </Text>
         )}
+        {/*
+          Derived from the same lastRunAt anchor the scheduler uses, so it needs
+          no status plumbing into this screen. The loop only runs while OpenBoard
+          is open, which the wording has to be honest about.
+        */}
+        {isBillerSyncConfigured(settings) && (
+          <Text color={UI_COLORS.subtitle}>
+            Next run: {describeNextRun(msUntilDue(settings))} (while OpenBoard is open)
+          </Text>
+        )}
         {hasDir && (
-          <Text color={UI_COLORS.subtitle}>Credentials file: {credentialsPathFor(settings.scriptsDir!)}</Text>
+          <Text color={UI_COLORS.subtitle}>Credentials: encrypted in config, passed to fetchers at run time</Text>
         )}
       </Box>
 
@@ -317,13 +371,16 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
 
       <Box marginTop={1} flexDirection="column">
         <Text color={UI_COLORS.subtitle}>
-          The fetchers read Gmail over IMAP, so they need their credentials in a plain file
-          on this machine — protected only as well as the folder it sits in (owner-only
-          permissions apply on macOS/Linux; Windows uses the folder's ACLs). An App Password
-          grants full mailbox read access — revoke it in your Google account to cut access off.
+          The fetchers read Gmail over IMAP. Your App Password is stored encrypted and handed
+          to each fetcher through its environment at run time — it is never written to disk.
+          An App Password grants full mailbox read access, so revoke it in your Google account
+          to cut access off. Fetchers need Python 3 with beautifulsoup4 installed.
         </Text>
         <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open. Press ESC to go back</Text>
       </Box>
+
+      {/* Last child: progress belongs below every option, never above them. */}
+      <LogPane view={log.view} title="Fetch log" />
     </Box>
   );
 }

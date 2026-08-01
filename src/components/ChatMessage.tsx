@@ -1,64 +1,47 @@
 /**
- * ChatMessage — Renders a chat message in the TUI.
- * Supports user/assistant/system/error message types with distinct colors.
+ * ChatMessage — Renders ONE line of the chat log in the TUI.
+ *
+ * The log is flattened to lines by `utils/chatViewport` before it reaches
+ * here, so a row is already wrapped to the viewport width: rendering per line
+ * (rather than per message) is what lets PgUp/PgDn land on an exact row and
+ * lets the scrollbar thumb match what is on screen.
  */
 import React, { memo } from 'react';
-import { Box, Text } from 'ink';
+import { Text } from 'ink';
+import type { ChatLine } from '../utils/chatViewport.js';
 import type { ChatMessage as ChatMessageType } from '../types/board.js';
 
 // System/status messages must not look like failures — reserve red for errors.
-const ROLE_CONFIG = {
-  user:      { label: 'You', color: '#90EE90' },
-  assistant: { label: 'LLM', color: '#FFD166' },
-  system:    { label: 'Sys', color: '#6EC5E9' },
-  error:     { label: 'Err', color: 'red'   as const },
+export const ROLE_COLORS: Record<ChatMessageType['role'], string> = {
+  user: '#90EE90',
+  assistant: '#FFD166',
+  system: '#6EC5E9',
+  error: 'red',
 };
 
-// Max visible lines per message to prevent layout thrashing.
-const DEFAULT_MAX_DISPLAY_LINES = 20;
-
 interface Props {
-  message: ChatMessageType;
-  maxLines?: number;
+  line: ChatLine;
 }
 
-/**
- * Truncate content to the last N lines for display.
- * Keeps the tail so the user always sees the latest output.
- */
-function truncateForDisplay(content: string, maxLines: number): { text: string; truncated: boolean } {
-  const lines = content.split('\n');
-  if (lines.length <= maxLines) {
-    return { text: content, truncated: false };
-  }
-  return {
-    text: '...\n' + lines.slice(-maxLines).join('\n'),
-    truncated: true,
-  };
-}
-
-function ChatMessageInner({ message, maxLines = DEFAULT_MAX_DISPLAY_LINES }: Props) {
-  const config = ROLE_CONFIG[message.role];
-  const { text } = truncateForDisplay(message.content, maxLines);
-
+function ChatLineRowInner({ line }: Props) {
   return (
-    <Box flexDirection="column" marginBottom={0}>
-      <Box>
-        <Text color={config.color} bold>{config.label}: </Text>
-        <Text wrap="wrap">{text}{message.isStreaming ? '▋' : ''}</Text>
-      </Box>
-    </Box>
+    <Text wrap="truncate-end">
+      <Text color={ROLE_COLORS[line.role]} bold>{line.label}</Text>
+      {line.text}
+      {line.streaming ? '▋' : ''}
+    </Text>
   );
 }
 
-// Memoize: skip re-render if content and streaming state haven't changed
-export const ChatMessageComponent = memo(ChatMessageInner, (prev, next) => {
+// Memoize: rows are re-rendered on every streamed token, but only the tail
+// line of the streaming message actually changes.
+export const ChatLineRow = memo(ChatLineRowInner, (prev, next) => {
   return (
-    prev.message.id === next.message.id &&
-    prev.message.content === next.message.content &&
-    prev.message.isStreaming === next.message.isStreaming &&
-    prev.maxLines === next.maxLines
+    prev.line.key === next.line.key &&
+    prev.line.text === next.line.text &&
+    prev.line.label === next.line.label &&
+    prev.line.streaming === next.line.streaming
   );
 });
 
-export default ChatMessageComponent;
+export default ChatLineRow;
