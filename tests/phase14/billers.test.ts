@@ -12,9 +12,11 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
 import {
+  BUNDLED_SUPPORT_SCRIPTS,
   bundledScriptsDir,
   credentialsPathFor,
   discoverBillers,
+  probeScriptPath,
   installBundledScripts,
   isInsideScriptsDir,
   repoRootFor,
@@ -978,7 +980,20 @@ describe('Biller invoice fetchers', () => {
       expect(result.error).toBeUndefined();
       expect(result.installed.length).toBeGreaterThan(0);
       expect(result.skipped).toEqual([]);
-      expect(discoverBillers(target).length).toBe(result.installed.length);
+      // Support scripts install alongside the fetchers but are not billers, so
+      // the discovered count is the installed count minus those.
+      expect(discoverBillers(target).length).toBe(result.installed.length - BUNDLED_SUPPORT_SCRIPTS.length);
+    });
+
+    it('installs the probe helper without listing it as a biller', () => {
+      const target = join(root, 'installed-probe');
+      const result = installBundledScripts(target);
+
+      // It has to reach the user's folder — Biller Studio spawns it from there.
+      expect(result.installed).toContain('probe_biller.py');
+      expect(existsSync(probeScriptPath(target))).toBe(true);
+      // ...but it must never show up beside the real billers.
+      expect(discoverBillers(target).map((b) => b.key)).not.toContain('probe_biller');
     });
 
     it('never overwrites a fetcher the user has edited', () => {
