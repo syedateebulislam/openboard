@@ -105,7 +105,14 @@ const ENCRYPTED_PREFIX = 'enc:';
 
 /**
  * Derives a 32-byte encryption key from the OPENBOARD_ENCRYPTION_SECRET env var.
- * Throws if the secret is not set — never falls back to insecure defaults.
+ *
+ * When that variable is unset we generate a random per-machine secret and
+ * persist it to ~/.openboard/.encryption-secret rather than failing — the CLI
+ * has to work on a fresh install with no prior setup. Note the consequence:
+ * the key then lives next to the config file it protects, so this defends
+ * against a leaked config.json, not against an attacker who can already read
+ * the home directory. Set OPENBOARD_ENCRYPTION_SECRET from an OS keychain for
+ * a real trust boundary. Documented under "Data Privacy & Security" in README.
  */
 function deriveEncryptionKey(): Buffer {
   const secret = process.env.OPENBOARD_ENCRYPTION_SECRET;

@@ -2,23 +2,22 @@
  * BillerFetcherService — run the external per-biller invoice fetchers and turn
  * their output into dashboards.
  *
- * One run per biller is: materialize the credentials file the script expects →
- * hash its CSV → spawn the script → hash again. An unchanged hash means the
- * fetcher found no new invoices, so the dashboard step is skipped entirely and
- * no LLM call happens. This change-gate mirrors the user's existing external
- * run_biller_cron.py, which OpenBoard is replacing.
+ * One run per biller is: hash its CSV → spawn the script → hash again. An
+ * unchanged hash means the fetcher found no new invoices, so the dashboard step
+ * is skipped entirely and no LLM call happens. This change-gate mirrors the
+ * user's existing external run_biller_cron.py, which OpenBoard is replacing.
  *
- * Credentials note: the JSON written for the scripts is necessarily plaintext —
- * the Python fetchers have no way to decrypt anything. OpenBoard's own copy in
- * config.json stays encrypted. The file is requested with owner-only 0600, but
- * that is POSIX-only: on Windows Node ignores the mode bits and the file simply
- * inherits the parent folder's ACLs. Treat it as "as protected as the folder it
- * sits in", not as guaranteed owner-only. See the security section in the docs.
+ * Credentials note: the Gmail App Password is handed to each fetcher through
+ * the spawned process's environment, never written to disk. It previously went
+ * into a plaintext secrets/gmail_app_credentials.json, which meant a mailbox
+ * credential sat unencrypted for the lifetime of the install while every other
+ * secret was AES-GCM encrypted in config.json. The env var lives only as long
+ * as the subprocess. Any file left by an older version is deleted on the next
+ * run — see removeLegacyCredentialsFile.
  */
 
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createReadStream, existsSync, rmSync } from 'node:fs';
 import { crossSpawn } from '../../utils/crossSpawn.js';
 import { DashboardUpdateService } from '../project/DashboardUpdateService.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
@@ -106,7 +105,10 @@ export function describeFetchError(raw: string): string {
     return 'Gmail rejected the login. Check the address and App Password in Settings › Invoice fetchers.';
   }
   if (/FileNotFoundError.*gmail_app_credentials/i.test(text)) {
-    return 'The fetcher could not find its credentials file. Re-enter the email and App Password to rewrite it.';
+    // Reaching this means the fetcher fell through to its standalone file path,
+    // so it never saw the environment OpenBoard sets. Usually an old copy of
+    // the script that predates load_credentials().
+    return 'This fetcher could not read its credentials from the environment. Reinstall the bundled fetchers from Settings › Invoice fetchers, then try again.';
   }
   const lastLine = text.split(/\r?\n/).filter(Boolean).pop();
   return lastLine ? lastLine.slice(0, 300) : 'The fetcher failed with no output.';
@@ -135,24 +137,39 @@ export class BillerFetcherService {
   }
 
   /**
-   * Write the credentials JSON where every fetcher looks for it. Called before
-   * each run so an updated password takes effect immediately.
+   * The credentials each fetcher reads from its environment. Validated here so
+   * a missing password fails before anything is spawned, with the same message
+   * the old file-writing path used.
    */
-  writeCredentialsFile(settings: BillerSettings = this.settings()): string {
+  credentialEnv(settings: BillerSettings = this.settings()): Record<string, string> {
     const { scriptsDir, email, appPassword } = settings;
     if (!scriptsDir) throw new Error('No invoice scripts folder configured.');
     if (!email || !appPassword) throw new Error('Gmail address and App Password are required.');
 
+    return {
+      OPENBOARD_GMAIL_EMAIL: email,
+      OPENBOARD_GMAIL_APP_PASSWORD: appPassword,
+    };
+  }
+
+  /**
+   * Delete the plaintext credentials file written by OpenBoard <= 1.8.0.
+   *
+   * Upgrading alone would otherwise leave the App Password readable on disk
+   * forever: nothing reads the file any more, so nothing would ever clean it
+   * up. Best-effort — a permission error here must not block a fetch.
+   */
+  removeLegacyCredentialsFile(settings: BillerSettings = this.settings()): boolean {
+    const { scriptsDir } = settings;
+    if (!scriptsDir) return false;
     const path = credentialsPathFor(scriptsDir);
-    mkdirSync(dirname(path), { recursive: true });
-    // 0600 is honoured on POSIX and ignored on Windows (the file inherits the
-    // folder's ACLs there) — requested anyway, since it costs nothing.
-    writeFileSync(
-      path,
-      `${JSON.stringify({ email, app_password: appPassword }, null, 2)}\n`,
-      { encoding: 'utf-8', mode: 0o600 },
-    );
-    return path;
+    if (!existsSync(path)) return false;
+    try {
+      rmSync(path, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Spawn one fetcher. Only the interpreter and numeric/enum args reach argv. */
@@ -178,6 +195,10 @@ export class BillerFetcherService {
       if (!SAFE_ARG.test(arg)) throw new Error(`Unsafe argument for the invoice fetcher: ${arg}`);
     }
 
+    // Credentials travel in the child's environment, not on argv (which is
+    // world-readable in process listings) and not on disk.
+    const env = this.credentialEnv(settings);
+
     let lastError: Error | undefined;
     for (const command of PYTHON_COMMANDS) {
       try {
@@ -186,6 +207,7 @@ export class BillerFetcherService {
           timeoutMs: BILLER_FETCH_TIMEOUT_MS,
           onProgress,
           signal,
+          env,
         });
         return { code: result.code, output: `${result.stdout}\n${result.stderr}` };
       } catch (error: any) {
@@ -213,11 +235,14 @@ export class BillerFetcherService {
       changed: false,
     };
 
+    // Validate before doing any work, and clear any plaintext file an older
+    // version left behind.
     try {
-      this.writeCredentialsFile(settings);
+      this.credentialEnv(settings);
     } catch (error: any) {
       return { ...base, error: error.message };
     }
+    this.removeLegacyCredentialsFile(settings);
 
     const before = await hashFile(biller.csvPath);
     let run: { code: number; output: string };

@@ -35,7 +35,9 @@ export function verifyAuth(req: VercelRequest): AuthenticatedUser | null {
   if (!token || !jwtSecret) return null;
 
   try {
-    const decoded = jwt.verify(token, jwtSecret) as { username?: string };
+    // Pin the algorithm: never let a token's own header choose how it is
+    // verified. HS256 is what sign() issues, so nothing else should be accepted.
+    const decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as { username?: string };
     if (!decoded.username) return null;
     return { username: decoded.username };
   } catch {

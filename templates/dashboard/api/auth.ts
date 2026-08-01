@@ -15,10 +15,26 @@ const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60 * 1000; // 1 minute
 const MAX_TRACKED_KEYS = 5000; // hard memory bound under IP-spray attacks
 
+// A real cost-12 bcrypt hash of a random value nobody holds the input to.
+// Compared against when the username is wrong so that branch costs the same
+// ~240ms as the valid-username branch — otherwise an instant 401 for unknown
+// usernames versus a slow one for known usernames leaks which names exist.
+const DUMMY_PASSWORD_HASH = '$2a$12$W92ySjltBQ9DVXohMSLK0uqzKDN8dHd3T8qhx0oB.s8HHQWQWA6Ia';
+
 function getRateLimitKey(req: VercelRequest): string {
+  // x-real-ip is set by the platform edge and cannot be forged by the client.
+  const realIp = req.headers['x-real-ip'];
+  const direct = Array.isArray(realIp) ? realIp[0] : realIp;
+  if (direct?.trim()) return direct.trim();
+
+  // Fall back to the LAST x-forwarded-for entry, not the first. A client may
+  // send its own X-Forwarded-For; the edge appends the true peer address, so
+  // the rightmost value is the trustworthy one. Keying on the leftmost would
+  // let an attacker mint a fresh attempt bucket per request and slip the cap.
   const forwarded = req.headers['x-forwarded-for'];
-  const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0] || 'unknown';
-  return ip.trim();
+  const chain = Array.isArray(forwarded) ? forwarded.join(',') : forwarded;
+  const last = chain?.split(',').filter((part) => part.trim()).pop();
+  return last?.trim() || 'unknown';
 }
 
 function pruneExpired(now: number): void {
@@ -96,12 +112,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Server configuration error' });
   }
 
-  if (username !== storedUsername) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
+  // Always run a bcrypt comparison, even for an unknown username, so both
+  // outcomes take the same time. Both checks are evaluated before replying.
+  const usernameMatches = username === storedUsername;
+  const passwordMatches = await bcrypt.compare(
+    password,
+    usernameMatches ? passwordHash : DUMMY_PASSWORD_HASH,
+  );
 
-  const isValid = await bcrypt.compare(password, passwordHash);
-  if (!isValid) {
+  if (!usernameMatches || !passwordMatches) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
