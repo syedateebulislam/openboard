@@ -37,26 +37,39 @@ describe('flattenLogLines', () => {
   });
 });
 
+/** The newest `count` of `lines(total)`, so expectations track LOG_PANE_HEIGHT. */
+const newest = (total: number, count = LOG_PANE_HEIGHT) =>
+  lines(total).slice(-count);
+
+/** The oldest `count`, for the clamped-past-the-top case. */
+const oldest = (total: number, count = LOG_PANE_HEIGHT) =>
+  lines(total).slice(0, count);
+
 describe('logViewport', () => {
-  it('should_show_the_newest_three_lines_when_pinned_to_the_bottom', () => {
+  it('should_show_the_newest_lines_when_pinned_to_the_bottom', () => {
     const view = logViewport(lines(10), 40, LOG_PANE_HEIGHT, 0);
-    expect(view.rows).toEqual(['line8', 'line9', 'line10']);
-    expect(view.hiddenOlder).toBe(7);
+    expect(view.rows).toEqual(newest(10));
+    expect(view.hiddenOlder).toBe(10 - LOG_PANE_HEIGHT);
     expect(view.hiddenNewer).toBe(0);
   });
 
   it('should_show_the_previous_page_when_scrolled_back', () => {
     const view = logViewport(lines(10), 40, LOG_PANE_HEIGHT, 3);
-    expect(view.rows).toEqual(['line5', 'line6', 'line7']);
-    expect(view.hiddenOlder).toBe(4);
+    expect(view.rows).toEqual(lines(10).slice(-LOG_PANE_HEIGHT - 3, -3));
+    expect(view.hiddenOlder).toBe(10 - LOG_PANE_HEIGHT - 3);
     expect(view.hiddenNewer).toBe(3);
   });
 
-  it('should_still_show_exactly_three_rows_when_a_single_entry_wraps', () => {
-    // Wraps to four rows, so the 3-row window keeps only the newest three.
-    const view = logViewport(['aaa bbb ccc ddd eee fff ggg hhh'], 7, LOG_PANE_HEIGHT, 0);
+  it('should_still_fill_the_window_when_a_single_entry_wraps', () => {
+    // One entry long enough to wrap past the window: the pane counts wrapped
+    // lines, not entries, so it fills and reports the overflow above.
+    // Sized from LOG_PANE_HEIGHT so this keeps testing overflow if the pane
+    // height changes again.
+    const words = Array.from({ length: LOG_PANE_HEIGHT + 1 }, (_, i) => `w${i}`);
+    const view = logViewport([words.join(' ')], 2, LOG_PANE_HEIGHT, 0);
+
     expect(view.rows).toHaveLength(LOG_PANE_HEIGHT);
-    expect(view.rows).toEqual(['ccc ddd', 'eee fff', 'ggg hhh']);
+    expect(view.rows).toEqual(words.slice(-LOG_PANE_HEIGHT));
     expect(view.hiddenOlder).toBe(1);
   });
 
@@ -75,19 +88,20 @@ describe('logViewport', () => {
 
   it('should_clamp_an_offset_past_the_top_instead_of_running_off_the_log', () => {
     const view = logViewport(lines(10), 40, LOG_PANE_HEIGHT, 999);
-    expect(view.rows).toEqual(['line1', 'line2', 'line3']);
+    expect(view.rows).toEqual(oldest(10));
     expect(view.hiddenOlder).toBe(0);
-    expect(view.hiddenNewer).toBe(7);
+    expect(view.hiddenNewer).toBe(10 - LOG_PANE_HEIGHT);
   });
 
   it('should_clamp_a_negative_offset_back_to_the_newest_line', () => {
     const view = logViewport(lines(10), 40, LOG_PANE_HEIGHT, -5);
-    expect(view.rows).toEqual(['line8', 'line9', 'line10']);
+    expect(view.rows).toEqual(newest(10));
     expect(view.hiddenNewer).toBe(0);
   });
 
   it('should_fill_the_scrollbar_when_the_whole_log_already_fits', () => {
-    expect(logViewport(lines(2), 40, LOG_PANE_HEIGHT, 0).scrollbar).toEqual([true, true, true]);
+    expect(logViewport(lines(2), 40, LOG_PANE_HEIGHT, 0).scrollbar)
+      .toEqual(Array(LOG_PANE_HEIGHT).fill(true));
   });
 
   it('should_size_the_scrollbar_to_the_viewport_when_the_log_is_longer', () => {

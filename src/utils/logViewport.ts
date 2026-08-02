@@ -23,8 +23,14 @@ import {
   wrapText,
 } from './chatViewport.js';
 
-/** Rows visible at once. Enough to watch new lines arrive and keep context. */
-export const LOG_PANE_HEIGHT = 3;
+/**
+ * Rows visible at once. Enough to watch new lines arrive and keep context.
+ *
+ * Six rather than three: a single fetcher line often wraps to two, so a
+ * three-row pane frequently showed barely more than one message and scrolled
+ * the rest away before it could be read.
+ */
+export const LOG_PANE_HEIGHT = 6;
 
 export interface LogViewport {
   /** Exactly the lines to draw, oldest first. May be shorter than the height. */
@@ -44,7 +50,7 @@ export interface LogViewport {
  *
  * One appended entry can occupy several rows, so the pane must count wrapped
  * lines rather than entries — otherwise a single long error would silently
- * push everything else out of a 3-row window.
+ * push everything else out of the window.
  */
 export function flattenLogLines(
   entries: string[],
