@@ -6,14 +6,14 @@ import { format, isValid, parseISO } from 'date-fns';
  * the dashboard title on the left, and on the right the total rows fetched
  * plus when the data/UI was last generated — so the user always sees how
  * fresh the dashboard is. Feed it from the protected data hook:
- *   <DashboardHeader title="Swiggy Food" rowCount={data?.rows.length} generatedAt={data?.generatedAt} />
+ *   <DashboardHeader title="Swiggy Food" rowCount={data?.rows?.length} generatedAt={data?.generatedAt} />
  *
  * Theme-aware (design-system variables only) and safe for any data: missing
  * rowCount or an unparseable timestamp degrade gracefully and never throw.
  */
 export interface DashboardHeaderProps {
   title: string;
-  /** Total rows the protected hook returned (data?.rows.length). */
+  /** Total rows the protected hook returned (data?.rows?.length). */
   rowCount?: number;
   /** ISO timestamp of the last data/UI generation (data?.generatedAt). */
   generatedAt?: string;
