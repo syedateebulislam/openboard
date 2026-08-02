@@ -193,6 +193,7 @@ describe('concurrent fetch protection', () => {
     const skipped = [first, second].filter((r) => r.length === 0);
     expect(ran).toHaveLength(1);
     expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.skipped).toBe('locked');
   });
 
   it('releases the lock so the next run is not blocked forever', async () => {

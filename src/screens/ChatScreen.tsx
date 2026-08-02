@@ -1331,6 +1331,7 @@ For the current board "${board.title}":
           const onProgress = createProgressCallback(logId);
           try {
             const results = await fetcher.syncEnabled({ onProgress, signal: controller.signal });
+            if (results.skipped === 'locked') return;
             if (results.length === 0) {
               onProgress('No billers are enabled — use /billers enable <key> first.');
             }

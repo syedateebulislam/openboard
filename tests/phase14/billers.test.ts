@@ -842,6 +842,30 @@ describe('Biller invoice fetchers', () => {
         expect(lines.some((line) => line.includes('Scheduled fetch failed: IMAP down'))).toBe(true);
       });
 
+      it('does not re-anchor or claim billers are disabled when a run is locked', async () => {
+        const lines: string[] = [];
+        const recordRun = vi.fn();
+        const stop = startBillerScheduler(() => {}, {
+          settings: () => ready,
+          fetcher: {
+            syncEnabled: vi.fn(async () => {
+              lines.push('Skipped: another fetch is already running.');
+              const skipped: any[] & { skipped?: 'locked' } = [];
+              Object.defineProperty(skipped, 'skipped', { value: 'locked' });
+              return skipped;
+            }),
+          } as any,
+          recordRun,
+          onProgress: (line) => lines.push(line),
+        });
+
+        await vi.advanceTimersByTimeAsync(MIN);
+        stop();
+
+        expect(recordRun).not.toHaveBeenCalled();
+        expect(lines.some((line) => line.includes('no billers are enabled'))).toBe(false);
+      });
+
       it('advertises the time the pending timer really fires', async () => {
         // nextRunAt used to be recomputed as "now + interval" on every emit, so
         // it slid forward and never matched the run that was actually queued.

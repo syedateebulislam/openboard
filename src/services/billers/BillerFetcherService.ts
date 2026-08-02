@@ -25,6 +25,7 @@ import {
   BILLER_FETCH_TIMEOUT_MS,
   presetForBiller,
   type BillerRunResult,
+  type BillerSyncResults,
   type BillerScript,
   type BillerSettings,
 } from '../../types/billers.js';
@@ -359,7 +360,7 @@ export class BillerFetcherService {
    */
   async syncEnabled(
     options: { onProgress?: ProgressCallback; signal?: AbortSignal; only?: string } = {},
-  ): Promise<BillerRunResult[]> {
+  ): Promise<BillerSyncResults> {
     const settings = this.settings();
     const lockDir = settings.scriptsDir ? repoRootFor(settings.scriptsDir) : undefined;
     const lock = lockDir ? ProjectLockService.acquire(lockDir) : undefined;
@@ -367,7 +368,11 @@ export class BillerFetcherService {
     if (lock && !lock.success) {
       // A concurrent fetch is not an error — it is the lock doing its job.
       options.onProgress?.(`Skipped: another fetch is already running. ${lock.error ?? ''}`.trim());
-      return [];
+      const skipped: BillerSyncResults = [];
+      // Keep this non-enumerable so the result remains array-compatible for
+      // JSON output and existing consumers that only inspect biller rows.
+      Object.defineProperty(skipped, 'skipped', { value: 'locked' });
+      return skipped;
     }
 
     try {
@@ -375,7 +380,7 @@ export class BillerFetcherService {
         ? this.list().filter((biller) => biller.key === options.only)
         : this.listEnabled();
 
-      const results: BillerRunResult[] = [];
+      const results: BillerSyncResults = [];
       for (const biller of billers) {
         if (options.signal?.aborted) break;
         options.onProgress?.(`[${biller.key}] fetching invoices…`);

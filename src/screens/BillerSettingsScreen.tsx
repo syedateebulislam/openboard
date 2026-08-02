@@ -197,6 +197,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       const results = await new BillerFetcherService().syncEnabled({
         onProgress: log.append,
       });
+      if (results.skipped === 'locked') return;
       if (results.length === 0) {
         // Distinguish "none switched on" from "the folder went missing".
         log.append(billers.length === 0

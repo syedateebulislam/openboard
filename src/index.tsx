@@ -869,6 +869,11 @@ if (!command || command === 'start') {
       }
 
       const results = await fetcher.syncEnabled({ onProgress, only });
+      if (results.skipped === 'locked') {
+        if (jsonMode) printJson({ success: false, action: 'billers-sync', error: 'Another invoice fetch is already running.', errorCode: 'E_LOCKED' });
+        else console.error('Another invoice fetch is already running. Retry after it finishes.');
+        process.exit(1);
+      }
       // Re-anchor the in-TUI schedule: a CLI sync is a real run, and leaving
       // lastRunAt stale would make the next TUI launch fetch everything again.
       // A run that matched no biller is not a run, and must not move the anchor.

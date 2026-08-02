@@ -84,6 +84,18 @@ export interface BillerRunResult {
   error?: string;
 }
 
+/**
+ * Results from one request to run enabled billers.
+ *
+ * It remains an array so existing callers can iterate the biller outcomes, but
+ * records when no outcome exists because another OpenBoard process owns the
+ * project lock. An empty array alone is ambiguous: it can also mean that no
+ * billers are enabled.
+ */
+export type BillerSyncResults = BillerRunResult[] & {
+  skipped?: 'locked';
+};
+
 export type BillerSchedulerState =
   | 'not-configured'
   | 'idle'

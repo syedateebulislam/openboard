@@ -18,6 +18,21 @@ const MAX_ACTIVITY_LINES = 500;
 
 let lines: string[] = [];
 const listeners = new Set<() => void>();
+let notificationQueued = false;
+
+/**
+ * A dashboard build can stream hundreds of progress lines in one turn. Notify
+ * React once after that burst rather than causing a nested render for every
+ * line; the snapshot still contains every retained entry when it is read.
+ */
+function notifyListeners(): void {
+  if (notificationQueued) return;
+  notificationQueued = true;
+  queueMicrotask(() => {
+    notificationQueued = false;
+    for (const listener of listeners) listener();
+  });
+}
 
 /** Snapshot for useSyncExternalStore — identity changes only on append. */
 export function getBillerActivity(): string[] {
@@ -30,7 +45,7 @@ export function appendBillerActivity(line: string): void {
   // — the pane renders this and the buffer outlives the run.
   const next = [...lines, sanitizeErrorMessage(line)];
   lines = next.length > MAX_ACTIVITY_LINES ? next.slice(-MAX_ACTIVITY_LINES) : next;
-  for (const listener of listeners) listener();
+  notifyListeners();
 }
 
 export function subscribeBillerActivity(listener: () => void): () => void {
@@ -41,7 +56,7 @@ export function subscribeBillerActivity(listener: () => void): () => void {
 /** Tests only — module state would otherwise leak between cases. */
 export function clearBillerActivity(): void {
   lines = [];
-  for (const listener of listeners) listener();
+  notifyListeners();
 }
 
 export const billerActivityLog = {

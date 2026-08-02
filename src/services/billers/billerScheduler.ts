@@ -192,6 +192,15 @@ export function startBillerScheduler(
       // lines at all and the settings screen's log pane stayed empty.
       const results = await fetcher.syncEnabled({ onProgress });
       if (stopped) return;
+      if (results.skipped === 'locked') {
+        // An interval change can re-arm while a manual/previous scheduled run
+        // is still building dashboards. The lock protects the data; do not
+        // misreport that as "no billers enabled" or move lastRunAt forward for
+        // work this scheduler did not perform.
+        scheduleNext(baseIntervalMs);
+        emit('idle');
+        return;
+      }
       lastRunAt = new Date(startedAt).toISOString();
       recordRun(lastRunAt);
 

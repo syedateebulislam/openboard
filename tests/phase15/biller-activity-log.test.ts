@@ -30,17 +30,22 @@ describe('billerActivityLog', () => {
     ]);
   });
 
-  it('should_notify_subscribers_on_append', () => {
+  it('should_batch_subscriber_notifications_for_one_progress_burst', async () => {
     const listener = vi.fn();
     const unsubscribe = subscribeBillerActivity(listener);
 
     appendBillerActivity('one');
     appendBillerActivity('two');
-    expect(listener).toHaveBeenCalledTimes(2);
+    // Both lines are visible immediately, but React only needs one notification
+    // after the current stream chunk has finished.
+    expect(listener).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
 
     unsubscribe();
     appendBillerActivity('three');
-    expect(listener).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('should_change_snapshot_identity_so_react_re_renders', () => {
@@ -58,5 +63,16 @@ describe('billerActivityLog', () => {
     expect(lines).toHaveLength(500);
     expect(lines[0]).toBe('line 100');
     expect(lines[lines.length - 1]).toBe('line 599');
+  });
+
+  it('should_notify_once_when_a_dashboard_build_streams_many_lines', async () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeBillerActivity(listener);
+
+    for (let i = 0; i < 600; i++) appendBillerActivity(`codex: line ${i}`);
+    await Promise.resolve();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 });
