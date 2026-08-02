@@ -132,9 +132,26 @@ openboard agent billers sync --biller zomato --json
 
 Billers are **discovered, never hardcoded**: OpenBoard scans `--scripts-dir` for `fetch_*.py` files and reads each script's own `KEY`/`DISPLAY_NAME` constants. `fetch_pending_invoices.py` and `run_backfill_invoices_new.py` are excluded (they are not per-biller fetchers). `--biller-key` accepts only discovered keys and *replaces* the enabled set; `status` lists the valid keys.
 
-Each biller's CSV is hashed before and after its run. Unchanged output ends the run for that biller with no LLM call; changed output creates that biller's dashboard on first data (mapped to a category preset — `zomato`/`swiggy_*` → food, `uber_rides`/`rapido`/`amazon_pay` → travel, `amazon` → shopping, `urban_company` → utilities, otherwise custom) and refreshes it afterwards via the normal update pipeline.
+Each biller's CSV is hashed before and after its run. Changed output refreshes that biller's dashboard (mapped to a category preset — `zomato`/`swiggy_*` → food, `uber_rides`/`rapido`/`amazon_pay` → travel, `amazon` → shopping, `urban_company` → utilities, otherwise custom) via the normal update pipeline. Unchanged output ends the run with no LLM call **only if a dashboard already exists**; a biller with data but no dashboard gets one built from the CSV already on disk, so adopting an existing CSV does not require waiting for new mail.
 
-`billers sync` exits 1 if any enabled biller failed; each entry in `results[]` carries `key`, `ok`, `changed`, `dashboardUpdated`, and a plain-language `error` (missing Python, missing `beautifulsoup4`/`pdfplumber`, rejected login).
+`billers sync` exits 1 if any enabled biller failed. Each entry in `results[]` carries:
+
+| Field | Meaning |
+|---|---|
+| `key`, `displayName` | which biller |
+| `ok` | the fetch itself succeeded |
+| `changed` | the CSV gained rows |
+| `dashboardUpdated` | a dashboard was created or refreshed on this run |
+| `dashboardExists` | whether this biller has a dashboard at all now |
+| `error` | plain-language cause (missing Python, missing `beautifulsoup4`/`pdfplumber`, rejected login) |
+
+`ok: true, changed: false` alone cannot tell a healthy no-op from a biller with nothing to look at — read `dashboardExists` for that.
+
+Credentials are passed to each fetcher through its **process environment** (`OPENBOARD_GMAIL_EMAIL`, `OPENBOARD_GMAIL_APP_PASSWORD`), never written to disk. Fetchers installed by OpenBoard ≤ 1.9.0 read a plaintext file instead; they are patched in place on the next run, preserving any edits.
+
+Fetches are serialised by a lock on the billers root. If a TUI scheduler tick or another `billers sync` is already running, this one returns `results: []` and logs that it was skipped rather than racing it — so a cron-driven sync overlapping an open TUI is safe.
+
+**Biller Studio (TUI only).** Creating a new fetcher from a sample email is interactive by design — it shows the user the exact email text before transmitting it to an LLM and asks for confirmation twice. There is no headless equivalent; write the `fetch_<biller>.py` yourself (see `scripts/invoice_fetchers/README.md`) and drop it into `--scripts-dir`, where discovery picks it up.
 
 The **recurring schedule is TUI-only** — it is an in-process loop, so `agent billers sync` is the headless equivalent. Drive it from your own cron/Task Scheduler if you need unattended runs.
 

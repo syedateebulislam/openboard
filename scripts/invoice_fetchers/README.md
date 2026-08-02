@@ -32,18 +32,45 @@ RAW_DIR  = REPO_ROOT / "data" / "invoices" / "raw" / KEY
 ```
 
 That last point is what lets OpenBoard find your output without being told: it
-writes the credentials file to the same derived location and reads the CSV back
-from it.
+reads the CSV back from the same derived location.
+
+4. A `load_credentials()` that prefers the environment, so the App Password never
+   has to sit on disk:
+
+```python
+def load_credentials() -> dict:
+    email = os.environ.get("OPENBOARD_GMAIL_EMAIL")
+    app_password = os.environ.get("OPENBOARD_GMAIL_APP_PASSWORD")
+    if email and app_password:
+        return {"email": email, "app_password": app_password}
+    return read_json(CREDENTIALS_PATH)   # standalone runs still work
+```
+
+OpenBoard sets those two variables on the process it spawns. The file fallback is
+only for running a fetcher by hand; OpenBoard no longer writes it, and deletes any
+copy left by an older version. A fetcher written against the old contract is
+patched in place on the next run, so existing scripts keep working.
 
 A script that declares no `KEY`/`DISPLAY_NAME` is ignored, which is how helper
-scripts sitting in the same folder stay out of the biller list.
+scripts sitting in the same folder stay out of the biller list — that is why
+`probe_biller.py` and `parse_sample.py`, which Biller Studio uses, never appear
+as billers.
+
+## Let OpenBoard write it for you
+
+You do not have to write any of this by hand. **Settings → Invoice fetchers →
+`✚ Add a new biller (Biller Studio)`** takes a sender address and a subject
+fragment, samples one real email, and generates a fetcher against this same
+contract — then compiles it, checks what it extracts, and dry-runs it against
+your mailbox before saving. Hand-writing is still supported and is the right
+choice when the parsing is unusual.
 
 ## Contract OpenBoard relies on
 
 | | |
 |---|---|
 | Invocation | `python fetch_<biller>.py [--since-days N] [--limit N] [--dry-run] [--log-level LEVEL]` |
-| Credentials | `{"email": ..., "app_password": ...}` at the derived path — OpenBoard writes this for you |
+| Credentials | `OPENBOARD_GMAIL_EMAIL` / `OPENBOARD_GMAIL_APP_PASSWORD` from the environment, falling back to `{"email": ..., "app_password": ...}` at the derived path for standalone runs |
 | Output | append rows to `CSV_PATH`; write the header only when the file is new |
 | Dedup | record handled message UIDs in `RAW_DIR/state.json` so re-runs are incremental |
 | Exit code | `0` on success. Note OpenBoard also scans output for fatal errors, because these scripts catch connection failures and still exit `0` |
