@@ -73,6 +73,23 @@ export function isBillerSyncConfigured(settings: BillerSettings): boolean {
 }
 
 /**
+ * Identity of a running scheduler: restart it only when this changes.
+ *
+ * A loop already re-reads settings on every tick, so enabled billers, the
+ * address and the password all take effect without restarting anything. Only
+ * two things are captured at arm time and cannot be picked up otherwise: the
+ * interval, and whether the loop should exist at all.
+ *
+ * Restarting for everything else was actively harmful. Arming schedules an
+ * overdue run immediately, so once the schedule was due, every settings change
+ * kicked off a full fetch — toggling a biller started one, which is what made
+ * opening the fetchers screen look like it triggered a run.
+ */
+export function billerSchedulerArmKey(settings: BillerSettings): string {
+  return `${isBillerSyncConfigured(settings)}:${settings.syncIntervalMinutes}`;
+}
+
+/**
  * Delay until the next run, measured from when the previous run STARTED.
  *
  * The configured interval is the period between runs, not the gap between one

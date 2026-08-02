@@ -39,6 +39,20 @@ interface Props {
 // secret for it.
 type Step = 'menu' | 'scripts-dir' | 'email' | 'app-password' | 'interval';
 
+/** Menu rows that flip a biller on or off carry their key behind this prefix. */
+const TOGGLE_PREFIX = 'toggle:';
+
+/**
+ * The biller a menu row toggles, or undefined for any other row.
+ *
+ * Both Enter and Space act on these rows, and the offset used to be a bare
+ * `slice(7)` at the Enter site — a magic number that silently decodes the
+ * wrong key the moment the prefix changes.
+ */
+export function billerKeyForToggle(menuValue: string): string | undefined {
+  return menuValue.startsWith(TOGGLE_PREFIX) ? menuValue.slice(TOGGLE_PREFIX.length) : undefined;
+}
+
 /** "in 4 min" / "in 2h 10m", or "due now" once the interval has elapsed. */
 function describeNextRun(msRemaining: number): string {
   if (msRemaining <= 0) return 'due now';
@@ -58,6 +72,8 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [, setRefresh] = useState(0);
+  /** Value of the row the cursor is on, so space can act on it. */
+  const [highlighted, setHighlighted] = useState('');
 
   // Bound to the shared activity log, not local state: scheduled fetches run
   // with no screen mounted, so their output has to survive until someone opens
@@ -65,11 +81,26 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   // `status` stays for short inline form validation next to the input.
   const log = useProgressLog({ store: billerActivityLog });
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (key.escape && !busy) {
       if (step === 'menu') onNavigate('settings');
       else setStep('menu');
     }
+
+    // Space toggles the highlighted biller. ink-select-input binds only
+    // arrows/j/k and Enter, so space did nothing at all — the row looked
+    // interactive and silently ignored the most obvious key for a checkbox.
+    //
+    // Menu only: the folder and address steps need space as a literal
+    // character, and `busy` keeps it from firing mid-fetch.
+    if (input === ' ' && step === 'menu' && !busy) {
+      const key = billerKeyForToggle(highlighted);
+      if (key) {
+        toggleBiller(key);
+        return;
+      }
+    }
+
     // PgUp/PgDn scroll the log without disturbing the menu's arrow keys.
     log.onKey(key);
   });
@@ -230,7 +261,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       ? [
           ...billers.map((biller) => ({
             label: `${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.displayName}${existsSync(biller.csvPath) ? '' : ' (no data yet)'}`,
-            value: `toggle:${biller.key}`,
+            value: `${TOGGLE_PREFIX}${biller.key}`,
           })),
           // Sits directly under the list it adds to, the way ManageBoardsScreen
           // puts "Add new dashboard" beside the dashboards.
@@ -247,7 +278,8 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   const handleMenuSelect = (item: { value: string }) => {
     if (busy) return;
     setStatus('');
-    if (item.value.startsWith('toggle:')) { toggleBiller(item.value.slice(7)); return; }
+    const toggleKey = billerKeyForToggle(item.value);
+    if (toggleKey) { toggleBiller(toggleKey); return; }
     if (item.value === 'install') { installBundled(); return; }
     // Pre-fill the canonical location so the common case is just Enter.
     if (item.value === 'dir') { setDirInput(settings.scriptsDir ?? defaultScriptsDir()); setStep('scripts-dir'); }
@@ -369,7 +401,11 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
       )}
       {step === 'menu' && (
         <Box marginTop={1}>
-          <SelectInput items={menuItems} onSelect={handleMenuSelect} />
+          <SelectInput
+            items={menuItems}
+            onSelect={handleMenuSelect}
+            onHighlight={(item) => setHighlighted(item.value)}
+          />
         </Box>
       )}
 
@@ -386,7 +422,8 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
           An App Password grants full mailbox read access, so revoke it in your Google account
           to cut access off. Fetchers need Python 3 with beautifulsoup4 installed.
         </Text>
-        <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open. Press ESC to go back</Text>
+        <Text color={UI_COLORS.subtitle}>Space or Enter toggles the highlighted biller · PgUp/PgDn scroll the log · ESC goes back</Text>
+        <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open.</Text>
       </Box>
 
       {/* Last child: progress belongs below every option, never above them. */}

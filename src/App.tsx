@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
@@ -17,7 +17,8 @@ import { VercelService } from './services/deploy/VercelService.js';
 import { AuthService } from './services/auth/AuthService.js';
 import type { LLMConfig, LLMProviderName } from './types/llm.js';
 import type { BoardConfig } from './types/board.js';
-import { startBillerScheduler } from './services/billers/billerScheduler.js';
+import { billerSchedulerArmKey, startBillerScheduler } from './services/billers/billerScheduler.js';
+import { TypedConfigRepository } from './services/config/TypedConfigRepository.js';
 import type { BillerSchedulerStatus } from './types/billers.js';
 import { BillerSettingsScreen } from './screens/BillerSettingsScreen.js';
 import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
@@ -613,9 +614,21 @@ export function App() {
   //
   // The status is held in state rather than dropped: the loop is otherwise
   // completely silent, so a working interval and a broken one looked identical
-  // from the TUI. Only billerConfigVersion re-arms the scheduler, so status
-  // updates re-render without restarting it.
-  useEffect(() => startBillerScheduler(setBillerStatus), [billerConfigVersion]);
+  // from the TUI.
+  //
+  // Re-arm only on the two things a running loop cannot pick up by itself: the
+  // interval it captured, and whether it is configured at all. Everything else
+  // — enabled billers, the address, the password — is re-read from config on
+  // each tick, so restarting for those achieved nothing and cost something:
+  // arming schedules an overdue run immediately, so once the schedule was due,
+  // every settings change kicked off a full fetch. Toggling a biller started
+  // one, which is what made entering this screen look like it triggered a run.
+  const billerArmKey = useMemo(
+    () => billerSchedulerArmKey(new TypedConfigRepository().getBillerSettings()),
+    [billerConfigVersion],
+  );
+
+  useEffect(() => startBillerScheduler(setBillerStatus), [billerArmKey]);
 
   const navigate = (s: Screen) => setScreen(s);
 
