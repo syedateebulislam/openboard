@@ -1599,7 +1599,7 @@ Requirements:
     reporter.log(`Deployed: ${deployResult.url || 'Success'}`);
     reporter.phase('done');
     reporter.result(true);
-    this.recordDeployment(projectDir, deployResult.url);
+    this.recordDeployment(projectDir, deployResult.url, reporter);
 
     if (run) {
       this.runs.complete(run, {
@@ -1632,12 +1632,24 @@ Requirements:
    * single board would leave its siblings looking undeployed while they are
    * live at that very address.
    */
-  private recordDeployment(projectDir: string, deployUrl?: string): void {
-    if (!deployUrl) return;
+  private recordDeployment(projectDir: string, deployUrl?: string, reporter?: PipelineReporter): void {
+    if (!deployUrl) {
+      reporter?.log('Deploy returned no URL — nothing recorded against the boards.');
+      return;
+    }
     const lastDeployed = new Date().toISOString();
-    for (const board of boardsNeedingDeployRecord(this.registry.listBoards(), projectDir, deployUrl)) {
+    const targets = boardsNeedingDeployRecord(this.registry.listBoards(), projectDir, deployUrl);
+    for (const board of targets) {
       this.registry.upsertBoard({ ...board, deployUrl, lastDeployed });
     }
+    // Stated in the deploy log because the write itself is invisible: boards
+    // reported "never deployed" for a long time purely because nothing ever
+    // persisted the URL, and there was no output that would have shown it.
+    reporter?.log(
+      targets.length > 0
+        ? `Recorded deployment on ${targets.length} board(s) in this workspace.`
+        : 'Boards already carried this deployment — nothing to record.',
+    );
   }
 
   private reconcileBatchResults(
