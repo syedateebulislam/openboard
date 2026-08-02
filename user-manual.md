@@ -287,7 +287,7 @@ together under OpenBoard's own folder:
 ```text
 ~/.openboard/billers/
   scripts/invoice_fetchers/     your fetch_<biller>.py files  ← this is the folder you configure
-  secrets/                      gmail_app_credentials.json (OpenBoard writes it)
+                                plus probe_biller.py and parse_sample.py (helpers Biller Studio uses)
   data/invoices/                <biller>.csv — one per biller, appended over time
     raw/<biller>/state.json     which emails were already imported
 ```
@@ -309,8 +309,9 @@ Settings → Invoice fetchers, in this order:
 2. **Gmail address** — the account the fetchers log into. Asked before any
    credential, so you always know which account you are about to authorize.
 3. **Gmail App Password** — a 16-character App Password from
-   myaccount.google.com/apppasswords, *not* your normal Gmail password. Saving it
-   writes the `secrets/gmail_app_credentials.json` file your scripts already read.
+   myaccount.google.com/apppasswords, *not* your normal Gmail password. It is
+   stored encrypted and handed to each fetcher through its process environment
+   at run time; nothing is written to disk.
 4. **The biller list** appears — one row per discovered biller with a `[x]`/`[ ]`
    toggle. Select a row to switch that biller on or off. Come back and change it
    any time.
@@ -322,19 +323,53 @@ Fetching runs in-process, only while OpenBoard is open — no background daemon.
 sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
 starts shortly after launch.
 
-After each biller runs, OpenBoard compares its CSV before and after. Nothing new
-means it stops there, with no LLM call. New invoices mean it creates that
-biller's dashboard the first time (using the closest category preset — Zomato and
-Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping) and
-refreshes it on later runs.
+After each biller runs, OpenBoard compares its CSV before and after. New invoices
+refresh that biller's dashboard (using the closest category preset — Zomato and
+Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping). If a
+biller has data but no dashboard yet — common when you bring an existing CSV with
+you — the first run builds one from what is already on disk instead of waiting for
+new mail that may never arrive. Nothing new *and* a dashboard already there means
+it stops, with no LLM call.
 
-Security worth knowing: the scripts cannot decrypt anything, so their credentials
-file is necessarily plain text on your machine (OpenBoard keeps its own copy of
-the password encrypted). It is written with owner-only permissions on
-macOS/Linux; on Windows those bits are ignored, so the file is only as protected
-as the folder holding it. An App Password also
-grants full mailbox read access — revoke it in your Google account to cut access
-off.
+Scheduled runs happen with no screen open, so their output goes to a shared
+**fetch log** at the bottom of this screen. Reopen it later and the recent history
+is still there; PgUp/PgDn scroll it.
+
+### Add your own biller (Biller Studio)
+
+The eight bundled fetchers will not cover your billers. Choose **`✚ Add a new
+biller (Biller Studio)`** and OpenBoard writes one for you.
+
+1. **Sender address** — where those receipts come from, e.g. `noreply@bigbasket.com`.
+2. **Subject contains** — a fragment that separates receipts from marketing mail,
+   e.g. `Your order`. Enter `-` to match every email from that sender.
+3. OpenBoard finds one real matching email and **shows you the exact text** it
+   wants to send to your LLM provider, with the character count. Nothing leaves
+   your machine until you type `yes`.
+4. It lists the fields it can extract, each with the value it found, so you can
+   check them against the email in front of you. Type `yes` to build.
+5. It writes the fetcher, compiles it, checks how much it actually extracts, and
+   **dry-runs it against your mailbox**. Anything that fails is fed back and
+   retried up to twice. Only then is it saved.
+6. The new biller appears in the list, already enabled.
+
+Receipts that arrive as **PDF attachments** work too — the probe reads them with
+`pdfplumber` and builds from the PDF-reading skeleton.
+
+Commands while in the Studio: `/probe` (search again), `/fields` (show detected
+fields), `/script` (show the generated code), `/restart`, `/cancel`, `/help`.
+
+If a CSV in your invoices folder has no fetcher behind it, the settings screen
+says so in yellow — that dashboard renders but will never update.
+
+**Security worth knowing.** Your App Password is stored encrypted and passed to
+each fetcher through its process environment at run time; it is never written to
+disk. An App Password grants full mailbox read access — revoke it in your Google
+account to cut access off. Generated fetchers are scanned before they are saved:
+a fetcher reads mail and writes a CSV, so anything reaching for the network, a
+subprocess or `eval` is refused, because the sample email is text somebody else
+wrote. Fetchers need **Python 3 with `beautifulsoup4`** (plus `pdfplumber` for
+PDF billers).
 
 ## Files OpenBoard Uses
 

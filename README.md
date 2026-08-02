@@ -126,10 +126,37 @@ Turn invoice emails into per-biller spending dashboards, automatically. OpenBoar
 - **Credentials, in a sensible order**: you're asked for the folder, then the **Gmail address**, then that account's **App Password** — you always know which account you're authorizing before typing a secret for it.
 - **Enable exactly the billers you want**: the list is a live toggle (`[x]`/`[ ]`) you can revisit and change any time. Only enabled billers ever run.
 - **Runs on a visible schedule**: one shared interval for all enabled billers, shown and editable in the same screen (default every 360 min). Like the Gmail sync it is in-process — it runs while OpenBoard is open, with no daemon — but the last run time is remembered, so reopening the TUI doesn't re-fetch everything and an overdue run fires on launch.
-- **Invoices become dashboards automatically**: after each fetch OpenBoard hashes the biller's CSV. Unchanged means it stops there (no LLM call). Changed means it creates that biller's dashboard the first time — using the matching category preset, e.g. Zomato → Food, Uber → Travel, Amazon → Shopping — and refreshes it from then on.
+- **Invoices become dashboards automatically**: after each fetch OpenBoard hashes the biller's CSV. New rows refresh that biller's dashboard — using the matching category preset, e.g. Zomato → Food, Uber → Travel, Amazon → Shopping. If a biller has data but no dashboard yet (common when you bring an existing CSV with you), the first run builds one from the data already on disk rather than waiting for new mail that may never come.
+- **Live fetch log**: scheduled runs happen with no screen open, so their output goes to a shared activity log. Open Settings → Invoice fetchers later and the recent history is still there, scrollable with PgUp/PgDn.
 - **Headless**: `openboard agent setup billers --scripts-dir ... --biller-email ... --biller-app-password ...` configures it, `openboard agent billers status|sync [--biller <key>]` inspects or runs it once. The recurring schedule itself is TUI-only.
 
-Security: the fetchers read their credentials from a plain JSON file (they have no way to decrypt anything), so OpenBoard writes `secrets/gmail_app_credentials.json` next to your scripts, while keeping its own copy of the password encrypted in `~/.openboard/config.json`. That file is requested with owner-only (`0600`) permissions, which macOS/Linux honour and **Windows ignores** — there it is only as protected as the folder it sits in. An App Password grants full mailbox read access — broader than the OAuth integration's read-only scope — so revoke it in your Google account when you want to cut access off. OpenBoard only ever executes `python`/`python3`/`py` on `.py` files directly inside the folder you configured, and passes only numeric/enum arguments.
+### Biller Studio — create your own fetcher
+
+The eight bundled fetchers will not cover your billers. Billers are regional and personal, and no shipped list ever will. So OpenBoard can write one for you:
+
+**Settings → Invoice fetchers → `✚ Add a new biller (Biller Studio)`**
+
+1. Give it the **sender address** those receipts come from, and a bit of the **subject line** to separate receipts from marketing mail (`-` matches everything from that sender).
+2. It finds one real matching email and **shows you the exact text** it wants to send to your LLM provider. Nothing is transmitted until you type `yes`.
+3. It proposes the fields it can extract, with the value it found for each, so you can check them against the email in front of you.
+4. On confirmation it writes a `fetch_<key>.py`, compiles it, checks how much it actually extracts, and **dry-runs it against your mailbox** before saving. Failures are fed back and retried up to twice.
+5. The new biller appears beside the bundled ones, already enabled.
+
+PDF billers work too — if the receipt is in an attachment, the probe reads it with `pdfplumber` and the generated fetcher is built from the PDF-reading skeleton.
+
+Generated code is scanned before it is written. A fetcher reads mail and writes a CSV; anything reaching for the network, a subprocess, `eval`, or the wider environment is refused, because the sample email is text somebody else wrote and could contain instructions aimed at the model.
+
+Commands inside the Studio: `/probe` `/fields` `/script` `/restart` `/cancel` `/help`.
+
+### Security
+
+Your Gmail App Password is stored AES-256-GCM-encrypted in `~/.openboard/config.json` and handed to each fetcher through its **process environment** at run time — it is never written to disk. (Versions up to 1.9.0 wrote it to `secrets/gmail_app_credentials.json`; that file is deleted automatically and fetchers installed before the change are upgraded in place on the next run, keeping any edits you have made to them.)
+
+An App Password grants full mailbox read access — broader than the OAuth integration's read-only scope — so revoke it in your Google account when you want to cut access off.
+
+OpenBoard only ever executes `python`/`python3`/`py` on `.py` files directly inside the folder you configured, never through a shell. Fetches are serialised by a lock, so a scheduled run and a manual "Fetch now" cannot write the same CSV at once.
+
+Fetchers need **Python 3 with `beautifulsoup4`** (plus `pdfplumber` for PDF billers).
 
 ## Internal Chat Commands
 
@@ -230,7 +257,7 @@ Shell-owned files (`App.tsx`, App.css, header components, api handlers, hooks) a
 - Data pushed to GitHub before this protection existed remains in old commits; rewrite history or recreate the repo if that matters to you.
 - Generated repos are created **private** by default. Anyone you grant repo access to can see everything that is committed.
 - **Your data is sent to the LLM provider you choose.** Generating or updating a dashboard puts a summary of your dataset *and a sample of real rows* into the prompt, which is transmitted to whichever provider is configured (Anthropic, OpenAI, Google, Moonshot). The prompts instruct the model never to embed that data in the generated code, but the transmission itself is inherent to how generation works. If your invoices or financial records must not leave your machine, use local mode (Ollama) — no dashboard content is sent anywhere in that mode.
-- Your Gmail App Password for the invoice fetchers is stored AES-256-GCM-encrypted alongside the other secrets and is handed to each fetcher through its process environment at run time. It is never written to disk. Versions up to 1.8.0 wrote it in plaintext to `<scripts>/../../secrets/gmail_app_credentials.json`; that file is deleted automatically on the next fetch or password save. **If you are on 1.9.0 and your fetchers stopped working, upgrade to 2.0.0** — 1.9.0 removed that file without updating fetchers installed before it, so they failed trying to read it (reported misleadingly as a missing Python). 2.0.0 repairs installed fetchers in place on the next run, keeping any edits you have made to them. If you have stopped using the fetchers, delete it by hand — and treat the App Password as exposed if that file was ever backed up or synced, revoking it at myaccount.google.com/apppasswords.
+- Your Gmail App Password for the invoice fetchers is stored AES-256-GCM-encrypted alongside the other secrets and is handed to each fetcher through its process environment at run time. It is never written to disk. Versions up to 1.8.0 wrote it in plaintext to `<scripts>/../../secrets/gmail_app_credentials.json`; that file is deleted automatically on the next fetch or password save. **If you are on 1.9.0 and your fetchers stopped working, upgrade** — 1.9.0 removed that file without updating fetchers installed before it, so they failed trying to read it (reported misleadingly as a missing Python). 2.0.0 and later repair installed fetchers in place on the next run, keeping any edits you have made to them. 1.9.0 is deprecated on npm for this reason. If you have stopped using the fetchers, delete it by hand — and treat the App Password as exposed if that file was ever backed up or synced, revoking it at myaccount.google.com/apppasswords.
 - Provider keys and tokens are stored AES-256-GCM-encrypted in `~/.openboard/config.json`. The encryption key is derived from `OPENBOARD_ENCRYPTION_SECRET`, or from a generated per-machine secret stored at `~/.openboard/.encryption-secret` (file mode 0600). Note: an attacker with full access to your home directory can read both files — set `OPENBOARD_ENCRYPTION_SECRET` (e.g. from an OS keychain) if you need stronger protection. Legacy plaintext secrets are re-encrypted automatically on first read.
 - Dashboard login rate limiting in the deployed app is per serverless instance (best-effort). For a hard global limit, put the deployment behind Vercel's attack challenge / a WAF, or back the limiter with Vercel KV.
 

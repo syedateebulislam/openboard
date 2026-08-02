@@ -119,9 +119,15 @@ src/
     llm/heartbeat.ts                     liveness lines during long LLM calls
     llm/localModelDiscovery.ts           live installed-model listing for Ollama/LM Studio
     llm/prompts/systemPrompt.ts           SYSTEM_PROMPT (high) + SYSTEM_PROMPT_LOW
-    billers/BillerDiscoveryService.ts    scan a folder for fetch_<biller>.py, read KEY/DISPLAY_NAME
-    billers/BillerFetcherService.ts      credentials file, safe python spawn, CSV hash gate, dashboard sync
+    billers/BillerDiscoveryService.ts    scan a folder for fetch_<biller>.py, read KEY/DISPLAY_NAME,
+                                         install support scripts, migrate pre-2.0 fetchers
+    billers/BillerFetcherService.ts      env credentials, safe python spawn, CSV hash gate, dashboard sync
     billers/billerScheduler.ts           in-process interval fetch, due-based (persisted lastRunAt)
+    billers/billerActivityLog.ts         buffered fetch log that outlives any mounted screen
+    billers/pythonRunner.ts              the one place that starts an interpreter (no shell, arg guard)
+    billers/BillerProbeService.ts        Biller Studio: pull one sample email via probe_biller.py
+    billers/BillerScriptGenerator.ts     Biller Studio: propose fields, then write the fetcher (+repair)
+    billers/BillerScriptWriter.ts        Biller Studio: scan generated code, write, compile, grade, dry-run
     project/ProjectManager.ts
     project/BoardRegistryService.ts
     project/PromptHistoryService.ts
@@ -443,12 +449,16 @@ append rows to a per-biller CSV.
 
 ```mermaid
 flowchart TD
-    A["BillerDiscoveryService: scan scriptsDir for fetch_*.py, read each script's KEY / DISPLAY_NAME"] --> B["BillerFetcherService: write secrets/gmail_app_credentials.json"]
-    B --> C["spawn python <script> --since-days N (allowlisted interpreter, numeric args only)"]
+    L{"acquire lock on billers root"} -- held --> L2["skip this run (a scheduler tick or CLI sync is already going)"]
+    L -- acquired --> A["BillerDiscoveryService: scan scriptsDir for fetch_*.py, read each script's KEY / DISPLAY_NAME"]
+    A --> B["migrate any pre-2.0 fetcher to env credentials, in place"]
+    B --> C["spawn python <script> --since-days N with OPENBOARD_GMAIL_* in env (allowlisted interpreter, no shell)"]
     C --> C2{"output shows a fatal login/import failure?"}
     C2 -- yes --> C3["fail with a translated message (exit code alone is not trusted)"]
     C2 -- no --> D{"CSV sha256 changed?"}
-    D -- no --> E["stop — no LLM call"]
+    D -- no --> D2{"a dashboard already exists?"}
+    D2 -- yes --> E["stop — no LLM call"]
+    D2 -- no --> G
     D -- yes --> F{"findBoard(key) exists?"}
     F -- no --> G["createFromDataSource: preset from BILLER_PRESET_MAP"]
     F -- yes --> H["updateBySelector(key): refresh from linked data"]
@@ -466,12 +476,47 @@ flowchart TD
   `data/invoices/<key>.csv`, and each `data/invoices/raw/<key>/`.
 - **Change-gate before any LLM work** (`BillerFetcherService`): the biller's CSV is
   SHA-256 hashed before and after its run; an unchanged hash ends that biller's
-  run. This mirrors the external `run_biller_cron.py` this feature replaces, and
-  keeps a scheduled tick free when no invoices arrived.
+  run *provided a dashboard already exists*. This mirrors the external
+  `run_biller_cron.py` this feature replaces, and keeps a scheduled tick free when
+  no invoices arrived. Gating on the hash alone was wrong for the first run: a
+  biller adopted with a populated CSV finds no new mail, so nothing changes and it
+  reported success forever without ever producing a tab. Data present with no
+  board therefore builds one from what is on disk.
+- **Credentials never touch disk**: `credentialEnv()` passes
+  `OPENBOARD_GMAIL_EMAIL` / `OPENBOARD_GMAIL_APP_PASSWORD` in the spawned
+  process's environment. Fetchers written for OpenBoard ≤ 1.9.0 read
+  `secrets/gmail_app_credentials.json` directly; `migrateInstalledFetchers()`
+  patches those in place before each run — inserting the env-reading helper and
+  redirecting the call — rather than recopying the bundled file, so edits the user
+  made to `parse()` survive.
+- **One fetch at a time** (`ProjectLockService` on the billers root): the scheduler
+  timer, "Fetch now" in the TUI, and `agent billers sync` in a separate process are
+  three independent entry points. The scheduler's own re-entrancy flag only knew
+  about itself, so two could run one fetcher concurrently — both appending to a CSV
+  and rewriting the `state.json` the fetchers rewrite after every row.
 - **Dashboard auto-linking**: on changed output, `DashboardUpdateService.findBoard(key)`
   decides between `createFromDataSource` (first data, typed via
   `BILLER_PRESET_MAP` in `types/billers.ts`) and `updateBySelector` (refresh) —
   both reuse the normal build → push → deploy pipeline and its app-mode gating.
+- **Biller Studio** (`screens/BillerStudioScreen.tsx` + the three services above):
+  a dedicated chat window that turns a sender address and a subject into a
+  `fetch_<key>.py`. It is deliberately not the dashboard chat — there is no
+  free-form conversation, only a fixed pipeline: probe one real email → show the
+  user the exact text before any of it is transmitted → propose fields → generate
+  → compile → grade what `parse()` extracts → dry-run against the mailbox → save.
+  The reference skeleton handed to the model is read from the bundled fetchers at
+  run time (`fetch_zomato.py`, or `fetch_rapido.py` when the probe found the
+  receipt in a PDF), so the template cannot drift from what ships. Decision logic
+  lives in `screens/billerStudioFlow.ts` as pure functions, because the rule that
+  matters — nothing is sent without an explicit `yes` — is worth asserting
+  directly rather than through a rendered terminal.
+- **Generated code is scanned before it is written** (`scanGeneratedSource`): the
+  sample is attacker-controlled text (anyone who can email you can put
+  instructions in something shaped like a receipt), and the result is compiled,
+  imported and dry-run with the App Password in its environment. An allowlist of
+  the modules the shipped fetchers import, plus explicit denials for the process,
+  network, `eval` and deserialisation surfaces that permitting `os` leaves
+  reachable. Only the two `OPENBOARD_GMAIL_*` variables may be read.
 - **Due-based scheduling** (`services/billers/billerScheduler.ts`): an unref'd,
   self-rescheduling timeout with failure backoff and a disposer, living in the TUI
   process. It does **not** tick on every launch: a tick spawns Python and can
