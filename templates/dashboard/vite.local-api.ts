@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin, ViteDevServer } from 'vite'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { newestGeneratedAt } from './api/_freshness.js'
 
 type LocalEnvironment = Record<string, string>
 
@@ -125,7 +126,9 @@ async function handleDashboardData(
   const dashboards = (module.PROTECTED_DASHBOARD_DATA ?? {}) as Record<string, unknown>
   res.setHeader('Cache-Control', 'private, no-store')
   if (dashboard === '__all__') {
-    send(res, 200, { dashboards, generatedAt: new Date().toISOString() })
+    // Must match the deployed handler: the newest timestamp in the payload,
+    // never the time of the request.
+    send(res, 200, { dashboards, generatedAt: newestGeneratedAt(dashboards) })
     return
   }
   if (!/^[a-z0-9-]+$/.test(dashboard)) {
