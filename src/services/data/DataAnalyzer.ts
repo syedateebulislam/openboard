@@ -33,6 +33,33 @@ const DATE_PATTERNS = [
   { regex: /^\d{2}-\d{2}-\d{4}$/, format: 'DD-MM-YYYY' },
 ];
 
+/**
+ * Comparable value for a date string, honouring the format it is written in.
+ *
+ * Only YYYY-MM-DD sorts correctly as text. The other two supported formats put
+ * the day or month first, so a plain `.sort()` ordered 12/01/2025 before
+ * 06/15/2025 and reported the range inverted. That range is fed to the model in
+ * the data summary, so the dashboards it writes inherit the wrong time span —
+ * a plausible-looking wrong answer rather than a visible failure.
+ *
+ * Returns NaN for anything unrecognised so callers can keep those out of the
+ * comparison instead of letting them decide the boundaries.
+ */
+function dateSortKey(value: string): number {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return Date.parse(`${value}T00:00:00Z`);
+  }
+  const slashed = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value); // MM/DD/YYYY
+  if (slashed) {
+    return Date.UTC(Number(slashed[3]), Number(slashed[1]) - 1, Number(slashed[2]));
+  }
+  const dashed = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value); // DD-MM-YYYY
+  if (dashed) {
+    return Date.UTC(Number(dashed[3]), Number(dashed[2]) - 1, Number(dashed[1]));
+  }
+  return Number.NaN;
+}
+
 export class DataAnalyzer {
   static analyze(parsed: ParsedData): DataAnalysis {
     const { rows, headers } = parsed;
@@ -59,8 +86,14 @@ export class DataAnalyzer {
       const nums = nonNull as number[];
       nums.sort((a, b) => a - b);
       analysis.stats = {
-        min: Math.min(...nums),
-        max: Math.max(...nums),
+        // Read the ends of the sorted array rather than spreading it into
+        // Math.min/Math.max. Spreading passes one argument per element, which
+        // exceeds the call-stack limit somewhere around 125k values — well
+        // inside the 1,000,000-row ceiling the parser accepts — and took down
+        // the whole analysis with a RangeError. The array is already sorted,
+        // so the ends are exact and free.
+        min: nums[0],
+        max: nums[nums.length - 1],
         mean: nums.reduce((a, b) => a + b, 0) / nums.length,
         median:
           nums.length % 2 === 0
@@ -70,9 +103,28 @@ export class DataAnalyzer {
     }
 
     if (type === 'date') {
-      const dates = (nonNull as string[]).sort();
-      const fmt = DATE_PATTERNS.find(p => p.regex.test(dates[0]));
-      analysis.dateRange = { earliest: dates[0], latest: dates[dates.length - 1] };
+      const raw = nonNull as string[];
+      // Detect the format from any recognised value, not from whichever one
+      // happened to sort first — the old code read dates[0] after a sort that
+      // was itself wrong for two of the three formats.
+      const fmt = DATE_PATTERNS.find(p => raw.some(value => p.regex.test(value)));
+
+      const comparable = raw
+        .map(value => ({ value, key: dateSortKey(value) }))
+        .filter(entry => !Number.isNaN(entry.key))
+        .sort((a, b) => a.key - b.key);
+
+      if (comparable.length > 0) {
+        analysis.dateRange = {
+          earliest: comparable[0].value,
+          latest: comparable[comparable.length - 1].value,
+        };
+      } else {
+        // Nothing parsed: fall back to text order rather than report no range
+        // at all, which is what a column of unrecognised formats used to get.
+        const lexical = [...raw].sort();
+        analysis.dateRange = { earliest: lexical[0], latest: lexical[lexical.length - 1] };
+      }
       analysis.dateFormat = fmt?.format;
     }
 
