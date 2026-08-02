@@ -189,6 +189,30 @@ Requirements:
   return 'src/App.tsx was cleaned up.';
 }
 
+/**
+ * Boards that should record this deployment.
+ *
+ * A workspace is one Vercel project serving every dashboard in it as tabs, so
+ * a deploy publishes all of them at once. Recording the URL against only the
+ * board that triggered the run left its siblings reading "never deployed"
+ * while they were live at that very address — and nothing wrote the field at
+ * all, so every board reported that regardless.
+ *
+ * Boards already carrying this exact URL are skipped so a repeat deploy does
+ * not rewrite the registry for no reason.
+ */
+export function boardsNeedingDeployRecord(
+  boards: BoardConfig[],
+  projectDir: string,
+  deployUrl: string,
+): BoardConfig[] {
+  const target = resolve(projectDir);
+  return boards.filter((board) => {
+    if (resolve(board.outputDir) !== target) return false;
+    return !(board.deployUrl === deployUrl && board.lastDeployed);
+  });
+}
+
 export class DashboardUpdateService {
   private registry: BoardRegistryService;
   private history: PromptHistoryService;
@@ -1575,6 +1599,8 @@ Requirements:
     reporter.log(`Deployed: ${deployResult.url || 'Success'}`);
     reporter.phase('done');
     reporter.result(true);
+    this.recordDeployment(projectDir, deployResult.url);
+
     if (run) {
       this.runs.complete(run, {
         boardId: board.id, boardName: board.name, boardTitle: board.title,
@@ -1591,6 +1617,27 @@ Requirements:
       runId: run?.runId,
       tokenUsage: run?.tokenUsage,
     };
+  }
+
+  /**
+   * Persist the deployment onto every board that shares this project.
+   *
+   * BoardConfig has always declared deployUrl and lastDeployed, and `agent
+   * list` reports them — but nothing ever wrote them, so every board read as
+   * "never deployed" no matter how many times it had shipped.
+   *
+   * They are written across the whole project directory rather than onto the
+   * board that happened to trigger the run, because a workspace is one Vercel
+   * project serving every dashboard in it as tabs. Recording the URL against a
+   * single board would leave its siblings looking undeployed while they are
+   * live at that very address.
+   */
+  private recordDeployment(projectDir: string, deployUrl?: string): void {
+    if (!deployUrl) return;
+    const lastDeployed = new Date().toISOString();
+    for (const board of boardsNeedingDeployRecord(this.registry.listBoards(), projectDir, deployUrl)) {
+      this.registry.upsertBoard({ ...board, deployUrl, lastDeployed });
+    }
   }
 
   private reconcileBatchResults(
