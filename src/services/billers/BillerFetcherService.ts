@@ -33,7 +33,9 @@ import {
   discoverBillers,
   isInsideScriptsDir,
   migrateInstalledFetchers,
+  repoRootFor,
 } from './BillerDiscoveryService.js';
+import { ProjectLockService } from '../project/ProjectLockService.js';
 
 export type ProgressCallback = (line: string) => void;
 
@@ -300,13 +302,25 @@ export class BillerFetcherService {
 
     const after = await hashFile(biller.csvPath);
     const changed = Boolean(after) && before !== after;
-    if (!changed || options.skipDashboard) {
-      return { ...base, ok: true, changed };
+    const existing = this.updateService.findBoard(biller.key);
+
+    // "Unchanged" is only a reason to stop once a dashboard already exists.
+    // Gating purely on `changed` meant a biller whose CSV was already populated
+    // — every biller adopted from an existing setup — reported success forever
+    // and never produced a tab, because the first fetch found no new mail and
+    // so nothing "changed". Build it from the data already on disk instead.
+    const needsFirstDashboard = Boolean(after) && !existing;
+    if ((!changed && !needsFirstDashboard) || options.skipDashboard) {
+      return { ...base, ok: true, changed, dashboardExists: Boolean(existing) };
     }
 
-    // The CSV grew: create the dashboard on first data, refresh it afterwards.
     try {
-      const existing = this.updateService.findBoard(biller.key);
+      if (needsFirstDashboard && !changed) {
+        options.onProgress?.(
+          `[${biller.key}] no new invoices, but no dashboard exists yet — building it from the CSV already on disk.`,
+        );
+      }
+
       const result = existing
         ? await this.updateService.updateBySelector(biller.key, options.onProgress)
         : await this.updateService.createFromDataSource(
@@ -320,31 +334,57 @@ export class BillerFetcherService {
       return {
         ...base,
         ok: result.success,
-        changed: true,
+        changed,
         dashboardUpdated: result.success,
+        dashboardExists: result.success || Boolean(existing),
         error: result.success ? undefined : result.error,
       };
     } catch (error: any) {
       if (error?.name === 'AbortError') throw error;
-      return { ...base, ok: false, changed: true, error: error.message };
+      return { ...base, ok: false, changed, dashboardExists: Boolean(existing), error: error.message };
     }
   }
 
-  /** Run every enabled biller in turn. Sequential: one IMAP account, one build queue. */
+  /**
+   * Run every enabled biller in turn. Sequential: one IMAP account, one build
+   * queue.
+   *
+   * Guarded by a lock on the billers root, because this has three entry points
+   * — the scheduler's timer, "Fetch now" in the TUI, and `agent billers sync`
+   * in a separate process. The scheduler's own re-entrancy flag only knows
+   * about itself, so a manual fetch could run the same script at the same time
+   * as a scheduled one: two processes appending to one CSV and rewriting the
+   * same state.json, which the fetchers rewrite after every row. Last writer
+   * wins, and the loser's UIDs come back as duplicates on the next run.
+   */
   async syncEnabled(
     options: { onProgress?: ProgressCallback; signal?: AbortSignal; only?: string } = {},
   ): Promise<BillerRunResult[]> {
-    const billers = options.only
-      ? this.list().filter((biller) => biller.key === options.only)
-      : this.listEnabled();
+    const settings = this.settings();
+    const lockDir = settings.scriptsDir ? repoRootFor(settings.scriptsDir) : undefined;
+    const lock = lockDir ? ProjectLockService.acquire(lockDir) : undefined;
 
-    const results: BillerRunResult[] = [];
-    for (const biller of billers) {
-      if (options.signal?.aborted) break;
-      options.onProgress?.(`[${biller.key}] fetching invoices…`);
-      results.push(await this.syncBiller(biller, options));
+    if (lock && !lock.success) {
+      // A concurrent fetch is not an error — it is the lock doing its job.
+      options.onProgress?.(`Skipped: another fetch is already running. ${lock.error ?? ''}`.trim());
+      return [];
     }
-    return results;
+
+    try {
+      const billers = options.only
+        ? this.list().filter((biller) => biller.key === options.only)
+        : this.listEnabled();
+
+      const results: BillerRunResult[] = [];
+      for (const biller of billers) {
+        if (options.signal?.aborted) break;
+        options.onProgress?.(`[${biller.key}] fetching invoices…`);
+        results.push(await this.syncBiller(biller, options));
+      }
+      return results;
+    } finally {
+      lock?.release();
+    }
   }
 }
 

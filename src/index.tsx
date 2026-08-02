@@ -883,9 +883,20 @@ if (!command || command === 'start') {
             : 'No billers are enabled. Enable one with `openboard agent setup billers --biller-key <key>`.');
         }
         for (const result of results) {
-          console.log(result.ok
-            ? `${result.displayName}: ${result.changed ? `new invoices${result.dashboardUpdated ? ' — dashboard refreshed' : ''}` : 'no new invoices'}`
-            : `${result.displayName}: FAILED — ${result.error}`);
+          if (!result.ok) {
+            console.log(`${result.displayName}: FAILED — ${result.error}`);
+            continue;
+          }
+          const change = result.changed ? 'new invoices' : 'no new invoices';
+          // "no new invoices" alone reads as healthy even when the biller has
+          // no dashboard at all, which is the state a user reads as "nothing
+          // happened". Say which of the two it is.
+          const dashboard = result.dashboardUpdated
+            ? ' — dashboard refreshed'
+            : result.dashboardExists === false
+              ? ' — no dashboard yet'
+              : '';
+          console.log(`${result.displayName}: ${change}${dashboard}`);
         }
       }
       process.exit(ok ? 0 : 1);
