@@ -367,11 +367,16 @@ describe('Biller invoice fetchers', () => {
       expect(updateService.createFromDataSource).not.toHaveBeenCalled();
     });
 
-    it('skips the dashboard entirely when the CSV did not change', async () => {
+    it('skips the dashboard when the CSV did not change and one already exists', async () => {
+      // Unchanged data is only a reason to stop once there is a dashboard to
+      // leave alone. Gating on `changed` alone meant a biller whose CSV was
+      // already populated reported success forever and never produced a tab —
+      // see "builds the first dashboard from data already on disk" below.
       mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
       writeFileSync(join(root, 'data', 'invoices', 'zomato.csv'), 'order_id\n1\n', 'utf-8');
 
       const updateService = fakeUpdateService();
+      updateService.findBoard = vi.fn(() => ({ id: 'board-1', name: 'zomato' })) as never;
       const service = new BillerFetcherService({
         settings: () => settings(),
         updateService: updateService as unknown as DashboardUpdateService,
@@ -382,8 +387,26 @@ describe('Biller invoice fetchers', () => {
       const [result] = await service.syncEnabled();
       expect(result.ok).toBe(true);
       expect(result.changed).toBe(false);
+      expect(result.dashboardExists).toBe(true);
       expect(updateService.createFromDataSource).not.toHaveBeenCalled();
       expect(updateService.updateBySelector).not.toHaveBeenCalled();
+    });
+
+    it('builds the first dashboard from data already on disk', async () => {
+      mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+      writeFileSync(join(root, 'data', 'invoices', 'zomato.csv'), 'order_id\n1\n', 'utf-8');
+
+      const updateService = fakeUpdateService(); // findBoard returns undefined
+      const service = new BillerFetcherService({
+        settings: () => settings(),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: '[zomato] 0 new rows' }),
+      });
+
+      const [result] = await service.syncEnabled();
+      expect(result.changed).toBe(false);
+      expect(updateService.createFromDataSource).toHaveBeenCalledTimes(1);
+      expect(result.dashboardExists).toBe(true);
     });
 
     it('only runs enabled billers, and --biller overrides the selection', async () => {

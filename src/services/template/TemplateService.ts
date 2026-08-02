@@ -63,6 +63,7 @@ const SHELL_SYNC_FILES = [
   'src/hooks/useProtectedDashboardData.ts',
   'src/hooks/useTheme.ts',
   'api/_auth.ts',
+  'api/_freshness.ts',
   'api/auth.ts',
   'api/dashboard-data.ts',
   'vercel.json',

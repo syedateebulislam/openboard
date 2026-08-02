@@ -73,6 +73,14 @@ export interface BillerRunResult {
   changed: boolean;
   /** A dashboard was created or refreshed for this biller on this run. */
   dashboardUpdated?: boolean;
+  /**
+   * Whether this biller has a dashboard at all once the run finished.
+   *
+   * `ok: true, changed: false` alone cannot tell an agent whether the run was
+   * a healthy no-op or left the biller with no dashboard to look at, which is
+   * the same thing a human sees as "nothing happened".
+   */
+  dashboardExists?: boolean;
   error?: string;
 }
 

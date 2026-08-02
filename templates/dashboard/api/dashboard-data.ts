@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAuth } from './_auth.js';
+import { newestGeneratedAt } from './_freshness.js';
 import { PROTECTED_DASHBOARD_DATA } from './_data/protected-data.js';
 
 const DASHBOARD_NAME = /^[a-z0-9-]+$/;
@@ -28,9 +29,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   // It can never collide with a real slug: slugs must match DASHBOARD_NAME.
   if (dashboard === '__all__') {
     res.setHeader('Cache-Control', 'private, no-store');
+    // Report the newest timestamp in the payload, not the time of this
+    // request — the latter made the master tab claim fresh data on every
+    // reload while every other tab told the truth.
     return res.status(200).json({
       dashboards: PROTECTED_DASHBOARD_DATA,
-      generatedAt: new Date().toISOString(),
+      generatedAt: newestGeneratedAt(PROTECTED_DASHBOARD_DATA as Record<string, unknown>),
     });
   }
 

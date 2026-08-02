@@ -37,12 +37,29 @@ describe('Dashboard header strip', () => {
 
   it('instructs the LLM to start every dashboard with DashboardHeader and protects it', () => {
     expect(SYSTEM_PROMPT).toContain('DashboardHeader');
-    expect(SYSTEM_PROMPT).toContain('rowCount={data?.rows.length}');
+    expect(SYSTEM_PROMPT).toContain('rowCount={data?.rows?.length}');
     expect(SYSTEM_PROMPT).toContain('generatedAt={data?.generatedAt}');
     // Protected from removal (rule 20).
     expect(SYSTEM_PROMPT).toContain('src/components/DashboardHeader.tsx');
 
     const componentPrompt = buildComponentGenerationPrompt('Chart', 'test', 'type Row = {}', 'rows', '<div />');
     expect(componentPrompt).toContain('DashboardHeader');
+  });
+
+  it('never teaches the unguarded rows access', () => {
+    // `data?.rows.length` type-checks — the `?.` short-circuits the whole chain
+    // for the compiler — but at run time it only short-circuits when `data`
+    // itself is nullish. A payload that arrives without `rows` throws "Cannot
+    // read properties of undefined (reading 'length')" and the tab dies while
+    // every other tab keeps working. The prompt used to hand the model exactly
+    // that form, so every dashboard it wrote inherited the hazard.
+    const sources = [
+      SYSTEM_PROMPT,
+      buildComponentGenerationPrompt('Chart', 'test', 'type Row = {}', 'rows', '<div />'),
+      readFileSync(join(TEMPLATE, 'src', 'components', 'DashboardHeader.tsx'), 'utf-8'),
+    ];
+    for (const source of sources) {
+      expect(source).not.toMatch(/data\?\.rows\.length/);
+    }
   });
 });

@@ -10,6 +10,7 @@ import { TypedConfigRepository } from '../services/config/TypedConfigRepository.
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
 import {
   discoverBillers,
+  stalePronedDataKeys,
   installBundledScripts,
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
@@ -270,6 +271,10 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
           ? `Status: ready — ${billers.length} biller(s) found, none enabled yet`
           : `Status: ${settings.enabledKeys.length} of ${billers.length} biller(s) enabled`;
 
+  // Data with no fetcher behind it renders a dashboard that quietly stops
+  // updating, which looks identical to one that is simply up to date.
+  const stale = hasDir ? stalePronedDataKeys(settings.scriptsDir) : [];
+
   return (
     <Box flexDirection="column" padding={2}>
       <Text bold color={UI_COLORS.logo}>🧾 Invoice Fetchers</Text>
@@ -296,6 +301,11 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
         )}
         {hasDir && (
           <Text color={UI_COLORS.subtitle}>Credentials: encrypted in config, passed to fetchers at run time</Text>
+        )}
+        {stale.length > 0 && (
+          <Text color="yellow">
+            No fetcher for: {stale.join(', ')} — these dashboards will not refresh. Add one with ✚ Add a new biller.
+          </Text>
         )}
       </Box>
 

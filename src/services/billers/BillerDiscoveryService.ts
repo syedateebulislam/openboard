@@ -316,6 +316,36 @@ export function migrateInstalledFetchers(scriptsDir: string | undefined): string
 }
 
 /**
+ * CSVs in the invoices folder that no discoverable fetcher maintains.
+ *
+ * A dashboard can be built from any CSV, but only a `fetch_<key>.py` keeps one
+ * current. Data imported from an older setup — or produced by an aggregate
+ * script like fetch_pending_invoices.py, which is excluded from the biller list
+ * by design — therefore powers a dashboard that silently freezes: it renders,
+ * it looks healthy, and it never changes again. Nothing surfaced that, so this
+ * lists the affected keys for the UI to warn about.
+ */
+export function stalePronedDataKeys(scriptsDir: string | undefined): string[] {
+  if (!scriptsDir) return [];
+  const invoicesDir = join(repoRootFor(scriptsDir), 'data', 'invoices');
+
+  let files: string[];
+  try {
+    files = readdirSync(invoicesDir);
+  } catch {
+    return [];
+  }
+
+  const fetched = new Set(discoverBillers(scriptsDir).map((biller) => biller.key));
+  return files
+    .filter((entry) => entry.endsWith('.csv'))
+    .map((entry) => entry.slice(0, -4))
+    // The aggregate itself is not a biller and is not meant to be one.
+    .filter((key) => key !== 'pending_invoices' && !fetched.has(key))
+    .sort();
+}
+
+/**
  * Guard against executing anything outside the configured folder: the spawned
  * path must resolve to a direct child of it.
  */

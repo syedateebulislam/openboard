@@ -42,6 +42,7 @@ import {
 } from '../services/billers/BillerScriptGenerator.js';
 import { BillerScriptWriter, DRY_RUN_LIMIT } from '../services/billers/BillerScriptWriter.js';
 import { discoverBillers } from '../services/billers/BillerDiscoveryService.js';
+import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { sanitizeErrorMessage } from '../utils/logger.js';
 import { nextStudioAction, type StudioStage as Stage } from './billerStudioFlow.js';
 
@@ -238,6 +239,20 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
       });
       setProposal(detected);
       say('assistant', formatProposal(detected));
+
+      // A key that already names a dashboard is not blocked — replacing a
+      // biller's fetcher is legitimate — but it must not be silent. Saving
+      // would point that dashboard at this fetcher's CSV on the next sync.
+      const clash = new BoardRegistryService()
+        .listBoards()
+        .find((board) => board.name === detected.key);
+      if (clash) {
+        say(
+          'system',
+          `Note: a dashboard called "${clash.name}" already exists. Saving this fetcher will make it the source for that dashboard from the next fetch onwards. Use /restart and a different key if you meant to add a separate biller.`,
+        );
+      }
+
       say(
         'system',
         'Does that match what you see in the email? Type "yes" to build the fetcher, anything else to cancel.',
