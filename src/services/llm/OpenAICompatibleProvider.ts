@@ -10,11 +10,72 @@ import type {
 import { startHeartbeat } from './heartbeat.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
+/**
+ * Request timeout for a model running on the user's own machine.
+ *
+ * The SDK defaults to 10 minutes, which is a sensible ceiling for a hosted API
+ * — a request still open after that is a fault. It is the wrong ceiling for a
+ * local server: a 27B model at ~16 tok/s spends roughly seven minutes reasoning
+ * before it writes a line, and a full fetcher or dashboard runs past ten. The
+ * abort then lands mid-output, so the answer is discarded as malformed and the
+ * retry hits the same wall.
+ *
+ * Nothing is being waited on except the user's own GPU, so the ceiling only has
+ * to be high enough that finishing is possible; /stop and ESC still cancel.
+ */
+export const LOCAL_LLM_TIMEOUT_MS = 45 * 60_000;
+
+/**
+ * The usable text of a reply, falling back to the reasoning channel.
+ *
+ * Reasoning models served through OpenAI-compatible endpoints put their thought
+ * process in a non-standard `reasoning_content` field. Most fill `content` as
+ * well, but some leave it empty and answer entirely in the reasoning channel —
+ * in which case reading only `content` returns nothing and the caller reports a
+ * model that said nothing at all, having in fact said a great deal.
+ *
+ * Preferring `content` keeps normal replies untouched; this only rescues the
+ * case that would otherwise be silence.
+ */
+export function messageText(message: unknown): string {
+  if (typeof message !== 'object' || message === null) return '';
+  const record = message as { content?: unknown; reasoning_content?: unknown };
+  if (typeof record.content === 'string' && record.content.trim()) return record.content;
+  if (typeof record.reasoning_content === 'string') return record.reasoning_content;
+  return typeof record.content === 'string' ? record.content : '';
+}
+
+/** Whether a base URL points at this machine, and so at the user's own hardware. */
+export function isLocalBaseUrl(baseUrl: string): boolean {
+  try {
+    // URL keeps the brackets on an IPv6 host, so `[::1]` never equals `::1`.
+    const hostname = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname === '::1'
+      || hostname === '0.0.0.0'
+      || hostname.endsWith('.local');
+  } catch {
+    return false;
+  }
+}
+
+/** Timeout for a base URL: generous when local, SDK default when hosted. */
+export function timeoutForBaseUrl(baseUrl: string): number | undefined {
+  return isLocalBaseUrl(baseUrl) ? LOCAL_LLM_TIMEOUT_MS : undefined;
+}
+
 export interface OpenAICompatibleProviderOptions {
   name: string;
   apiKey: string;
   baseUrl: string;
   model: string;
+  /**
+   * Request timeout in ms. Omitted leaves the SDK's own default of 10 minutes,
+   * which is right for a hosted API and far too short for a local one — see
+   * LOCAL_LLM_TIMEOUT_MS.
+   */
+  timeoutMs?: number;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -23,6 +84,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly timeoutMs?: number;
   private resolvedModel?: string;
 
   constructor(options: OpenAICompatibleProviderOptions) {
@@ -30,12 +92,23 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl;
     this.model = options.model;
+    // Derived from the endpoint rather than the provider name, so a local
+    // server reached through any registration gets the local ceiling.
+    this.timeoutMs = options.timeoutMs ?? timeoutForBaseUrl(options.baseUrl);
   }
 
   private getClient(): Promise<OpenAI> {
     if (!this.clientPromise) {
       this.clientPromise = import('openai').then(
-        ({ default: OpenAI }) => new OpenAI({ apiKey: this.apiKey, baseURL: this.baseUrl }),
+        ({ default: OpenAI }) => new OpenAI({
+          apiKey: this.apiKey,
+          baseURL: this.baseUrl,
+          // Left undefined the SDK applies its own 10-minute default, which
+          // silently severs a local model mid-answer: a 27B model at ~16 tok/s
+          // needs longer than that to finish one dashboard or fetcher, and the
+          // abort arrives as a generic failure after ten minutes of nothing.
+          ...(this.timeoutMs !== undefined ? { timeout: this.timeoutMs } : {}),
+        }),
       );
     }
     return this.clientPromise;
@@ -96,7 +169,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           completionTokens: response.usage.completion_tokens,
         });
       }
-      return response.choices[0]?.message?.content ?? '';
+      return messageText(response.choices[0]?.message);
     } catch (error: unknown) {
       const raw = error instanceof Error ? error.message : String(error);
       throw new Error(sanitizeErrorMessage(raw));

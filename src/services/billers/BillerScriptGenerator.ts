@@ -17,6 +17,7 @@ import { LLMService } from '../llm/LLMService.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 import type { LLMProvider } from '../../types/llm.js';
 import { bundledScriptsDir } from './BillerDiscoveryService.js';
+import { logger } from '../../utils/logger.js';
 import { BILLER_KEY_PATTERN, validateScriptSource } from './BillerScriptWriter.js';
 
 /** The fetcher used as the structural reference. Chosen for being the plainest. */
@@ -92,6 +93,17 @@ const RESERVED_COLUMNS = new Set([
 export function outputBudgetFor(reference: string): number {
   const referenceTokens = Math.ceil(reference.length / 4);
   return Math.min(32_000, Math.max(8192, referenceTokens * 2 + 6000));
+}
+
+/**
+ * Whether a rejection means the answer was severed rather than wrong.
+ *
+ * Matches the two truncation messages parseGeneratedScript raises. Kept as a
+ * predicate rather than an error subclass so the distinction stays next to the
+ * text it depends on.
+ */
+export function wasCutOff(message: string): boolean {
+  return /cut off|ran out of output budget/i.test(message);
 }
 
 /** Pull the payload out of a fenced region, tolerating models that omit markers. */
@@ -266,6 +278,11 @@ export class BillerScriptGenerator {
         ? `${basePrompt}\n\n## Previous attempt failed\n\nYour last script was rejected:\n\n${lastFailure}\n\nReturn a corrected COMPLETE script. Fix the cause; do not restate the error.`
         : basePrompt;
 
+      // Timed and sized because a failure here is otherwise indistinguishable
+      // between "the model was cut off", "it returned nothing" and "it returned
+      // something unusable" — the ambiguity that made a real timeout look like
+      // a formatting bug for four attempts.
+      const startedAt = Date.now();
       const response = await this.provider().complete({
         messages: [
           { role: 'system', content: BILLER_SCRIPT_GENERATION_PROMPT },
@@ -278,11 +295,29 @@ export class BillerScriptGenerator {
         onProgress: options.onProgress,
         signal: options.signal,
       });
+      logger.debug('biller script generation returned', {
+        attempt,
+        seconds: Math.round((Date.now() - startedAt) / 1000),
+        chars: response.length,
+      });
 
       let source: string;
       try {
         source = parseGeneratedScript(response);
       } catch (error: any) {
+        // A script cut off mid-file is not a content mistake, so there is
+        // nothing for the model to "fix". Retrying resubmits a near-identical
+        // prompt and the answer is severed at the same place — three attempts
+        // on a local model burned half an hour proving exactly that. Stop and
+        // say what is actually wrong.
+        if (wasCutOff(error.message)) {
+          throw new Error(
+            `${error.message}\n\n` +
+            'The model is producing more text than it can finish. Retrying would ' +
+            'be cut off at the same point, so this stopped after one attempt. ' +
+            'Use a smaller or faster model, or one with a larger output budget.',
+          );
+        }
         lastFailure = error.message;
         continue;
       }

@@ -206,12 +206,36 @@ def fetch_html_and_attachments(msg, raw_dir, uid: str, dry_run: bool) -> Tuple[s
     return html_body, saved_files
 
 
-def search_uids(imap, sender_email: str, since_date: str) -> List[str]:
-    criteria = f'(FROM "{sender_email}" SINCE {since_date})'
+def _search_uids(imap, criteria: str) -> List[str]:
     status, data = imap.uid("search", None, criteria)
     if status != "OK" or not data or not data[0]:
         return []
     return [uid.decode() for uid in data[0].split()]
+
+
+def search_uids(imap, sender_email, since_date: str) -> List[str]:
+    """UIDs to consider, widening the search when the sender match finds nothing.
+
+    A FROM search cannot see a forwarded receipt: forwarding rewrites the From:
+    header to whoever forwarded it, leaving the original sender only in the
+    quoted body. TEXT searches headers and body together, so it still finds the
+    receipt inside a forwarded thread.
+
+    The sender match runs first and wins outright when it matches, so an inbox
+    receiving mail directly is unaffected. Accepts one address or several.
+    """
+    senders = sender_email if isinstance(sender_email, (list, tuple, set)) else [sender_email]
+
+    uids = set()
+    for sender in senders:
+        uids.update(_search_uids(imap, f'(FROM "{sender}" SINCE {since_date})'))
+    if uids:
+        return sorted(uids, key=lambda value: int(value))
+
+    # Nothing from that sender directly — look for it quoted in forwarded mail.
+    for sender in senders:
+        uids.update(_search_uids(imap, f'(SINCE {since_date} TEXT "{sender}")'))
+    return sorted(uids, key=lambda value: int(value))
 
 
 # ── Amazon Pay-specific logic ─────────────────────────────────────────────────
