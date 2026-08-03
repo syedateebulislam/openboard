@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# <<OPENBOARD:DOCSTRING>>
 """Standalone Zomato invoice fetcher.
 
 Self-contained: connects to Gmail over IMAP, finds Zomato order emails,
@@ -11,6 +12,7 @@ Usage:
 Requires: beautifulsoup4
 Credentials: secrets/gmail_app_credentials.json  -> { "email": ..., "app_password": ... }
 """
+# <</OPENBOARD:DOCSTRING>>
 
 import argparse
 import csv
@@ -34,6 +36,7 @@ from bs4 import BeautifulSoup
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_PATH = REPO_ROOT / "secrets" / "gmail_app_credentials.json"
 
+# <<OPENBOARD:CONFIG>>
 KEY = "zomato"
 DISPLAY_NAME = "Zomato"
 SENDER_EMAIL = "noreply@zomato.com"
@@ -43,7 +46,9 @@ RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "zomato"
 STATE_PATH = RAW_DIR / "state.json"
 DEFAULT_SINCE_DAYS = 30
 SEARCH_LIMIT = 100
+# <</OPENBOARD:CONFIG>>
 
+# <<OPENBOARD:COLUMNS>>
 COLUMNS = [
     "source_sender",
     "email_uid",
@@ -56,6 +61,7 @@ COLUMNS = [
     "total_paid",
     "currency",
 ]
+# <</OPENBOARD:COLUMNS>>
 
 
 # ── Shared helpers (inlined so this script stands alone) ──────────────────────
@@ -226,11 +232,14 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
     return sorted(uids, key=lambda value: int(value))
 
 
-# ── Zomato-specific logic ────────────────────────────────────────────────
+# ── Biller-specific logic ────────────────────────────────────────────────
+# <<OPENBOARD:IS_RECEIPT>>
 def is_receipt(subject: str) -> bool:
     return True  # subject-prefix filter is enough
+# <</OPENBOARD:IS_RECEIPT>>
 
 
+# <<OPENBOARD:PARSE>>
 def parse(text: str, subject: str) -> Dict[str, str]:
     """Parse Zomato order emails (Zomato Order <noreply@zomato.com>).
 
@@ -271,6 +280,7 @@ def parse(text: str, subject: str) -> Dict[str, str]:
         "currency": "INR",
     }
 
+# <</OPENBOARD:PARSE>>
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 def run(args) -> Tuple[int, int]:

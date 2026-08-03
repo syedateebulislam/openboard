@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# <<OPENBOARD:DOCSTRING>>
 """Standalone Rapido receipt fetcher.
 
 Connects to Gmail over IMAP, finds Rapido receipt emails, extracts attached
@@ -10,6 +11,7 @@ Usage:
 Requires: beautifulsoup4, pdfplumber
 Credentials: secrets/gmail_app_credentials.json  -> { "email": ..., "app_password": ... }
 """
+# <</OPENBOARD:DOCSTRING>>
 
 import argparse
 import csv
@@ -38,6 +40,7 @@ except ImportError:  # pragma: no cover - handled at runtime for clearer CLI log
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_PATH = REPO_ROOT / "secrets" / "gmail_app_credentials.json"
 
+# <<OPENBOARD:CONFIG>>
 KEY = "rapido"
 DISPLAY_NAME = "Rapido"
 SENDER_EMAIL = "partner@rapido.bike"
@@ -47,7 +50,9 @@ RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "rapido"
 STATE_PATH = RAW_DIR / "state.json"
 DEFAULT_SINCE_DAYS = 365
 SEARCH_LIMIT = 1000
+# <</OPENBOARD:CONFIG>>
 
+# <<OPENBOARD:COLUMNS>>
 COLUMNS = [
     "source_sender",
     "email_uid",
@@ -67,6 +72,7 @@ COLUMNS = [
     "currency",
     "receipt_file",
 ]
+# <</OPENBOARD:COLUMNS>>
 
 
 def read_json(path) -> dict:
@@ -221,18 +227,23 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
     return sorted(uids, key=lambda value: int(value))
 
 
+# <<OPENBOARD:IS_RECEIPT>>
 def is_receipt(subject: str) -> bool:
     lowered = subject.lower()
     return "rapido" in lowered or "trip with rapido" in lowered
+# <</OPENBOARD:IS_RECEIPT>>
 
 
+# <<OPENBOARD:EXTRACT_PDF_TEXT>>
 def extract_pdf_text(data: bytes) -> str:
     if pdfplumber is None:
         raise RuntimeError("pdfplumber is required to parse Rapido PDF receipts")
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         return "\n".join(page.extract_text(layout=True) or "" for page in pdf.pages)
+# <</OPENBOARD:EXTRACT_PDF_TEXT>>
 
 
+# <<OPENBOARD:PARSE_RECEIPT>>
 def parse_receipt(text: str) -> Dict[str, str]:
     normalized = re.sub(r"\r\n?", "\n", text)
     raw_lines = [line.strip() for line in normalized.splitlines()]
@@ -264,8 +275,10 @@ def parse_receipt(text: str) -> Dict[str, str]:
         "payment_method": "",
         "currency": "INR",
     }
+# <</OPENBOARD:PARSE_RECEIPT>>
 
 
+# <<OPENBOARD:EXTRACT_LOCATIONS>>
 def extract_locations(lines: List[str]) -> Tuple[str, str]:
     try:
         price_index = next(i for i, line in enumerate(lines) if re.fullmatch(r"(?:\u20b9|Rs\.?)?\s*[0-9.,]+", line))
@@ -296,8 +309,10 @@ def extract_locations(lines: List[str]) -> Tuple[str, str]:
         return (address_groups[0] if address_groups else "", "")
 
     return address_groups[0], address_groups[1]
+# <</OPENBOARD:EXTRACT_LOCATIONS>>
 
 
+# <<OPENBOARD:FETCH_PARTS>>
 def fetch_parts(msg, raw_dir, uid: str, dry_run: bool) -> Tuple[str, List[Tuple[str, bytes, str]]]:
     html_body = ""
     pdfs = []
@@ -325,6 +340,7 @@ def fetch_parts(msg, raw_dir, uid: str, dry_run: bool) -> Tuple[str, List[Tuple[
             pdfs.append((safe_name, payload, filepath))
 
     return html_body, pdfs
+# <</OPENBOARD:FETCH_PARTS>>
 
 
 def run(args) -> Tuple[int, int]:

@@ -18,6 +18,7 @@ import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 import type { LLMProvider } from '../../types/llm.js';
 import { bundledScriptsDir } from './BillerDiscoveryService.js';
 import { logger } from '../../utils/logger.js';
+import { parseRegions, regionNames, spliceRegions, stripRegionMarkers } from './skeletonRegions.js';
 import { BILLER_KEY_PATTERN, validateScriptSource } from './BillerScriptWriter.js';
 
 /** The fetcher used as the structural reference. Chosen for being the plainest. */
@@ -83,16 +84,24 @@ const RESERVED_COLUMNS = new Set([
 /**
  * Output budget for one generation attempt.
  *
- * The model has to reproduce the whole reference skeleton verbatim, so the
- * floor is the reference itself — and a reasoning model spends part of the
- * same budget thinking before it writes a character. A flat 8192 was enough
- * for the 12 KB HTML skeleton and silently truncated the 14 KB PDF one, which
- * surfaced as "did not return a complete fetcher script" three attempts in a
- * row. Scale with the reference and leave room to think.
+ * Scaled to what is actually asked for. The model used to reproduce the whole
+ * skeleton, so the budget had to cover ~3,100 tokens for the HTML reference and
+ * ~3,900 for the PDF one — and a flat 8192 silently truncated the larger of the
+ * two. Now only the marked regions are requested (~590 and ~1,260 tokens), so
+ * the budget sits far above the answer and truncation is out of reach.
+ *
+ * The headroom on top is for a reasoning model, which spends part of the same
+ * budget thinking before it writes a character.
  */
 export function outputBudgetFor(reference: string): number {
-  const referenceTokens = Math.ceil(reference.length / 4);
-  return Math.min(32_000, Math.max(8192, referenceTokens * 2 + 6000));
+  let askedFor = reference;
+  try {
+    askedFor = parseRegions(reference).map((region) => region.body).join('\n');
+  } catch {
+    // An unmarked skeleton still works via the whole-file path; budget for it.
+  }
+  const askedTokens = Math.ceil(askedFor.length / 4);
+  return Math.min(32_000, Math.max(8192, askedTokens * 2 + 6000));
 }
 
 /**
@@ -168,6 +177,90 @@ export function parseProposal(response: string): BillerProposal {
     fields,
     notes: typeof value.notes === 'string' ? value.notes : '',
   };
+}
+
+/**
+ * Pull the marked regions out of a region-mode reply.
+ *
+ * Returns the bodies keyed by region name. Missing regions are reported by
+ * name — far more actionable than "did not return a complete fetcher script",
+ * and the caller can still splice what did arrive because any region left out
+ * keeps the skeleton's own body.
+ */
+export function parseRegionResponse(response: string, expected: string[]): Map<string, string> {
+  const found = new Map<string, string>();
+
+  for (const name of expected) {
+    // Tolerate a model that fences each block, and one that omits the trailing
+    // marker on the final region.
+    const pattern = new RegExp(
+      `//REGION:${name}\\s*\\r?\\n(?:\`\`\`(?:python)?\\s*\\r?\\n)?([\\s\\S]*?)(?:\\r?\\n\`\`\`)?\\s*(?://END:${name}|(?=//REGION:)|$)`,
+    );
+    const match = pattern.exec(response);
+    if (!match) continue;
+    const body = match[1].replace(/\s+$/, '');
+    if (body.trim()) found.set(name, body);
+  }
+
+  if (found.size === 0) {
+    throw new Error('The model returned no marked regions.');
+  }
+  return found;
+}
+
+/** Names the model was asked for but did not return. */
+export function missingRegions(expected: string[], found: Map<string, string>): string[] {
+  return expected.filter((name) => !found.has(name));
+}
+
+/**
+ * Whether this skeleton can be generated a region at a time.
+ *
+ * False for a skeleton whose markers are absent or malformed, which keeps the
+ * whole-file path reachable instead of failing generation outright — the
+ * markers are an optimisation, not a prerequisite.
+ */
+export function regionsAvailable(skeleton: string): boolean {
+  try {
+    return regionNames(skeleton).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Turn a reply into a complete fetcher, whichever shape it came in.
+ *
+ * Region mode is what we ask for, but a model that ignores the format and
+ * returns a whole file is still perfectly useful — and some will. Trying
+ * regions first and falling back keeps the win without making the feature
+ * depend on every model honouring a custom output format.
+ *
+ * A partial region reply is still spliced: regions the model left out keep the
+ * skeleton's own body, so a near-miss produces a file the existing checks can
+ * judge rather than an outright failure.
+ */
+export function assembleScript(response: string, skeleton: string): string {
+  let expected: string[];
+  try {
+    expected = regionNames(skeleton);
+  } catch {
+    // Unmarked skeleton — only the whole-file shape is possible.
+    return parseGeneratedScript(response);
+  }
+
+  if (expected.length > 0 && response.includes('//REGION:')) {
+    const regions = parseRegionResponse(response, expected);
+    const absent = missingRegions(expected, regions);
+    if (absent.length > 0) {
+      // Named, because "the script was incomplete" gave the repair prompt
+      // nothing specific to correct.
+      throw new Error(`The model did not return these regions: ${absent.join(', ')}.`);
+    }
+    return stripRegionMarkers(spliceRegions(skeleton, regions));
+  }
+
+  return parseGeneratedScript(response);
 }
 
 /** Pull the Python file out of a generation reply. */
@@ -274,8 +367,15 @@ export class BillerScriptGenerator {
     for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS + 1; attempt++) {
       options.onAttempt?.(attempt, MAX_REPAIR_ATTEMPTS + 1);
 
+      // The repair prompt has to restate the output shape, or the model drifts
+      // back to emitting a whole file on retry — undoing the saving at exactly
+      // the moment it matters most, since a repair follows a reply that was
+      // already too long or incomplete.
+      const retryInstruction = regionsAvailable(reference)
+        ? 'Return the full set of //REGION: blocks again, corrected. Same format, same order, no prose, nothing outside the markers. Fix the cause; do not restate the error.'
+        : 'Return a corrected COMPLETE script. Fix the cause; do not restate the error.';
       const userPrompt = lastFailure
-        ? `${basePrompt}\n\n## Previous attempt failed\n\nYour last script was rejected:\n\n${lastFailure}\n\nReturn a corrected COMPLETE script. Fix the cause; do not restate the error.`
+        ? `${basePrompt}\n\n## Previous attempt failed\n\nYour last script was rejected:\n\n${lastFailure}\n\n${retryInstruction}`
         : basePrompt;
 
       // Timed and sized because a failure here is otherwise indistinguishable
@@ -291,6 +391,8 @@ export class BillerScriptGenerator {
         // Low temperature: this is transcription of a fixed skeleton plus a
         // small slice of new code, not a task that benefits from variety.
         temperature: 0.1,
+        // Budgeted against what is actually asked for — the regions — not the
+        // whole skeleton. That is what puts truncation out of reach.
         maxTokens: outputBudgetFor(reference),
         onProgress: options.onProgress,
         signal: options.signal,
@@ -303,7 +405,7 @@ export class BillerScriptGenerator {
 
       let source: string;
       try {
-        source = parseGeneratedScript(response);
+        source = assembleScript(response, reference);
       } catch (error: any) {
         // A script cut off mid-file is not a content mistake, so there is
         // nothing for the model to "fix". Retrying resubmits a near-identical
@@ -358,16 +460,54 @@ export class BillerScriptGenerator {
 
     const isPdf = sample.bodySource === 'pdf';
 
-    return [
-      '## Reference skeleton',
-      '',
-      isPdf
-        ? 'This biller puts its receipt in a PDF attachment, so the reference below is the PDF-reading fetcher. Keep its guarded pdfplumber import, its attachment loop and its business-key dedupe; reproduce everything outside the biller-specific regions EXACTLY as it appears here:'
-        : 'Reproduce everything outside the five biller-specific regions EXACTLY as it appears here:',
+    // A skeleton without usable markers still has to be generatable, so the
+    // instructions switch shape rather than the call failing.
+    const names = regionsAvailable(reference) ? regionNames(reference) : [];
+
+    const askForRegions = [
+      'Everything outside the `# <<OPENBOARD:NAME>>` markers is shared by every',
+      'fetcher and is already on disk — do NOT reproduce it. Read it for context,',
+      'then return ONLY the marked regions and nothing else.',
       '',
       '```python',
       reference,
       '```',
+      '',
+      '## What to return',
+      '',
+      `Return each of these ${names.length} regions, in this order, with no prose between them:`,
+      '',
+      '```',
+      ...names.map((name) => `//REGION:${name}\n<the code for ${name}>\n//END:${name}\n`),
+      '```',
+      '',
+      'Each region body replaces exactly what sits between that marker pair in the',
+      'skeleton, so it must be complete and at the same indentation — a top-level',
+      '`def` starts at column 0. Do not emit the marker comments themselves, and do',
+      'not include imports, helpers, run() or main(): those are outside the regions',
+      'and are supplied by OpenBoard.',
+    ];
+
+    const askForWholeFile = [
+      'Adapt it for the biller below, keeping the structure intact.',
+      '',
+      '```python',
+      reference,
+      '```',
+      '',
+      '## What to return',
+      '',
+      'The complete Python file between `//CODE_START` and `//CODE_END`, and nothing else.',
+    ];
+
+    return [
+      '## Reference skeleton',
+      '',
+      isPdf
+        ? 'This biller puts its receipt in a PDF attachment, so the reference below is the PDF-reading fetcher — it keeps a guarded pdfplumber import, an attachment loop and a dedupe on a business key.'
+        : 'This is the fetcher OpenBoard will build from.',
+      '',
+      ...(names.length > 0 ? askForRegions : askForWholeFile),
       '',
       isPdf
         ? '## PDF notes\n\n- The sample text below came from pdfplumber `extract_text(layout=True)`, which preserves column spacing — so a label and its value are often on the SAME line, separated by runs of spaces. Write patterns accordingly (`Label\\s{2,}([0-9.,]+)`), not with `\\n` between them.\n- Declare `Requires: beautifulsoup4, pdfplumber` in the docstring.\n- One email may carry several PDFs; keep the per-attachment loop and the dedupe on a business key.\n'

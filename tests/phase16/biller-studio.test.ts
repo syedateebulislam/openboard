@@ -577,13 +577,23 @@ describe('bundled support scripts', () => {
 // ── output budget ────────────────────────────────────────────────────────────
 
 describe('outputBudgetFor', () => {
-  it('scales with the reference so a large skeleton is not truncated', () => {
-    // A flat 8192 silently cut off the 14 KB PDF skeleton mid-file; the budget
-    // has to leave room for the whole reference plus reasoning.
-    const small = outputBudgetFor('x'.repeat(12_000));
-    const large = outputBudgetFor('x'.repeat(14_000));
+  it('scales with what is asked for, so a large skeleton is not truncated', () => {
+    // A flat 8192 silently cut off the 14 KB PDF skeleton mid-file. The budget
+    // now tracks the marked regions rather than the whole reference — the model
+    // is no longer asked to retype the boilerplate — so it is the region bodies
+    // that have to fit, with headroom for a reasoning model on top.
+    const region = (body: string) => `# <<OPENBOARD:PARSE>>\n${body}\n# <</OPENBOARD:PARSE>>\n`;
+    const small = outputBudgetFor(region('x'.repeat(12_000)));
+    const large = outputBudgetFor(region('x'.repeat(14_000)));
     expect(large).toBeGreaterThan(small);
     expect(large).toBeGreaterThan(14_000 / 4);
+  });
+
+  it('ignores boilerplate the model is not asked to write', () => {
+    // The behaviour change region splicing bought: padding the shared part of a
+    // skeleton no longer inflates the ask.
+    const body = '# <<OPENBOARD:PARSE>>\ndef parse(t, s):\n    return {}\n# <</OPENBOARD:PARSE>>\n';
+    expect(outputBudgetFor(body + 'x'.repeat(40_000))).toBe(outputBudgetFor(body));
   });
 
   it('never drops below the old floor', () => {
