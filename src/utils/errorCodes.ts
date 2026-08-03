@@ -97,7 +97,17 @@ export function describeLLMError(error: string | undefined | null, providerName?
     return `Could not reach the LLM provider${provider}. If you use a local server (Ollama/LM Studio), make sure it is running, then try again. Details: ${cleaned}`;
   }
   if (TIMEOUT_PATTERN.test(raw)) {
-    return `The LLM request${provider} timed out. Large models can be slow — try again, or switch to a faster model with /model. Details: ${cleaned}`;
+    // A timeout on a local server almost always means the model is simply slow
+    // rather than that anything is wrong, and the answer was usually part-built
+    // when the request was cut — so the advice differs from the hosted case.
+    // Retrying an identical prompt at the same speed just repeats the wait.
+    return (
+      `The LLM request${provider} timed out before the model finished. ` +
+      `A local model on modest hardware can take tens of minutes for one dashboard or fetcher; ` +
+      `OpenBoard now waits 45 minutes for a local server, so hitting this means the model is slower than that. ` +
+      `Use a smaller/quantised model, or lower the UI quality to shorten the answer — retrying the same prompt will take just as long. ` +
+      `Details: ${cleaned}`
+    );
   }
   if (BAD_REQUEST_PATTERN.test(raw)) {
     return `The LLM provider${provider} rejected the request settings. The selected model may not support them — try a different model with /model. Details: ${cleaned}`;

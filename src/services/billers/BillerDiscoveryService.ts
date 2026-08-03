@@ -240,6 +240,60 @@ const READ_JSON_BLOCK = `def read_json(path) -> dict:
         return json.load(f)
 `;
 
+/** The sender-only search shipped by every fetcher before the forwarded fix. */
+const SEARCH_UIDS_STANDARD = `def search_uids(imap, sender_email: str, since_date: str) -> List[str]:
+    criteria = f'(FROM "{sender_email}" SINCE {since_date})'
+    status, data = imap.uid("search", None, criteria)
+    if status != "OK" or not data or not data[0]:
+        return []
+    return [uid.decode() for uid in data[0].split()]
+`;
+
+/** The multi-sender variant fetch_swiggy_instamart.py carried. */
+const SEARCH_UIDS_MULTI = `def search_uids(imap, sender_email: str, since_date: str) -> List[str]:
+    sender_emails = sender_email if isinstance(sender_email, (list, tuple, set)) else [sender_email]
+    uids = set()
+    for sender in sender_emails:
+        criteria = f'(FROM "{sender}" SINCE {since_date})'
+        status, data = imap.uid("search", None, criteria)
+        if status == "OK" and data and data[0]:
+            uids.update(uid.decode() for uid in data[0].split())
+    return sorted(uids, key=lambda value: int(value))
+`;
+
+/** Supersedes both: keeps the sender match, widens only when it finds nothing. */
+const SEARCH_UIDS_CANONICAL = `def _search_uids(imap, criteria: str) -> List[str]:
+    status, data = imap.uid("search", None, criteria)
+    if status != "OK" or not data or not data[0]:
+        return []
+    return [uid.decode() for uid in data[0].split()]
+
+
+def search_uids(imap, sender_email, since_date: str) -> List[str]:
+    """UIDs to consider, widening the search when the sender match finds nothing.
+
+    A FROM search cannot see a forwarded receipt: forwarding rewrites the From:
+    header to whoever forwarded it, leaving the original sender only in the
+    quoted body. TEXT searches headers and body together, so it still finds the
+    receipt inside a forwarded thread.
+
+    The sender match runs first and wins outright when it matches, so an inbox
+    receiving mail directly is unaffected. Accepts one address or several.
+    """
+    senders = sender_email if isinstance(sender_email, (list, tuple, set)) else [sender_email]
+
+    uids = set()
+    for sender in senders:
+        uids.update(_search_uids(imap, f'(FROM "{sender}" SINCE {since_date})'))
+    if uids:
+        return sorted(uids, key=lambda value: int(value))
+
+    # Nothing from that sender directly — look for it quoted in forwarded mail.
+    for sender in senders:
+        uids.update(_search_uids(imap, f'(SINCE {since_date} TEXT "{sender}")'))
+    return sorted(uids, key=lambda value: int(value))
+`;
+
 /**
  * Bring one fetcher's source up to environment-based credentials.
  *
@@ -248,19 +302,25 @@ const READ_JSON_BLOCK = `def read_json(path) -> dict:
  * parse() or the config block untouched. Replacing the whole file would be
  * simpler and would silently discard their work.
  */
-export function migrateFetcherSource(source: string): string | undefined {
-  const crlf = source.includes('\r\n');
-  const eol = (text: string) => (crlf ? text.replaceAll('\n', '\r\n') : text);
+type Eol = (text: string) => string;
 
-  // Repair a fetcher damaged by the first version of this migration, which
-  // rewrote the call sites *after* inserting the helper and so rewrote the
-  // helper's own fallback into a call to itself. Harmless under OpenBoard,
-  // which sets the environment and returns before reaching it — but a
-  // standalone run would recurse until it blew the stack.
-  if (/return\s+load_credentials\(\)/.test(source)) {
-    return source.replace(/return\s+load_credentials\(\)/g, 'return read_json(CREDENTIALS_PATH)');
-  }
+/** One in-place upgrade. Returns undefined when it has nothing to do. */
+type FetcherMigration = (source: string, eol: Eol) => string | undefined;
 
+/**
+ * Repair a fetcher damaged by the first version of the credentials migration,
+ * which rewrote the call sites *after* inserting the helper and so rewrote the
+ * helper's own fallback into a call to itself. Harmless under OpenBoard, which
+ * sets the environment and returns before reaching it — but a standalone run
+ * would recurse until it blew the stack.
+ */
+const repairRecursiveCredentials: FetcherMigration = (source) => {
+  if (!/return\s+load_credentials\(\)/.test(source)) return undefined;
+  return source.replace(/return\s+load_credentials\(\)/g, 'return read_json(CREDENTIALS_PATH)');
+};
+
+/** Move a pre-2.0 fetcher off the plaintext credentials file. */
+const useEnvironmentCredentials: FetcherMigration = (source, eol) => {
   if (source.includes('def load_credentials(')) return undefined;
   if (!source.includes('read_json(CREDENTIALS_PATH)')) return undefined;
 
@@ -272,6 +332,42 @@ export function migrateFetcherSource(source: string): string | undefined {
   return source
     .replaceAll('read_json(CREDENTIALS_PATH)', 'load_credentials()')
     .replace(readJson, readJson + eol(LOAD_CREDENTIALS_HELPER));
+};
+
+/**
+ * Teach an installed fetcher to find forwarded receipts.
+ *
+ * A FROM search cannot see one: forwarding rewrites the From: header to the
+ * forwarder, leaving the original sender only in the quoted body. A fetcher
+ * built against a forwarded mailbox therefore reported "No messages found"
+ * forever, and because the skeleton is immutable no regeneration could fix it.
+ */
+const findForwardedMail: FetcherMigration = (source, eol) => {
+  if (source.includes('def _search_uids(')) return undefined;
+  for (const shape of [SEARCH_UIDS_STANDARD, SEARCH_UIDS_MULTI]) {
+    const block = eol(shape);
+    if (source.includes(block)) return source.replace(block, eol(SEARCH_UIDS_CANONICAL));
+  }
+  return undefined;
+};
+
+/** Applied in order; each is independent and skips itself when already done. */
+const FETCHER_MIGRATIONS: FetcherMigration[] = [
+  repairRecursiveCredentials,
+  useEnvironmentCredentials,
+  findForwardedMail,
+];
+
+export function migrateFetcherSource(source: string): string | undefined {
+  const crlf = source.includes('\r\n');
+  const eol: Eol = (text) => (crlf ? text.replaceAll('\n', '\r\n') : text);
+
+  let current = source;
+  for (const migrate of FETCHER_MIGRATIONS) {
+    const next = migrate(current, eol);
+    if (next && next !== current) current = next;
+  }
+  return current === source ? undefined : current;
 }
 
 /**
