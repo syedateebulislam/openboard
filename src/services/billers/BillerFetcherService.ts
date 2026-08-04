@@ -359,7 +359,22 @@ export class BillerFetcherService {
    * wins, and the loser's UIDs come back as duplicates on the next run.
    */
   async syncEnabled(
-    options: { onProgress?: ProgressCallback; signal?: AbortSignal; only?: string } = {},
+    options: {
+      onProgress?: ProgressCallback;
+      signal?: AbortSignal;
+      only?: string;
+      /**
+       * Called once real work is about to begin — the lock was won and there is
+       * at least one biller to run.
+       *
+       * The schedule anchors here rather than on completion. A fetch across nine
+       * billers takes minutes, and anything that ended the run in between —
+       * quitting the TUI, a re-armed scheduler, pressing stop — discarded the
+       * anchor for work that had already happened. The next launch then saw an
+       * overdue schedule and fetched everything again, forever.
+       */
+      onStart?: () => void;
+    } = {},
   ): Promise<BillerSyncResults> {
     const settings = this.settings();
     const lockDir = settings.scriptsDir ? repoRootFor(settings.scriptsDir) : undefined;
@@ -379,6 +394,11 @@ export class BillerFetcherService {
       const billers = options.only
         ? this.list().filter((biller) => biller.key === options.only)
         : this.listEnabled();
+
+      // Only once there is something to do: anchoring on an empty list would
+      // push the next scheduled run out by a full interval for work that never
+      // happened, quietly suppressing the loop on a misconfigured setup.
+      if (billers.length > 0) options.onStart?.();
 
       const results: BillerSyncResults = [];
       for (const biller of billers) {

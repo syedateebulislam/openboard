@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║        [_-_] O p e n B o a r d        ║
 ║     Analytics Dashboard Generator     ║
-║                v2.1.0                 ║
+║                v2.1.1                 ║
 ╚═══════════════════════════════════════╝
 ```
 
@@ -337,10 +337,20 @@ Integrations → Gmail, in this order:
 5. **Fetch interval** — one shared schedule for every enabled biller (default 360
    min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
    ones immediately. **Rescan folder** picks up newly added scripts.
+6. **Stop fetch** replaces "Fetch now" while a fetch is in flight, and can stop a
+   scheduled run as well as one you started. The biller currently running is
+   terminated; billers already finished keep their invoices, and the schedule
+   stays anchored so stopping does not cause a full re-fetch next time.
 
-Fetching runs in-process, only while OpenBoard is open — no background daemon. The last run time is remembered between
-sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
-starts shortly after launch.
+Fetching runs in-process, only while OpenBoard is open — no background daemon. The
+meta line reads `fetching now` during a run and `next in …` otherwise. The last run
+time is remembered between sessions, so reopening OpenBoard does not re-fetch
+everything; an overdue run starts shortly after launch.
+
+The schedule is anchored when a run **starts**, not when it finishes. A fetch across
+many billers takes minutes, and quitting OpenBoard part-way used to discard the
+record of work that had already happened — so the next launch found the schedule
+overdue and fetched everything again.
 
 After each biller runs, OpenBoard compares its CSV before and after. New invoices
 refresh that biller's dashboard (using the closest category preset — Zomato and

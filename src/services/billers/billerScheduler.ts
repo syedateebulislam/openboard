@@ -20,6 +20,7 @@
 import type { BillerRunResult, BillerSchedulerStatus, BillerSettings } from '../../types/billers.js';
 import { BillerFetcherService } from './BillerFetcherService.js';
 import { appendBillerActivity } from './billerActivityLog.js';
+import { beginBillerRun, endBillerRun } from './billerRunController.js';
 import { ConfigService } from '../config/ConfigService.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 
@@ -187,10 +188,33 @@ export function startBillerScheduler(
     const startedAt = Date.now();
     emit('running');
     onProgress(`Scheduled fetch started ${new Date(startedAt).toLocaleTimeString()}`);
+    const run = beginBillerRun('scheduled');
+    /**
+     * Anchoring must not depend on the fetcher calling back. onStart is the
+     * better moment — it survives a run cut short — but a fetcher that never
+     * fires it would otherwise leave the schedule permanently overdue, which is
+     * exactly the failure this change set out to fix.
+     */
+    let anchored = false;
+    const anchor = () => {
+      if (anchored) return;
+      anchored = true;
+      lastRunAt = new Date(startedAt).toISOString();
+      recordRun(lastRunAt);
+    };
+
     try {
       // Forward the per-biller output: without this a scheduled run produced no
       // lines at all and the settings screen's log pane stayed empty.
-      const results = await fetcher.syncEnabled({ onProgress });
+      const results = await fetcher.syncEnabled({
+        onProgress,
+        signal: run.controller.signal,
+        // Anchor the moment work begins, not when it ends. A nine-biller fetch
+        // takes minutes; quitting the TUI or re-arming the scheduler in between
+        // used to throw the anchor away for work already done, so every launch
+        // saw an overdue schedule and fetched the lot again.
+        onStart: anchor,
+      });
       if (stopped) return;
       if (results.skipped === 'locked') {
         // An interval change can re-arm while a manual/previous scheduled run
@@ -201,8 +225,10 @@ export function startBillerScheduler(
         emit('idle');
         return;
       }
-      lastRunAt = new Date(startedAt).toISOString();
-      recordRun(lastRunAt);
+      // Fallback for a fetcher that did not signal its start. An empty result
+      // set still must not anchor: no fetcher ran, and stamping the schedule
+      // there would push the next run out a full interval for work never done.
+      if (results.length > 0) anchor();
 
       const failed = results.filter((result) => !result.ok);
       const changedKeys = results.filter((result) => result.changed).map((result) => result.key);
@@ -241,6 +267,7 @@ export function startBillerScheduler(
       emit('error', { error: error?.message ?? String(error) });
     } finally {
       isRunning = false;
+      endBillerRun(run);
     }
   };
 
