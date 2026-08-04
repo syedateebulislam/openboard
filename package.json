@@ -54,7 +54,10 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "bench:data": "vitest run benchmarks/data-parser.benchmark.test.ts",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:ui": "playwright test",
+    "test:ui:report": "playwright show-report tests/ui/.playwright-report",
+    "test:ui:tui": "vitest run --config vitest.tui-frames.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
@@ -76,6 +79,7 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/figlet": "^1.5.8",
     "@types/jsonwebtoken": "^9.0.5",

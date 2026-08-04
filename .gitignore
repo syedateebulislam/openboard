@@ -12,3 +12,7 @@ coverage/
 # The invoice fetchers are Python and the phase16 suite executes them.
 __pycache__/
 *.pyc
+tests/ui/.artifacts/
+tests/ui/.playwright-report/
+tests/ui/__screens__/.findings/
+tests/ui/__screens__/
