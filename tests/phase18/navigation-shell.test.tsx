@@ -184,11 +184,15 @@ describe('HintBar', () => {
 });
 
 describe('screens use the shared vocabulary rather than their own sentences', async () => {
-  const { readFileSync } = await import('node:fs');
-  const { globSync } = await import('node:fs');
+  // readdirSync, not fs.globSync: glob landed in Node 22 and CI runs 18 and 20,
+  // so globSync passed locally and failed everywhere that matters.
+  const { readFileSync, readdirSync } = await import('node:fs');
 
   it('no screen still spells out its own escape hint', () => {
-    const files = globSync('src/screens/*.tsx').concat(['src/App.tsx']);
+    const files = readdirSync('src/screens')
+      .filter((name) => name.endsWith('.tsx'))
+      .map((name) => `src/screens/${name}`)
+      .concat(['src/App.tsx']);
     const offenders: string[] = [];
     for (const file of files) {
       const source = readFileSync(file, 'utf-8');
