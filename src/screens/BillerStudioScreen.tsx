@@ -22,6 +22,8 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { HintBar } from '../components/HintBar.js';
+import { parentOf } from '../config/navigation.js';
 import { ChatLineRow } from '../components/ChatMessage.js';
 import type { ChatMessage } from '../types/board.js';
 import {
@@ -365,7 +367,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
 
     switch (action.type) {
       case 'leave':
-        onNavigate('settings-billers');
+        onNavigate(parentOf('biller-studio'));
         return;
 
       case 'help':
@@ -457,7 +459,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
   viewRef.current = { totalLines: lines.length, logHeight };
 
   useInput((_input, key) => {
-    if (key.escape && !busy) onNavigate('settings-billers');
+    if (key.escape && !busy) onNavigate(parentOf('biller-studio'));
     if (key.pageUp) {
       const view = viewRef.current;
       setScrollOffset((offset) => clampOffset(offset + pageStep(view.logHeight), view.totalLines, view.logHeight));
@@ -523,7 +525,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
         />
       </Box>
 
-      <Text color={UI_COLORS.subtitle}>ESC to go back | PgUp/PgDn to scroll | /help for commands</Text>
+      <HintBar keys={['scroll', 'commands', 'back']} />
     </Box>
   );
 }

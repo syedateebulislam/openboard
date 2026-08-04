@@ -55,9 +55,9 @@ The command with no arguments also launches the TUI:
 openboard
 ```
 
-## Setup
+## Onboarding
 
-On a fresh install (no LLM configured), `openboard` opens the setup wizard automatically; afterwards it starts at the main menu. OpenBoard needs these configured once:
+On a fresh install (no LLM configured), `openboard` opens onboarding automatically; afterwards it starts at the main menu, whose options are **Onboarding, Integrations, Dashboards, Settings, Exit** in that order. OpenBoard needs these configured once:
 
 - App mode: Local only / Hybrid / All remote (asked first — see [Modes](#modes--pick-your-privacy-level-first)).
 - LLM provider: OpenAI API, OpenAI Codex via ChatGPT subscription, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, local Ollama, or local LM Studio.
@@ -67,7 +67,7 @@ On a fresh install (no LLM configured), `openboard` opens the setup wizard autom
 - Vercel token or Vercel Git integration *(All remote mode only)*.
 - Dashboard login credentials.
 
-Settings can be re-entered later from the Settings menu, and the model/effort can be switched any time from the internal chat with `/model`.
+Settings can be re-entered later from the Settings menu, and the model/effort can be switched any time from the internal chat with `/model`. Data sources — Gmail invoice fetching today — live under **Integrations**, not Settings.
 
 ### Headless setup (for agents)
 
@@ -119,22 +119,22 @@ The generated app header shows the OpenBoard website/GitHub/npm icon links on th
 
 Turn invoice emails into per-biller spending dashboards, automatically. OpenBoard **ships ready-made fetchers** for Amazon, Amazon Pay, Rapido, Swiggy (Food and Instamart), Uber, Urban Company, and Zomato — and drives any `fetch_<biller>.py` you write yourself:
 
-- **Start with one keypress**: Settings → Invoice fetchers → *Install the fetchers bundled with OpenBoard*. They land in the canonical folder, already configured. A fetcher you have edited is never overwritten by a later install.
+- **Start with one keypress**: Integrations → Gmail → *Install bundled fetchers*. They land in the canonical folder, already configured. A fetcher you have edited is never overwritten by a later install.
 
 - **One canonical home**, pre-filled for you: `~/.openboard/billers/scripts/invoice_fetchers/` for the scripts, with `billers/data/invoices/` and `billers/secrets/` alongside. The scripts find their own data two folders up, so this layout works with them unmodified.
-- **Point OpenBoard at the folder once**: Settings → Invoice fetchers. It scans for `fetch_*.py` files, reads each script's own `KEY`/`DISPLAY_NAME` constants, and lists every biller it finds. Nothing is hardcoded, so dropping in a new fetcher and choosing "Rescan billers folder" picks it up.
+- **Point OpenBoard at the folder once**: Integrations → Gmail. It scans for `fetch_*.py` files, reads each script's own `KEY`/`DISPLAY_NAME` constants, and lists every biller it finds. Nothing is hardcoded, so dropping in a new fetcher and choosing "Rescan folder" picks it up.
 - **Credentials, in a sensible order**: you're asked for the folder, then the **Gmail address**, then that account's **App Password** — you always know which account you're authorizing before typing a secret for it.
 - **Enable exactly the billers you want**: the list is a live toggle (`[x]`/`[ ]`) you can revisit and change any time. Only enabled billers ever run.
 - **Runs on a visible schedule**: one shared interval for all enabled billers, shown and editable in the same screen (default every 360 min). Like the Gmail sync it is in-process — it runs while OpenBoard is open, with no daemon — but the last run time is remembered, so reopening the TUI doesn't re-fetch everything and an overdue run fires on launch.
 - **Invoices become dashboards automatically**: after each fetch OpenBoard hashes the biller's CSV. New rows refresh that biller's dashboard — using the matching category preset, e.g. Zomato → Food, Uber → Travel, Amazon → Shopping. If a biller has data but no dashboard yet (common when you bring an existing CSV with you), the first run builds one from the data already on disk rather than waiting for new mail that may never come.
-- **Live fetch log**: scheduled runs happen with no screen open, so their output goes to a shared activity log. Open Settings → Invoice fetchers later and the recent history is still there, scrollable with PgUp/PgDn.
+- **Live fetch log**: scheduled runs happen with no screen open, so their output goes to a shared activity log. Open Integrations → Gmail later and the recent history is still there, scrollable with PgUp/PgDn.
 - **Headless**: `openboard agent setup billers --scripts-dir ... --biller-email ... --biller-app-password ...` configures it, `openboard agent billers status|sync [--biller <key>]` inspects or runs it once. The recurring schedule itself is TUI-only.
 
 ### Biller Studio — create your own fetcher
 
 The eight bundled fetchers will not cover your billers. Billers are regional and personal, and no shipped list ever will. So OpenBoard can write one for you:
 
-**Settings → Invoice fetchers → `✚ Add a new biller (Biller Studio)`**
+**Integrations → Gmail → `✚ Add a biller`**
 
 1. Give it the **sender address** those receipts come from, and a bit of the **subject line** to separate receipts from marketing mail (`-` matches everything from that sender).
 2. It finds one real matching email and **shows you the exact text** it wants to send to your LLM provider. Nothing is transmitted until you type `yes`.

@@ -47,6 +47,7 @@ import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
 import { UI_COLORS } from '../theme.js';
+import { HintBar } from '../components/HintBar.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
@@ -1903,7 +1904,7 @@ Requirements:
       </Box>
 
       {/* Footer hint */}
-      <Text color={UI_COLORS.subtitle}>ESC to go back | PgUp/PgDn to scroll chat | /help for commands</Text>
+      <HintBar keys={['scroll', 'commands', 'back']} />
     </Box>
   );
 }

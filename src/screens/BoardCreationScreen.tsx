@@ -10,6 +10,7 @@ import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.j
 import { ConfigService } from '../services/config/ConfigService.js';
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
 import { UI_COLORS } from '../theme.js';
+import { HintBar } from '../components/HintBar.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -267,9 +268,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
           <SelectInput items={presetItems()} onSelect={handlePresetSelect} />
         </Box>
         <Box marginTop={1}>
-          <Text color={UI_COLORS.subtitle}>
-            Use ↑/↓ to navigate, Enter to select
-          </Text>
+          <HintBar keys={['move', 'select', 'back']} />
         </Box>
       </Box>
     );
@@ -297,11 +296,12 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             onSelect={handleQualitySelect}
           />
         </Box>
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
           <Text color={UI_COLORS.subtitle}>
-            Low quality uses a shorter prompt and fewer required features — better odds of completing on
-            local/small-context models. Use ↑/↓ to navigate, Enter to select · ESC to go back
+            Low quality uses a shorter prompt and fewer required features — better odds of
+            completing on local or small-context models.
           </Text>
+          <HintBar keys={['move', 'select', 'back']} />
         </Box>
       </Box>
     );
@@ -337,10 +337,9 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             placeholder="/path/to/data.csv, data.xlsx, or data.json"
           />
         </Box>
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.subtitle}>
-            Supports .csv, .xlsx, and .json files · ESC to go back
-          </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>Supports .csv, .xlsx and .json</Text>
+          <HintBar keys={['continue', 'back']} />
         </Box>
       </Box>
     );
@@ -367,10 +366,9 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
             placeholder="e.g. My Finance Dashboard"
           />
         </Box>
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.subtitle}>
-            Will be used as the dashboard title · ESC to go back
-          </Text>
+        <Box marginTop={1} flexDirection="column">
+          <Text color={UI_COLORS.subtitle}>Used as the dashboard title</Text>
+          <HintBar keys={['continue', 'back']} />
         </Box>
       </Box>
     );
@@ -457,12 +455,8 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         )}
 
         <Box marginTop={2} flexDirection="column">
-          <Text bold color="green">
-            Press Enter to continue to Chat → generate dashboard
-          </Text>
-          <Text color={UI_COLORS.subtitle}>
-            ESC to go back and change name
-          </Text>
+          <Text bold color="green">Ready to generate</Text>
+          <HintBar keys={['continue', 'back']} />
         </Box>
       </Box>
     );
@@ -479,9 +473,7 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
           <Text color="red">{errorMessage}</Text>
         </Box>
         <Box marginTop={2}>
-          <Text color={UI_COLORS.subtitle}>
-            Press ESC to go back and try again
-          </Text>
+          <HintBar keys={['back']} />
         </Box>
       </Box>
     );

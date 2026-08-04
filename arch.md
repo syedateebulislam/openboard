@@ -84,7 +84,9 @@ src/
     BoardCreationScreen.tsx
     ManageBoardsScreen.tsx
     ChatScreen.tsx
-    BillerSettingsScreen.tsx
+    IntegrationsScreen.tsx
+    IntegrationsScreen.tsx
+    GmailIntegrationScreen.tsx
   components/
     ChatMessage.tsx
     LoadingRemark.tsx
@@ -192,13 +194,14 @@ setup
 manage-boards
 create-board
 chat
+integrations
+integrations-gmail
 settings
 settings-mode
 settings-llm
 settings-github
 settings-vercel
 settings-dashboard-auth
-settings-billers
 deploy
 ```
 
@@ -538,13 +541,13 @@ flowchart TD
   interval is indistinguishable from a broken one, which is how it first read.
 - **Fetcher output goes to `services/billers/billerActivityLog.ts`**, a buffered store
   outside React that both the scheduler and "Fetch now" write to and
-  `BillerSettingsScreen`'s log pane subscribes to via `useProgressLog({ store })`.
+  `GmailIntegrationScreen`'s log pane subscribes to via `useProgressLog({ store })`.
   It cannot be component state: scheduled runs fire with no screen mounted, so their
   output has to survive until someone opens the screen. The scheduler also has to pass
   `onProgress` into `syncEnabled` — without it a scheduled run emitted nothing at all,
   and "Last run"/"Next run" advanced above an empty pane.
 - **Credential model**: an IMAP **App Password**, which is what the fetchers use.
-  `BillerSettingsScreen` asks for the folder, then the email, then the password,
+  `GmailIntegrationScreen` asks for the folder, then the email, then the password,
   in that order — you know which account you are authorizing before typing a
   secret for it. The materialized JSON for the scripts is
   necessarily plaintext (they cannot decrypt); OpenBoard's own copy uses

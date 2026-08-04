@@ -9,7 +9,8 @@ import { BoardRegistryService } from '../services/project/BoardRegistryService.j
 import { DashboardUpdateService } from '../services/project/DashboardUpdateService.js';
 import { PipelineProgress } from '../components/PipelineProgress.js';
 import type { PipelinePhase } from '../services/project/pipelinePhases.js';
-import { UI_COLORS } from '../theme.js';
+import { ScreenFrame } from '../components/ScreenFrame.js';
+import { summariseFailures } from '../utils/summariseFailures.js';
 
 // Re-exported so the generated-UI cleanup helper keeps a stable import path.
 export { removeDashboardFromGeneratedApp } from '../services/project/DashboardUpdateService.js';
@@ -26,7 +27,30 @@ type MenuItem =
       | 'modify-all' | 'regen-all' | 'remove-all' | 'confirm-remove-all' | 'cancel-remove-all'
       | `open:${string}` | `remove:${string}` | `confirm-remove:${string}` };
 
+/**
+ * What the highlighted row does. Destructive rows say so here rather than in a
+ * standing warning below the list — "Removing a dashboard deletes its tab and
+ * data" used to sit on screen permanently, including when nothing was selected.
+ */
+function detailFor(value: string): string {
+  if (value.startsWith('remove:')) return 'Deletes this dashboard, its tab and its data from your app.';
+  if (value.startsWith('open:')) return 'Open this dashboard in chat to change it.';
+  if (value.startsWith('confirm-remove:')) return 'This cannot be undone.';
+  return {
+    add: 'Pick a data file and describe the dashboard you want.',
+    'modify-all': 'One prompt applied to every dashboard, deployed once.',
+    'regen-all': 'Rebuild every dashboard from its saved prompts and latest data.',
+    'remove-all': 'Deletes every dashboard and resets the app to an empty starter.',
+    'confirm-remove-all': 'This cannot be undone.',
+    'cancel-remove': 'Keep this dashboard.',
+    'cancel-remove-all': 'Keep all dashboards.',
+    refresh: 'Re-read the dashboard registry.',
+    back: 'Return to the main menu.',
+  }[value] ?? '';
+}
+
 export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }: Props) {
+  const [highlighted, setHighlighted] = useState('add');
   const registry = useMemo(() => new BoardRegistryService(), []);
   const [boards, setBoards] = useState<BoardConfig[]>(() => registry.listBoards());
   // Progress and outcomes both append here: one feedback surface, below the
@@ -136,7 +160,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
         log.append(
           failed.length === 0
             ? `Regenerated ${results.length} dashboard(s) and redeployed.`
-            : `Regenerated with ${failed.length} failure(s): ${failed.map((f) => f.error).join('; ')}`,
+            : `Regenerated with ${failed.length} failure(s): ${summariseFailures(failed.map((f) => f.error))}`,
         );
       } catch (error: unknown) {
         log.append(`Regenerate-all failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -234,18 +258,14 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
   };
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>Existing Dashboards</Text>
-      <Text color={UI_COLORS.subtitle}>
-        Add a data source to create your first dashboard, or open an existing dashboard chat.
-      </Text>
-      {boards.length === 0 && (
-        <Box marginTop={1}>
-          <Text color="yellow">No dashboards registered yet.</Text>
-        </Box>
-      )}
+    <ScreenFrame
+      title="Dashboards"
+      meta={[boards.length === 0 ? 'none yet' : `${boards.length} registered`]}
+      detail={detailFor(highlighted)}
+      hints={['move', 'select', 'scroll', 'back']}
+    >
       {isProcessing && (
-        <Box marginTop={1}>
+        <Box marginBottom={1}>
           {pipeline ? (
             <PipelineProgress phase={pipeline.phase} pct={pipeline.pct} phaseStartedAt={pipeline.phaseStartedAt} />
           ) : (
@@ -253,18 +273,15 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
           )}
         </Box>
       )}
-      <Box marginTop={1}>
-        <SelectInput items={items} onSelect={handleSelect} />
-      </Box>
-      <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>
-          Removing a dashboard deletes its tab and data from your app.
-        </Text>
-      </Box>
+      <SelectInput
+        items={items}
+        onSelect={handleSelect}
+        onHighlight={(item) => setHighlighted(item.value)}
+      />
 
-      {/* Last child: progress belongs below every option, never above them. */}
+      {/* Progress belongs below every option, never above them. */}
       <LogPane view={log.view} />
-    </Box>
+    </ScreenFrame>
   );
 }
 
