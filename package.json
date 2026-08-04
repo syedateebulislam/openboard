@@ -57,7 +57,8 @@
     "prepublishOnly": "npm run build",
     "test:ui": "playwright test",
     "test:ui:report": "playwright show-report tests/ui/.playwright-report",
-    "test:ui:tui": "vitest run --config vitest.tui-frames.config.ts"
+    "test:ui:tui": "vitest run --config vitest.tui-frames.config.ts",
+    "test:ui:accept": "node scripts/dev/accept-ui-baseline.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
@@ -84,9 +85,12 @@
     "@types/figlet": "^1.5.8",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^18.3.0",
     "@vitest/coverage-v8": "^2.1.9",
     "ink-testing-library": "^3.0.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"

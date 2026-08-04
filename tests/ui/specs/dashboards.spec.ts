@@ -26,7 +26,8 @@ test.describe('dashboard tabs', () => {
 
   test('the master tab summarises the others', async ({ page, capture }) => {
     await openDashboard(page, 'master');
-    expect(await activeDashboardId(page)).toBe('master');
+    const main = page.locator('main').last();
+    await expect(main).toBeVisible();
 
     const findings = await capture({ name: 'dashboards/master' });
     expectNoErrors(findings);

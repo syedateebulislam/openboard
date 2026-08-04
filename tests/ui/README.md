@@ -5,7 +5,9 @@ several viewports and both themes, capturing a screenshot per screen and running
 machine-checkable assertions against it.
 
 ```bash
-npm run test:ui              # run the suite
+npm run test:ui              # dashboards, in a real browser
+npm run test:ui:tui          # every TUI screen, as a text frame
+npm run test:ui:accept       # accept the current look as the new baseline
 npm run test:ui:report       # open the Playwright HTML report
 ```
 
@@ -15,6 +17,8 @@ Artifacts land in `tests/ui/__screens__/`:
 |---|---|
 | `<flow>/<name>.<viewport>.<theme>.png` | one screenshot per screen |
 | `ui-report.md` | findings per screen, with the screenshot inline |
+| `<name>.diff.png` | pixels that moved, when a screen drifts |
+| `tui/*.txt` | one text frame per TUI screen |
 | `ui-report.json` | the same, for tooling |
 
 `ui-report.md` is the artefact to read. It is the review surface: the assertions
@@ -34,6 +38,29 @@ judgement calls no assertion can make.
   data** — a legend with no pie looks fine to a height check
 - no horizontal page overflow at any viewport
 - every dashboard in the manifest is reachable and renders
+
+## Regression: baselines
+
+Accepted screenshots live in `tests/ui/__baseline__/`. Every run diffs against
+them and reports drift as a finding, with a diff image showing exactly which
+pixels moved.
+
+- A **missing** baseline is seeded, not failed. A suite whose first run is red
+  teaches people to pass `--update` reflexively, and then nobody reads the diffs.
+- Under **0.2%** of pixels changed is tolerated, so antialiasing noise does not
+  cost you a red run.
+- A **size change** is reported rather than diffed — a page that grew or shrank
+  is itself the news, and mismatched dimensions cannot be compared.
+- Accepting a new look is its own command (`npm run test:ui:accept`), never
+  something an ordinary run can do by accident.
+
+## The TUI
+
+`npm run test:ui:tui` renders every terminal screen and writes its frame to
+`__screens__/tui/`. The TUI draws ANSI to a terminal, not a DOM, so a browser
+cannot traverse it — the frames are its equivalent of the screenshots, and are
+reviewed the same way. The capture also asserts the main-menu order and that
+every screen uses the shared hint vocabulary.
 
 ## How it runs
 

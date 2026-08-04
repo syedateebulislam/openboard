@@ -16,3 +16,9 @@ tests/ui/.artifacts/
 tests/ui/.playwright-report/
 tests/ui/__screens__/.findings/
 tests/ui/__screens__/
+
+# UI suite artefacts. Baselines are screenshots of whatever generated app the
+# developer happens to have — they contain that person's real invoice data, are
+# meaningless on another machine (different dashboards, different rows), and run
+# to megabytes. Seeded locally on first run instead.
+tests/ui/__baseline__/

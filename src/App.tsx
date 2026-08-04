@@ -68,7 +68,7 @@ const SETTINGS_DETAIL: Record<string, string> = {
   back: 'Return to the main menu.',
 };
 
-function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [highlighted, setHighlighted] = useState('mode');
 
   useInput((_input, key) => {
@@ -120,7 +120,7 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [status, setStatus] = useState('');
   // Detail for the highlighted option renders below the list — each mode is
   // described once instead of a legend duplicating the select entries.
@@ -182,7 +182,7 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   );
 }
 
-function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [step, setStep] = useState<'username' | 'password'>('username');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -259,7 +259,7 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
   );
 }
 
-function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -332,7 +332,7 @@ const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back'
   { label: '← Go Back', value: 'back' },
 ];
 
-function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [step, setStep] = useState<LLMSettingsStep>('provider');
   const [provider, setProvider] = useState<LLMProviderName>('openai');
   const [apiKey, setApiKey] = useState('');
@@ -513,7 +513,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   );
 }
 
-function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -568,7 +568,7 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   useInput((_input, key) => {
     if (key.escape) onNavigate('welcome');
   });

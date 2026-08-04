@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ScreenAudit, type Finding } from './audit.js';
 import { recordScreen, UI_OUT } from './report.js';
+import { compareToBaseline } from './baseline.js';
 import type { DashboardTab } from './workspace.js';
 
 export interface Session {
@@ -82,12 +83,18 @@ export const test = base.extend<{
       ).catch(() => {});
       await page.waitForTimeout(settleMs);
 
-      const screenshot = join(UI_OUT, `${name}.${label}.${theme}.png`);
+      const slug = `${name}.${label}.${theme}`;
+      const screenshot = join(UI_OUT, `${slug}.png`);
       mkdirSync(dirname(screenshot), { recursive: true });
-      await page.screenshot({ path: screenshot, fullPage: true });
+      const shot = await page.screenshot({ path: screenshot, fullPage: true });
 
       const findings = await audit.run(screen);
       audit.clear();
+
+      // Drift is a finding like any other, so it lands in the same report and
+      // is reviewed the same way rather than only failing a test.
+      const baseline = compareToBaseline(screen, slug, shot);
+      if (baseline.finding) findings.push(baseline.finding);
 
       recordScreen({
         screen,
