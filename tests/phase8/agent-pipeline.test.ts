@@ -299,14 +299,46 @@ describe('ProjectLockService', () => {
     expect(existsSync(join(projectDir, '.openboard.lock'))).toBe(false);
   });
 
-  it('reacquires a lock held by this (alive) process — same-process lock is not stale', () => {
-    // A lock from our own live pid blocks a second acquire.
+  it('blocks a second acquire while this process is genuinely holding one', () => {
+    // The biller scheduler can fire while the TUI is mid-refresh. Same pid, but
+    // two real operations — blocking is the whole point of the lock.
     const first = ProjectLockService.acquire(projectDir);
     expect(first.success).toBe(true);
     const second = ProjectLockService.acquire(projectDir);
     expect(second.success).toBe(false);
-    expect(second.error).toContain('locked by another OpenBoard run');
+    // Not "another OpenBoard run": it is this one, and saying otherwise sent a
+    // user hunting for a second instance that did not exist.
+    expect(second.error).toContain('Another OpenBoard operation');
     first.release();
+  });
+
+  it('reclaims a lock this process leaked rather than blocking on itself', () => {
+    // An operation that ended without releasing leaves a file carrying our own
+    // pid. Every later operation then failed for up to 30 minutes with a
+    // message naming the very process reading it, and only a restart cleared it.
+    const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+    writeFileSync(
+      join(projectDir, '.openboard.lock'),
+      JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
+    );
+
+    const lock = ProjectLockService.acquire(projectDir);
+    expect(lock.success).toBe(true);
+    lock.release();
+  });
+
+  it('names the lockfile so a recycled pid is not a dead end', () => {
+    // A pid identifies a process, not which one. A lock left by a crashed run
+    // reads as alive until it ages out, so the user needs a way to clear it.
+    const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+    writeFileSync(
+      join(projectDir, '.openboard.lock'),
+      JSON.stringify({ pid: process.ppid, createdAt: new Date().toISOString() }),
+    );
+
+    const lock = ProjectLockService.acquire(projectDir);
+    expect(lock.success).toBe(false);
+    expect(lock.error).toContain('.openboard.lock');
   });
 
   it('breaks a stale lock from a dead process', () => {

@@ -15,6 +15,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from 'ink-testing-library';
+import { HINTS } from '../../src/components/HintBar.js';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -198,6 +199,8 @@ describe('BillerStudioScreen frame', () => {
     const { lastFrame } = render(
       <BillerStudioScreen onNavigate={() => {}} deps={{ probeService: probe() }} />,
     );
-    expect(lastFrame() ?? '').toMatch(/ESC to go back/);
+    // Sourced from HINTS rather than typed here, so the assertion tracks the
+    // shared vocabulary instead of freezing one screen's old phrasing.
+    expect(lastFrame() ?? '').toContain(HINTS.back);
   });
 });

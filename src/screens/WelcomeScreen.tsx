@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { HintBar } from '../components/HintBar.js';
 import { bannerVersionLine } from '../version.js';
 import { describeAppMode, getAppMode, isValidAppMode } from '../config/appModes.js';
 import { ConfigService } from '../services/config/ConfigService.js';
@@ -13,22 +14,36 @@ interface Props {
 
 type MenuValue = Screen | 'exit';
 
+/** One line per destination, shown for the highlighted row only. */
+const DETAIL: Record<string, string> = {
+  setup: 'Connect an LLM and choose what leaves your machine.',
+  integrations: 'Where your data comes from — Gmail invoices, and more later.',
+  'manage-boards': 'Create, modify and regenerate your dashboards.',
+  settings: 'Mode, provider and credentials.',
+  exit: 'Close OpenBoard.',
+};
+
 export function WelcomeScreen({ onNavigate }: Props) {
+  const [highlighted, setHighlighted] = useState('setup');
+
   // Until setup runs, don't advertise the default mode as if it were chosen.
   let configured = false;
-  let modeLine: string | undefined;
+  let mode: string | undefined;
+  let provider: string | undefined;
   try {
     const config = new ConfigService();
     configured = Boolean(config.get('llm.provider'));
-    modeLine = isValidAppMode(config.get('app.mode'))
+    provider = config.get('llm.provider') as string | undefined;
+    mode = isValidAppMode(config.get('app.mode'))
       ? describeAppMode(getAppMode(config))
-      : 'not configured yet — run Setup to choose one';
+      : undefined;
   } catch {
-    modeLine = undefined;
+    mode = undefined;
   }
 
   const menuItems = [
-    { label: configured ? 'Setup' : 'Get started — set up OpenBoard', value: 'setup' as MenuValue },
+    { label: configured ? 'Onboarding' : 'Onboarding — start here', value: 'setup' as MenuValue },
+    { label: 'Integrations', value: 'integrations' as MenuValue },
     { label: 'Dashboards', value: 'manage-boards' as MenuValue },
     { label: 'Settings', value: 'settings' as MenuValue },
     { label: 'Exit', value: 'exit' as MenuValue },
@@ -63,19 +78,28 @@ export function WelcomeScreen({ onNavigate }: Props) {
         <Text bold color={UI_COLORS.border}>╚═══════════════════════════════════════╝</Text>
       </Box>
       
-      {modeLine && (
-        <Box marginTop={1}>
-          <Text color={UI_COLORS.subtitle}>Mode: {modeLine}</Text>
-        </Box>
-      )}
-
+      {/* Facts, not a sentence: the mode and provider read at a glance. */}
+      <Box marginTop={1}>
+        <Text color={UI_COLORS.border} dimColor>
+          {[mode?.toLowerCase(), provider].filter(Boolean).join('  ·  ') || 'not configured yet'}
+        </Text>
+      </Box>
 
       <Box marginTop={1} flexDirection="column">
-        <SelectInput items={menuItems} onSelect={handleSelect} />
+        <SelectInput
+          items={menuItems}
+          onHighlight={(item) => setHighlighted(item.value)}
+          onSelect={handleSelect}
+        />
       </Box>
-      
+
+      {/* Reserved, so moving the cursor never shifts the hints below it. */}
       <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>Use ↑↓ arrows to navigate, Enter to select</Text>
+        <Text color={UI_COLORS.subtitle}>{DETAIL[highlighted] || ' '}</Text>
+      </Box>
+
+      <Box marginTop={1}>
+        <HintBar keys={['move', 'select']} />
       </Box>
     </Box>
   );

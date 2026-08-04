@@ -9,7 +9,7 @@ hand, and you are meant to add your own.
 
 ## Installing
 
-Settings → Invoice fetchers → **Install the fetchers bundled with OpenBoard**.
+Integrations → Gmail → **Install bundled fetchers**.
 That copies these files to `~/.openboard/billers/scripts/invoice_fetchers/` and
 configures the path. Running it again only adds what is missing — a script you
 have edited is never overwritten.
@@ -58,8 +58,8 @@ as billers.
 
 ## Let OpenBoard write it for you
 
-You do not have to write any of this by hand. **Settings → Invoice fetchers →
-`✚ Add a new biller (Biller Studio)`** takes a sender address and a subject
+You do not have to write any of this by hand. **Integrations → Gmail →
+`✚ Add a biller`** takes a sender address and a subject
 fragment, samples one real email, and generates a fetcher against this same
 contract — then compiles it, checks what it extracts, and dry-runs it against
 your mailbox before saving. Hand-writing is still supported and is the right

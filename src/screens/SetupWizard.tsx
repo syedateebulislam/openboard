@@ -32,6 +32,7 @@ import { DEFAULT_EFFORT, DEFAULT_MODELS, EFFORT_CHOICES, LLM_PROVIDER_CHOICES, M
 import { APP_MODES, allowedProvidersForMode, appModeInfo, getAppMode, modeAllowsDeploy, type AppMode } from '../config/appModes.js';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { HintBar } from '../components/HintBar.js';
 import { setupWizardNavigationReducer, visibleWizardSteps } from './setupWizardReducer.js';
 import type { WizardStep } from './setupWizardReducer.js';
 
@@ -377,9 +378,7 @@ function Step1LLMConfig({
               )}
             </Box>
           </Box>
-          <Text color={UI_COLORS.subtitle}>
-            Use ↑↓ arrows to select, Enter to continue
-          </Text>
+          <HintBar keys={['move', 'continue', 'back']} />
         </Box>
       )}
 
@@ -392,9 +391,7 @@ function Step1LLMConfig({
               <SelectInput items={EFFORT_CHOICES} onSelect={handleEffortSelect} />
             </Box>
           </Box>
-          <Text color={UI_COLORS.subtitle}>
-            Use ↑↓ arrows to select, Enter to validate
-          </Text>
+          <HintBar keys={['move', 'select', 'back']} />
         </Box>
       )}
 

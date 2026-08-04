@@ -1,3 +1,15 @@
+/**
+ * GmailIntegrationScreen — invoice fetching, under Integrations › Gmail.
+ *
+ * Was "Invoice Fetchers" under Settings. Reading invoices out of a mailbox is
+ * how data gets into OpenBoard, not a preference about how it behaves, so it
+ * belongs beside the other sources rather than beneath the credentials.
+ *
+ * The screen used to spend twelve lines before its first option: a title, a
+ * two-line subtitle, up to five stacked status lines and a four-line security
+ * paragraph — on a screen that also has to fit a log pane. The facts are now
+ * one meta line, and the prose is shown for the row it actually describes.
+ */
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
@@ -5,6 +17,8 @@ import TextInput from 'ink-text-input';
 import { existsSync } from 'node:fs';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
+import { ScreenFrame } from '../components/ScreenFrame.js';
+import { parentOf } from '../config/navigation.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { TypedConfigRepository } from '../services/config/TypedConfigRepository.js';
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
@@ -63,7 +77,36 @@ function describeNextRun(msRemaining: number): string {
   return minutes === 0 ? `in ${hours}h` : `in ${hours}h ${minutes}m`;
 }
 
-export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props) {
+/**
+ * What each row does, shown one line at a time for the highlighted row.
+ *
+ * This is where the security paragraph went. It was true and worth saying, but
+ * saying it permanently above the options meant it was read once and then
+ * became four lines of noise; attached to the App Password row it lands at the
+ * moment it matters.
+ */
+const ROW_DETAIL: Record<string, string> = {
+  install: 'Copies the fetchers shipped with OpenBoard into its own folder.',
+  dir: 'Folder holding your fetch_<biller>.py scripts.',
+  email: 'The Gmail account the fetchers sign in as.',
+  password: 'A 16-character Google App Password, not your Gmail password. Encrypted, and passed to fetchers at run time — never written to disk.',
+  'add-biller': 'Describe one sample email and OpenBoard writes the fetcher for it.',
+  interval: 'How often enabled fetchers run, while OpenBoard is open.',
+  sync: 'Run every enabled fetcher now.',
+  rescan: 'Re-read the scripts folder to pick up fetchers added outside OpenBoard.',
+  clear: 'Forget the address and App Password. Revoke it in your Google account to cut access off.',
+  back: 'Return to Integrations.',
+};
+
+/** Guidance for the input steps, which have no highlighted row to describe. */
+const STEP_DETAIL: Record<string, string> = {
+  'scripts-dir': "Keep them in OpenBoard's folder (pre-filled) so invoices live alongside. Quotes are fine.",
+  email: 'The Gmail account the fetchers sign in as.',
+  'app-password': 'Create one at myaccount.google.com/apppasswords — 16 characters, not your Gmail password.',
+  interval: 'Whole minutes. Runs are scheduled from the last fetch.',
+};
+
+export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Props) {
   const [step, setStep] = useState<Step>('menu');
   const [dirInput, setDirInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
@@ -74,6 +117,7 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
   const [, setRefresh] = useState(0);
   /** Value of the row the cursor is on, so space can act on it. */
   const [highlighted, setHighlighted] = useState('');
+  const [showHelp, setShowHelp] = useState(false);
 
   // Bound to the shared activity log, not local state: scheduled fetches run
   // with no screen mounted, so their output has to survive until someone opens
@@ -83,8 +127,14 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
 
   useInput((input, key) => {
     if (key.escape && !busy) {
-      if (step === 'menu') onNavigate('settings');
+      if (step === 'menu') onNavigate(parentOf('integrations-gmail'));
       else setStep('menu');
+    }
+
+    // '?' expands the guidance the detail line shows one row at a time.
+    if (input === '?' && step === 'menu' && !busy) {
+      setShowHelp((on) => !on);
+      return;
     }
 
     // Space toggles the highlighted biller. ink-select-input binds only
@@ -248,14 +298,16 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     changed();
   };
 
+  // Labels carry their current value inline rather than "(current: …)" — the
+  // parenthetical repeated on every configurable row and doubled its length.
   const menuItems = [
     // Offered first on a fresh setup: one keypress from nothing to a working
     // folder, instead of hunting for scripts the user may not have yet.
-    ...(hasDir ? [] : [{ label: 'Install the fetchers bundled with OpenBoard (recommended)', value: 'install' }]),
-    { label: hasDir ? `Invoice scripts folder (current: ${settings.scriptsDir})` : 'Set invoice scripts folder', value: 'dir' },
-    ...(hasDir ? [{ label: hasEmail ? `Gmail address (current: ${settings.email})` : 'Set Gmail address', value: 'email' }] : []),
+    ...(hasDir ? [] : [{ label: 'Install bundled fetchers', value: 'install' }]),
+    { label: hasDir ? `Scripts folder — ${settings.scriptsDir}` : 'Scripts folder — not set', value: 'dir' },
+    ...(hasDir ? [{ label: hasEmail ? `Gmail address — ${settings.email}` : 'Gmail address — not set', value: 'email' }] : []),
     ...(hasDir && hasEmail
-      ? [{ label: hasPassword ? 'Replace Gmail App Password' : 'Set Gmail App Password', value: 'password' }]
+      ? [{ label: hasPassword ? 'App Password — set' : 'App Password — not set', value: 'password' }]
       : []),
     // The biller list only makes sense once the account behind it is known.
     ...(hasDir && hasEmail && hasPassword
@@ -266,14 +318,14 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
           })),
           // Sits directly under the list it adds to, the way ManageBoardsScreen
           // puts "Add new dashboard" beside the dashboards.
-          { label: '✚ Add a new biller (Biller Studio)', value: 'add-biller' },
-          { label: `Fetch interval (current: ${settings.syncIntervalMinutes} min)`, value: 'interval' },
+          { label: '✚ Add a biller', value: 'add-biller' },
+          { label: `Fetch interval — ${settings.syncIntervalMinutes} min`, value: 'interval' },
           { label: 'Fetch now', value: 'sync' },
-          { label: 'Rescan billers folder', value: 'rescan' },
-          { label: 'Clear saved credentials', value: 'clear' },
+          { label: 'Rescan folder', value: 'rescan' },
+          { label: 'Clear credentials', value: 'clear' },
         ]
       : []),
-    { label: '← Go Back', value: 'back' },
+    { label: '← Back', value: 'back' },
   ];
 
   const handleMenuSelect = (item: { value: string }) => {
@@ -291,77 +343,67 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
     else if (item.value === 'sync') void syncNow();
     else if (item.value === 'rescan') { setStatus(`Found ${discoverBillers(settings.scriptsDir).length} biller fetcher(s).`); refresh(); }
     else if (item.value === 'clear') clearCredentials();
-    else onNavigate('settings');
+    else onNavigate(parentOf('integrations-gmail'));
   };
 
-  const setupLine = !hasDir
-    ? 'Status: no scripts folder set'
-    : !hasEmail
-      ? 'Status: folder set — Gmail address needed'
-      : !hasPassword
-        ? 'Status: address set — App Password needed'
-        : settings.enabledKeys.length === 0
-          ? `Status: ready — ${billers.length} biller(s) found, none enabled yet`
-          : `Status: ${settings.enabledKeys.length} of ${billers.length} biller(s) enabled`;
+  // Five stacked status lines became one row of facts. Each is short enough to
+  // scan and only appears once it is true, so the line grows with setup instead
+  // of announcing what has not happened yet.
+  const meta = [
+    !hasDir ? 'no scripts folder' : !hasEmail ? 'address needed' : !hasPassword ? 'password needed' : 'ready',
+    hasDir && hasEmail && hasPassword && `${settings.enabledKeys.length}/${billers.length} billers on`,
+    settings.lastRunAt && `last ${new Date(settings.lastRunAt).toLocaleTimeString()}`,
+    // Derived from the same lastRunAt anchor the scheduler uses. The loop only
+    // runs while OpenBoard is open, which the wording has to stay honest about.
+    isBillerSyncConfigured(settings) && `next ${describeNextRun(msUntilDue(settings))} while open`,
+  ];
 
   // Data with no fetcher behind it renders a dashboard that quietly stops
-  // updating, which looks identical to one that is simply up to date.
+  // updating, which looks identical to one that is simply up to date. This is a
+  // real problem rather than guidance, so it stays visible.
   const stale = hasDir ? stalePronedDataKeys(settings.scriptsDir) : [];
 
+  const detail = step === 'menu' ? ROW_DETAIL[highlighted] : STEP_DETAIL[step];
+
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>🧾 Invoice Fetchers</Text>
-      <Text color={UI_COLORS.subtitle}>
-        Run your per-biller invoice scripts on a schedule and turn each biller's
-        invoices into its own dashboard.
-      </Text>
-      <Box marginTop={1} flexDirection="column">
-        <Text color={UI_COLORS.subtitle}>{setupLine}</Text>
-        {settings.lastRunAt && (
+    <ScreenFrame
+      title={['Integrations', 'Gmail']}
+      meta={meta}
+      detail={detail}
+      status={status}
+      statusTone={busy ? 'busy' : undefined}
+      hints={step === 'menu' ? ['move', 'toggle', 'select', 'scroll', 'help', 'back'] : ['save', 'back']}
+    >
+      {stale.length > 0 && (
+        <Text color="yellow">No fetcher for {stale.join(', ')} — those dashboards will not refresh.</Text>
+      )}
+
+      {showHelp && step === 'menu' && (
+        <Box flexDirection="column" marginBottom={1}>
           <Text color={UI_COLORS.subtitle}>
-            Last run: {new Date(settings.lastRunAt).toLocaleString()}
+            Fetchers read Gmail over IMAP. Your App Password is encrypted and handed to each
+            fetcher through its environment at run time — never written to disk. It grants full
+            mailbox read access, so revoke it in your Google account to cut access off.
           </Text>
-        )}
-        {/*
-          Derived from the same lastRunAt anchor the scheduler uses, so it needs
-          no status plumbing into this screen. The loop only runs while OpenBoard
-          is open, which the wording has to be honest about.
-        */}
-        {isBillerSyncConfigured(settings) && (
           <Text color={UI_COLORS.subtitle}>
-            Next run: {describeNextRun(msUntilDue(settings))} (while OpenBoard is open)
+            Fetchers need Python 3 with beautifulsoup4. Fetching runs only while OpenBoard is open.
           </Text>
-        )}
-        {hasDir && (
-          <Text color={UI_COLORS.subtitle}>Credentials: encrypted in config, passed to fetchers at run time</Text>
-        )}
-        {stale.length > 0 && (
-          <Text color="yellow">
-            No fetcher for: {stale.join(', ')} — these dashboards will not refresh. Add one with ✚ Add a new biller.
-          </Text>
-        )}
-      </Box>
+        </Box>
+      )}
 
       {step === 'scripts-dir' && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color={UI_COLORS.subtitle}>Folder holding your fetch_&lt;biller&gt;.py scripts (quotes are fine).</Text>
-          <Text color={UI_COLORS.subtitle}>
-            Recommended: keep them in OpenBoard's own folder, pre-filled below — your
-            invoices and credentials then live alongside it under billers/.
-          </Text>
-          <Box>
-            <Text color={UI_COLORS.logo}>Folder › </Text>
-            <TextInput
-              value={dirInput}
-              onChange={setDirInput}
-              onSubmit={saveScriptsDir}
-              placeholder="C:\path\to\invoice_fetchers"
-            />
-          </Box>
+        <Box>
+          <Text color={UI_COLORS.logo}>Folder › </Text>
+          <TextInput
+            value={dirInput}
+            onChange={setDirInput}
+            onSubmit={saveScriptsDir}
+            placeholder="C:\path\to\invoice_fetchers"
+          />
         </Box>
       )}
       {step === 'email' && (
-        <Box marginTop={1}>
+        <Box>
           <Text color={UI_COLORS.logo}>Gmail address › </Text>
           <TextInput
             value={emailInput}
@@ -372,25 +414,19 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
         </Box>
       )}
       {step === 'app-password' && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color={UI_COLORS.subtitle}>
-            A Google App Password (16 characters) for {settings.email} — create one at
-            myaccount.google.com/apppasswords. This is not your normal Gmail password.
-          </Text>
-          <Box>
-            <Text color={UI_COLORS.logo}>App Password › </Text>
-            <TextInput
-              value={passwordInput}
-              onChange={setPasswordInput}
-              onSubmit={savePassword}
-              mask="*"
-              placeholder="abcd efgh ijkl mnop"
-            />
-          </Box>
+        <Box>
+          <Text color={UI_COLORS.logo}>App Password › </Text>
+          <TextInput
+            value={passwordInput}
+            onChange={setPasswordInput}
+            onSubmit={savePassword}
+            mask="*"
+            placeholder="abcd efgh ijkl mnop"
+          />
         </Box>
       )}
       {step === 'interval' && (
-        <Box marginTop={1}>
+        <Box>
           <Text color={UI_COLORS.logo}>Interval (minutes) › </Text>
           <TextInput
             value={intervalInput}
@@ -401,34 +437,15 @@ export function BillerSettingsScreen({ onNavigate, onBillersConfigured }: Props)
         </Box>
       )}
       {step === 'menu' && (
-        <Box marginTop={1}>
-          <SelectInput
-            items={menuItems}
-            onSelect={handleMenuSelect}
-            onHighlight={(item) => setHighlighted(item.value)}
-          />
-        </Box>
+        <SelectInput
+          items={menuItems}
+          onSelect={handleMenuSelect}
+          onHighlight={(item) => setHighlighted(item.value)}
+        />
       )}
 
-      {status && (
-        <Box marginTop={1}>
-          <Text color={busy ? 'yellow' : /fail|error|not |cannot|must be|missing/i.test(status) ? 'red' : 'green'}>{status}</Text>
-        </Box>
-      )}
-
-      <Box marginTop={1} flexDirection="column">
-        <Text color={UI_COLORS.subtitle}>
-          The fetchers read Gmail over IMAP. Your App Password is stored encrypted and handed
-          to each fetcher through its environment at run time — it is never written to disk.
-          An App Password grants full mailbox read access, so revoke it in your Google account
-          to cut access off. Fetchers need Python 3 with beautifulsoup4 installed.
-        </Text>
-        <Text color={UI_COLORS.subtitle}>Space or Enter toggles the highlighted biller · PgUp/PgDn scroll the log · ESC goes back</Text>
-        <Text color={UI_COLORS.subtitle}>Fetching runs only while OpenBoard is open.</Text>
-      </Box>
-
-      {/* Last child: progress belongs below every option, never above them. */}
+      {/* Progress belongs below every option, never above them. */}
       <LogPane view={log.view} title="Fetch log" />
-    </Box>
+    </ScreenFrame>
   );
 }

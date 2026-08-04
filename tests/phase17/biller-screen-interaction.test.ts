@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import type { BillerSettings } from '../../src/types/billers.js';
 import { billerSchedulerArmKey, msUntilDue } from '../../src/services/billers/billerScheduler.js';
-import { billerKeyForToggle } from '../../src/screens/BillerSettingsScreen.js';
+import { billerKeyForToggle } from '../../src/screens/GmailIntegrationScreen.js';
 
 const settings = (overrides: Partial<BillerSettings> = {}): BillerSettings => ({
   scriptsDir: '/scripts/invoice_fetchers',

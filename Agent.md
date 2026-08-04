@@ -109,6 +109,8 @@ openboard agent setup status --json
 
 ### Invoice fetchers (per-biller scripts)
 
+In the TUI these live under **Integrations → Gmail**.
+
 Per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). They authenticate over IMAP with a Gmail App Password.
 
 OpenBoard ships fetchers for Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy Instamart, Uber, Urban Company and Zomato inside the package at `scripts/invoice_fetchers/`. A human installs them with one keypress in the TUI; there is no headless installer, because writing executable scripts onto a machine should be an explicit human action. Point `--scripts-dir` at your own folder to use your own instead.

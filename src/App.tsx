@@ -20,8 +20,10 @@ import type { BoardConfig } from './types/board.js';
 import { billerSchedulerArmKey, startBillerScheduler } from './services/billers/billerScheduler.js';
 import { TypedConfigRepository } from './services/config/TypedConfigRepository.js';
 import type { BillerSchedulerStatus } from './types/billers.js';
-import { BillerSettingsScreen } from './screens/BillerSettingsScreen.js';
+import { GmailIntegrationScreen } from './screens/GmailIntegrationScreen.js';
+import { IntegrationsScreen } from './screens/IntegrationsScreen.js';
 import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
+import { ScreenFrame } from './components/ScreenFrame.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -43,17 +45,32 @@ export type Screen =
   | 'manage-boards'
   | 'chat'
   | 'deploy'
+  | 'integrations'
+  // Gmail sits under Integrations, not Settings: reading invoices is a way data
+  // gets into OpenBoard, not a preference about how it behaves.
+  | 'integrations-gmail'
   | 'settings'
   | 'settings-mode'
   | 'settings-vercel'
   | 'settings-github'
   | 'settings-llm'
   | 'settings-dashboard-auth'
-  | 'settings-billers'
   | 'biller-studio';
 
-// Placeholder components with "Go Back" option
+/** One line per settings row, shown for the highlighted one. */
+const SETTINGS_DETAIL: Record<string, string> = {
+  mode: 'What OpenBoard produces — and what leaves your machine.',
+  llm: 'Which model generates dashboards, and where it runs.',
+  github: 'Token used to push the generated app. Encrypted locally.',
+  vercel: 'Token used to deploy. Encrypted locally.',
+  'dashboard-auth': 'Username and password for the deployed dashboard.',
+  setup: 'Re-run onboarding from the start.',
+  back: 'Return to the main menu.',
+};
+
 function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+  const [highlighted, setHighlighted] = useState('mode');
+
   useInput((_input, key) => {
     if (key.escape) onNavigate('welcome');
   });
@@ -64,41 +81,42 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
   // GitHub/Vercel tokens only matter in All remote mode — hiding them keeps
   // the privacy contract visible: local/hybrid never talk to GitHub/Vercel.
   const items = [
-    { label: `App mode (current: ${describeAppMode(mode)})`, value: 'mode' },
-    { label: 'Update LLM provider', value: 'llm' },
+    { label: 'App mode', value: 'mode' },
+    { label: 'LLM provider', value: 'llm' },
     ...(remote
       ? [
-          { label: 'Re-enter GitHub token', value: 'github' },
-          { label: 'Re-enter Vercel token', value: 'vercel' },
+          { label: 'GitHub token', value: 'github' },
+          { label: 'Vercel token', value: 'vercel' },
         ]
       : []),
-    { label: 'Invoice fetchers (billers)', value: 'billers' },
-    { label: 'Reset dashboard login', value: 'dashboard-auth' },
-    { label: 'Run full setup wizard', value: 'setup' },
-    { label: '← Go Back', value: 'back' },
+    { label: 'Dashboard login', value: 'dashboard-auth' },
+    { label: 'Re-run onboarding', value: 'setup' },
+    { label: '← Back', value: 'back' },
   ];
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>⚙️ Settings</Text>
-      <Text color={UI_COLORS.subtitle}>Update the mode and credentials used by OpenBoard.</Text>
-      <Box marginTop={1}>
+    <ScreenFrame
+      title="Settings"
+      meta={[describeAppMode(mode).toLowerCase()]}
+      detail={SETTINGS_DETAIL[highlighted]}
+      hints={['move', 'select', 'back']}
+    >
+      <Box>
         <SelectInput
           items={items}
+          onHighlight={(item) => setHighlighted(item.value)}
           onSelect={(item) => {
             if (item.value === 'mode') onNavigate('settings-mode');
             else if (item.value === 'llm') onNavigate('settings-llm');
             else if (item.value === 'github') onNavigate('settings-github');
             else if (item.value === 'vercel') onNavigate('settings-vercel');
-            else if (item.value === 'billers') onNavigate('settings-billers');
             else if (item.value === 'dashboard-auth') onNavigate('settings-dashboard-auth');
             else if (item.value === 'setup') onNavigate('setup');
             else onNavigate('welcome');
           }}
         />
       </Box>
-      <Text color={UI_COLORS.subtitle}>Press ESC or select Go Back</Text>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -114,12 +132,14 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
 
   const currentMode = getAppMode();
 
+  // The summary moves to the detail line — it described the highlighted mode
+  // twice, once in the row and once below it.
   const items = [
-    ...APP_MODES.map((m, index) => ({
-      label: `${index + 1}. ${m.label} — ${m.summary}${m.id === currentMode ? '  (current)' : ''}`,
+    ...APP_MODES.map((m) => ({
+      label: m.id === currentMode ? `${m.label}  (current)` : m.label,
       value: m.id as string,
     })),
-    { label: '← Go Back', value: 'back' },
+    { label: '← Back', value: 'back' },
   ];
 
   const selectMode = (selected: AppMode) => {
@@ -138,10 +158,15 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   };
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>App Mode</Text>
-      <Text color={UI_COLORS.subtitle}>What OpenBoard produces — and what leaves your machine.</Text>
-      <Box marginTop={1}>
+    <ScreenFrame
+      title={['Settings', 'App mode']}
+      meta={[`current: ${describeAppMode(currentMode).toLowerCase()}`]}
+      detail={appModeInfo(highlighted).detail}
+      status={status}
+      statusTone="ok"
+      hints={['move', 'select', 'back']}
+    >
+      <Box>
         <SelectInput
           items={items}
           onHighlight={(item) => {
@@ -153,16 +178,7 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
           }}
         />
       </Box>
-      <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>{appModeInfo(highlighted).detail}</Text>
-      </Box>
-      {status && (
-        <Box marginTop={1}>
-          <Text color="green">{status}</Text>
-        </Box>
-      )}
-      <Text color={UI_COLORS.subtitle}>Press ESC or select Go Back</Text>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -208,11 +224,17 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
   };
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>Dashboard Login</Text>
-      <Text color={UI_COLORS.subtitle}>Set the username and password used by the deployed dashboard.</Text>
+    <ScreenFrame
+      title={['Settings', 'Dashboard login']}
+      detail={step === 'username'
+        ? 'The username for signing in to your deployed dashboard.'
+        : 'At least 8 characters. Hashed with bcrypt before it is stored.'}
+      status={status}
+      statusTone={saving ? 'busy' : undefined}
+      hints={[step === 'username' ? 'continue' : 'save', 'back']}
+    >
       {step === 'username' ? (
-        <Box marginTop={1}>
+        <Box>
           <Text color={UI_COLORS.logo}>Username › </Text>
           <TextInput
             value={username}
@@ -222,7 +244,7 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
           />
         </Box>
       ) : (
-        <Box marginTop={1}>
+        <Box>
           <Text color={UI_COLORS.logo}>Password › </Text>
           <TextInput
             value={password}
@@ -233,15 +255,7 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
           />
         </Box>
       )}
-      {status && (
-        <Box marginTop={1}>
-          <Text color={status.includes('saved') ? 'green' : saving ? 'yellow' : 'red'}>{status}</Text>
-        </Box>
-      )}
-      <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>Press Enter to continue/save · ESC to go back</Text>
-      </Box>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -290,10 +304,14 @@ function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   };
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>GitHub Token</Text>
-      <Text color={UI_COLORS.subtitle}>Paste a GitHub token with repo scope. It will be validated and encrypted locally.</Text>
-      <Box marginTop={1}>
+    <ScreenFrame
+      title={['Settings', 'GitHub token']}
+      detail="Needs repo scope. Validated against GitHub, then encrypted locally."
+      status={status}
+      statusTone={saving ? 'busy' : undefined}
+      hints={['save', 'back']}
+    >
+      <Box>
         <Text color={UI_COLORS.logo}>Token › </Text>
         <TextInput
           value={token}
@@ -303,15 +321,7 @@ function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
           placeholder="ghp_... or github_pat_..."
         />
       </Box>
-      {status && (
-        <Box marginTop={1}>
-          <Text color={status.includes('saved') || status.includes('success') ? 'green' : saving ? 'yellow' : 'red'}>{status}</Text>
-        </Box>
-      )}
-      <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>Press Enter to save · ESC to go back</Text>
-      </Box>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -407,19 +417,14 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       (item) => item.value === 'back' || providerAllowedInMode(item.value, mode),
     );
     return (
-      <Box flexDirection="column" padding={2}>
-        <Text bold color={UI_COLORS.logo}>LLM Provider</Text>
-        <Text color={UI_COLORS.subtitle}>
-          {mode === 'local'
-            ? 'Local only mode: generation runs on your machine via Ollama or LM Studio.'
-            : 'Choose the provider to configure.'}
-        </Text>
-        {status && (
-          <Box marginTop={1}>
-            <Text color={status.includes('saved') ? 'green' : 'yellow'}>{status}</Text>
-          </Box>
-        )}
-        <Box marginTop={1}>
+      <ScreenFrame
+        title={['Settings', 'LLM provider']}
+        meta={[mode === 'local' && 'local only — runs on your machine']}
+        detail="Choose the provider to configure."
+        status={status}
+        hints={['move', 'select', 'back']}
+      >
+        <Box>
           <SelectInput
             items={providerItems}
             onSelect={(item) => {
@@ -435,43 +440,55 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
             }}
           />
         </Box>
-      </Box>
+      </ScreenFrame>
     );
   }
 
   if (step === 'apiKey') {
     return (
-      <Box flexDirection="column" padding={2}>
-        <Text bold color={UI_COLORS.logo}>{provider} API Key</Text>
-        <Box marginTop={1}>
+      <ScreenFrame
+        title={['Settings', 'LLM provider', 'API key']}
+        meta={[provider]}
+        detail="Stored encrypted on this machine."
+        status={status}
+        statusTone="error"
+        hints={['continue', 'back']}
+      >
+        <Box>
           <Text color={UI_COLORS.logo}>API key › </Text>
           <TextInput value={apiKey} onChange={setApiKey} onSubmit={() => setStep('model')} mask="*" placeholder="sk-..." />
         </Box>
-        {status && <Text color="red">{status}</Text>}
-        <Text color={UI_COLORS.subtitle}>Press Enter to continue · ESC to go back</Text>
-      </Box>
+      </ScreenFrame>
     );
   }
 
   if (step === 'ollamaHost') {
     return (
-      <Box flexDirection="column" padding={2}>
-        <Text bold color={UI_COLORS.logo}>{provider === 'lmstudio' ? 'LM Studio Local Server' : 'Ollama Host'}</Text>
-        <Box marginTop={1}>
+      <ScreenFrame
+        title={['Settings', 'LLM provider', provider === 'lmstudio' ? 'LM Studio server' : 'Ollama host']}
+        detail="Where the local server is listening. Nothing leaves your machine."
+        status={status}
+        statusTone="error"
+        hints={['continue', 'back']}
+      >
+        <Box>
           <Text color={UI_COLORS.logo}>Host › </Text>
           <TextInput value={ollamaHost} onChange={setOllamaHost} onSubmit={() => setStep('model')} placeholder={provider === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434'} />
         </Box>
-        {status && <Text color="red">{status}</Text>}
-        <Text color={UI_COLORS.subtitle}>Press Enter to continue · ESC to go back</Text>
-      </Box>
+      </ScreenFrame>
     );
   }
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>LLM Model</Text>
-      <Text color={UI_COLORS.subtitle}>Provider: {provider}</Text>
-      <Box marginTop={1}>
+    <ScreenFrame
+      title={['Settings', 'LLM provider', 'Model']}
+      meta={[provider]}
+      detail="Validated against the provider before it is saved."
+      status={status}
+      statusTone={step === 'saving' ? 'busy' : undefined}
+      hints={['move', 'select', 'back']}
+    >
+      <Box>
         {provider === 'ollama' || provider === 'lmstudio' ? (
           <LocalModelPicker
             provider={provider}
@@ -492,13 +509,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
           />
         )}
       </Box>
-      {status && (
-        <Box marginTop={1}>
-          <Text color={status.includes('saved') ? 'green' : step === 'saving' ? 'yellow' : 'red'}>{status}</Text>
-        </Box>
-      )}
-      <Text color={UI_COLORS.subtitle}>Press Enter to validate/save · ESC to go back</Text>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -536,10 +547,14 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   };
 
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>Vercel Token</Text>
-      <Text color={UI_COLORS.subtitle}>Paste a Vercel API token. It will be validated and encrypted locally.</Text>
-      <Box marginTop={1}>
+    <ScreenFrame
+      title={['Settings', 'Vercel token']}
+      detail="Validated for project access, then encrypted locally."
+      status={status}
+      statusTone={saving ? 'busy' : undefined}
+      hints={['save', 'back']}
+    >
+      <Box>
         <Text color={UI_COLORS.logo}>Token › </Text>
         <TextInput
           value={token}
@@ -549,15 +564,7 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
           placeholder="vercel token..."
         />
       </Box>
-      {status && (
-        <Box marginTop={1}>
-          <Text color={status.includes('saved') ? 'green' : saving ? 'yellow' : 'red'}>{status}</Text>
-        </Box>
-      )}
-      <Box marginTop={1}>
-        <Text color={UI_COLORS.subtitle}>Press Enter to save · ESC to go back</Text>
-      </Box>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -566,17 +573,16 @@ function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) 
     if (key.escape) onNavigate('welcome');
   });
 
-  const items = [{ label: '← Go Back', value: 'back' }];
-
   return (
-    <Box flexDirection="column" padding={2}>
-      <Text bold color={UI_COLORS.logo}>🚀 Deploy</Text>
-      <Text color={UI_COLORS.subtitle}>Deploy screen - Coming soon</Text>
-      <Box marginTop={1}>
-        <SelectInput items={items} onSelect={() => onNavigate('welcome')} />
+    <ScreenFrame
+      title="Deploy"
+      detail="Deploying happens from a dashboard's chat. This screen is not built yet."
+      hints={['select', 'back']}
+    >
+      <Box>
+        <SelectInput items={[{ label: '← Back', value: 'back' }]} onSelect={() => onNavigate('welcome')} />
       </Box>
-      <Text color={UI_COLORS.subtitle}>Press ESC or select Go Back</Text>
-    </Box>
+    </ScreenFrame>
   );
 }
 
@@ -722,9 +728,12 @@ export function App() {
     case 'settings-dashboard-auth':
       return <DashboardAuthSettings onNavigate={navigate} />;
 
-    case 'settings-billers':
+    case 'integrations':
+      return <IntegrationsScreen onNavigate={navigate} />;
+
+    case 'integrations-gmail':
       return (
-        <BillerSettingsScreen
+        <GmailIntegrationScreen
           onNavigate={navigate}
           onBillersConfigured={() => setBillerConfigVersion((n) => n + 1)}
         />

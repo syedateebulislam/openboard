@@ -40,18 +40,27 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║        [_-_] O p e n B o a r d        ║
 ║     Analytics Dashboard Generator     ║
-║                v2.0.6                 ║
+║                v2.1.0                 ║
 ╚═══════════════════════════════════════╝
 ```
 
-Menu options:
+Menu options, in order:
 
-- Setup (shown as "Get started — set up OpenBoard" until you configure an LLM)
-- Dashboards
-- Settings
-- Exit
+1. **Onboarding** — connect an LLM and choose what leaves your machine
+   (shown as "Onboarding — start here" until you configure an LLM)
+2. **Integrations** — where your data comes from
+3. **Dashboards** — create, modify and regenerate dashboards
+4. **Settings** — mode, provider and credentials
+5. **Exit**
 
-Until setup has run, the mode line reads "not configured yet — run Setup to choose one".
+Below the banner a dim line states the facts: your mode and provider, or
+"not configured yet" before onboarding has run. Moving the cursor shows a
+one-line description of the highlighted option.
+
+Every screen shares the same shell: a breadcrumb title, one line of facts, the
+options, one line describing the highlighted option, and a key hint strip
+(`↑↓ move · ⏎ select · esc back`). Those hints are worded identically
+everywhere in the TUI.
 
 ## First-Time Setup
 
@@ -253,20 +262,30 @@ Removing a dashboard runs a full cleanup so the deployed app matches the registr
 
 If code cleanup fails, the dashboard is left registered so the live app is never left half-removed. Removing the last dashboard restores the empty starter app.
 
+## Integrations
+
+Integrations is where your data comes from. It lists each connected source and
+its state at a glance:
+
+- **Gmail** — per-biller invoice scripts, schedule, enable/disable
+
+Selecting Gmail opens everything described below. GitHub and Vercel are not
+integrations in this sense — they are deploy targets, and stay under Settings.
+
 ## Settings
 
 Settings supports:
 
-- Update LLM provider
-- Re-enter GitHub token
-- Re-enter Vercel token
-- Invoice fetchers (per-biller invoice scripts, schedule, enable/disable)
-- Reset dashboard login
-- Run full setup wizard
+- App mode
+- LLM provider
+- GitHub token *(All remote mode only)*
+- Vercel token *(All remote mode only)*
+- Dashboard login
+- Re-run onboarding
 
 Use Settings when tokens cannot be decrypted or external auth fails.
 
-### Invoice Fetchers
+## Integrations → Gmail
 
 Turn invoice emails into per-biller spending dashboards. OpenBoard ships
 ready-made fetchers for **Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy
@@ -297,7 +316,7 @@ themselves, so this layout works with them unmodified. You can point elsewhere
 if you already keep them somewhere, but that folder must have the same
 `scripts/<anything>/` shape.
 
-Settings → Invoice fetchers, in this order:
+Integrations → Gmail, in this order:
 
 0. **Install the fetchers bundled with OpenBoard** — offered first when nothing
    is configured. Skip this only if you keep your own scripts elsewhere.
@@ -317,7 +336,7 @@ Settings → Invoice fetchers, in this order:
    any time.
 5. **Fetch interval** — one shared schedule for every enabled biller (default 360
    min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
-   ones immediately. **Rescan billers folder** picks up newly added scripts.
+   ones immediately. **Rescan folder** picks up newly added scripts.
 
 Fetching runs in-process, only while OpenBoard is open — no background daemon. The last run time is remembered between
 sessions, so reopening OpenBoard does not re-fetch everything; an overdue run
