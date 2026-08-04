@@ -531,10 +531,19 @@ flowchart TD
   a 7-minute interval ran every 7m34s, and the drift compounded across a session.
   `msUntilNextRun()` returns 0 when a fetch outlasts its own interval, so a run that
   overruns starts the next one as soon as it ends rather than skipping a slot.
+- **The anchor is taken when a run starts**, via `syncEnabled`'s `onStart` — fired once
+  the lock is won and at least one biller is queued. Anchoring on completion meant that
+  anything ending the run in between (quitting the TUI, a re-armed scheduler, pressing
+  stop) discarded the record of work already done, leaving `lastRunAt` frozen and every
+  subsequent launch re-fetching everything. A completion fallback still anchors a
+  fetcher that never signals its start, so the behaviour cannot be lost by forgetting a
+  callback. An empty result set and a lock-skipped run still never anchor.
 - **Manual fetches re-anchor too** — all three of them ("Fetch now", `/billers sync`,
-  `openboard agent billers sync`) — but only via `shouldAnchorRun()`, which rejects an
-  empty result set. A fetch that ran nothing must not move the anchor, or it silently
-  delays the next scheduled run by a full interval.
+  `openboard agent billers sync`).
+- **A run can be stopped**: `billerRunController` holds the single in-flight run, so the
+  Gmail screen can abort a fetch the scheduler started. The `AbortSignal` breaks the
+  per-biller loop and is passed to the Python child, so a spawned fetcher is terminated
+  rather than left running unwatched.
 - **The loop reports to the UI**: `App` holds `BillerSchedulerStatus` and passes it to
   `ChatScreen`, which shows a header line (`next fetch HH:MM` / `fetching…` / error)
   and posts a message when a scheduled run it watched start finishes. A silent

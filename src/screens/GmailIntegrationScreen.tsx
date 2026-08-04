@@ -33,8 +33,14 @@ import {
   isBillerSyncConfigured,
   msUntilDue,
   recordBillerRun,
-  shouldAnchorRun,
 } from '../services/billers/billerScheduler.js';
+import {
+  activeBillerRun,
+  beginBillerRun,
+  endBillerRun,
+  stopBillerRun,
+} from '../services/billers/billerRunController.js';
+import { summariseFailures } from '../utils/summariseFailures.js';
 import { defaultScriptsDir } from '../types/billers.js';
 import { LogPane } from '../components/LogPane.js';
 import { useProgressLog } from '../hooks/useProgressLog.js';
@@ -93,6 +99,7 @@ const ROW_DETAIL: Record<string, string> = {
   'add-biller': 'Describe one sample email and OpenBoard writes the fetcher for it.',
   interval: 'How often enabled fetchers run, while OpenBoard is open.',
   sync: 'Run every enabled fetcher now.',
+  stop: 'Stop the fetch in progress. Billers already done are kept, and the schedule stays anchored.',
   rescan: 'Re-read the scripts folder to pick up fetchers added outside OpenBoard.',
   clear: 'Forget the address and App Password. Revoke it in your Google account to cut access off.',
   back: 'Return to Integrations.',
@@ -241,41 +248,55 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     setBusy(true);
     setStatus('');
     log.append('Running enabled invoice fetchers…');
+    const run = beginBillerRun('manual');
     try {
       // No truncation: the pane wraps, so a long fetcher line stays readable
       // instead of being cut at 120 characters.
       const results = await new BillerFetcherService().syncEnabled({
         onProgress: log.append,
+        signal: run.controller.signal,
+        // A manual fetch is the same work a scheduled tick does, so it anchors
+        // the schedule — and it anchors at the start, so stopping half way
+        // still counts the billers that did run instead of replaying them all.
+        onStart: () => recordBillerRun(),
       });
       if (results.skipped === 'locked') return;
       if (results.length === 0) {
         // Distinguish "none switched on" from "the folder went missing".
         log.append(billers.length === 0
-          ? `No biller scripts found in ${settings.scriptsDir}. Check the folder still exists, then use "Rescan billers folder".`
+          ? `No biller scripts found in ${settings.scriptsDir}. Check the folder still exists, then use "Rescan folder".`
           : 'No billers are enabled yet — switch one on in the list above.');
         return;
       }
-      // A manual fetch is the same work a scheduled tick does, so a real run
-      // re-anchors the schedule. Without this the restart below still saw the
-      // old lastRunAt, judged the loop overdue, and fetched everything again.
-      if (shouldAnchorRun(results)) recordBillerRun();
 
       const failed = results.filter((r) => !r.ok);
       const updated = results.filter((r) => r.changed);
-      log.append(failed.length > 0
-        ? `Failed: ${failed.map((r) => `${r.displayName} (${r.error})`).join(' · ')}`
-        : updated.length > 0
-          ? `Fetched new invoices for ${updated.map((r) => r.displayName).join(', ')}; dashboards refreshed.`
-          : `Ran ${results.length} fetcher(s) — no new invoices found.`);
+      log.append(run.controller.signal.aborted
+        ? `Stopped after ${results.length} of ${billers.length} fetcher(s).`
+        : failed.length > 0
+          ? `Failed: ${summariseFailures(failed.map((r) => `${r.displayName} (${r.error})`))}`
+          : updated.length > 0
+            ? `Fetched new invoices for ${updated.map((r) => r.displayName).join(', ')}; dashboards refreshed.`
+            : `Ran ${results.length} fetcher(s) — no new invoices found.`);
     } catch (error: any) {
-      log.append(`Sync failed: ${error.message}`);
+      log.append(error?.name === 'AbortError' ? 'Fetch stopped.' : `Sync failed: ${error.message}`);
     } finally {
+      endBillerRun(run);
       setBusy(false);
-      // Refresh the screen and restart the scheduler either way. When nothing
-      // was anchored above the restart re-arms from the unchanged lastRunAt, so
-      // the pending run keeps its original time.
+      // Refresh the screen and restart the scheduler either way.
       changed();
     }
+  };
+
+  /** Stop whatever fetch is running — this screen's, or the schedule's. */
+  const stopFetch = () => {
+    const stopped = stopBillerRun();
+    // Saying "stopped" when nothing was running taught users to distrust it.
+    setStatus(stopped
+      ? `Stopping the ${stopped.origin} fetch — the current biller is being terminated.`
+      : 'No fetch is running.');
+    log.append(stopped ? `Stop requested for the ${stopped.origin} fetch.` : 'Stop requested, but no fetch was running.');
+    refresh();
   };
 
   const installBundled = () => {
@@ -300,6 +321,10 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
 
   // Labels carry their current value inline rather than "(current: …)" — the
   // parenthetical repeated on every configurable row and doubled its length.
+  // Includes a scheduled run this screen did not start, so the row can offer to
+  // stop it. Read at render time; the log pane re-renders as a run streams lines.
+  const running = activeBillerRun();
+
   const menuItems = [
     // Offered first on a fresh setup: one keypress from nothing to a working
     // folder, instead of hunting for scripts the user may not have yet.
@@ -320,7 +345,12 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
           // puts "Add new dashboard" beside the dashboards.
           { label: '✚ Add a biller', value: 'add-biller' },
           { label: `Fetch interval — ${settings.syncIntervalMinutes} min`, value: 'interval' },
-          { label: 'Fetch now', value: 'sync' },
+          // The row reflects what is actually happening, including a scheduled
+          // run this screen did not start — otherwise a wedged fetcher could
+          // only be ended by killing the terminal.
+          running
+            ? { label: `■ Stop fetch (${running.origin})`, value: 'stop' }
+            : { label: 'Fetch now', value: 'sync' },
           { label: 'Rescan folder', value: 'rescan' },
           { label: 'Clear credentials', value: 'clear' },
         ]
@@ -329,6 +359,9 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   ];
 
   const handleMenuSelect = (item: { value: string }) => {
+    // Stop is the one action that must work while a fetch is in flight — that
+    // is the only time it exists, and a blanket busy-guard would swallow it.
+    if (item.value === 'stop') { stopFetch(); return; }
     if (busy) return;
     setStatus('');
     const toggleKey = billerKeyForToggle(item.value);
@@ -355,7 +388,12 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     settings.lastRunAt && `last ${new Date(settings.lastRunAt).toLocaleTimeString()}`,
     // Derived from the same lastRunAt anchor the scheduler uses. The loop only
     // runs while OpenBoard is open, which the wording has to stay honest about.
-    isBillerSyncConfigured(settings) && `next ${describeNextRun(msUntilDue(settings))} while open`,
+    // While a fetch is in flight, say so instead of showing a countdown. The
+    // schedule anchors at the start of a run, so the two together previously
+    // read as "due now" for the whole run and looked like nothing was happening.
+    running
+      ? `fetching now (${running.origin})`
+      : isBillerSyncConfigured(settings) && `next ${describeNextRun(msUntilDue(settings))} while open`,
   ];
 
   // Data with no fetcher behind it renders a dashboard that quietly stops
