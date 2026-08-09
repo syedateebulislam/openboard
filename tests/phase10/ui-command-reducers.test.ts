@@ -25,6 +25,19 @@ describe('setup reducer', () => {
     expect(state.step).toBe('vercel');
     expect(setupWizardNavigationReducer(state, { type: 'vercel_complete' }).step).toBe('credentials');
   });
+
+  it('walks hybrid-local through GitHub and Vercel too — it deploys', () => {
+    expect(visibleWizardSteps('hybrid-local')).toEqual(['mode', 'llm', 'github', 'vercel', 'credentials']);
+    let state = setupWizardNavigationReducer(
+      { step: 'mode', mode: 'local' },
+      { type: 'select_mode', mode: 'hybrid-local' },
+    );
+    state = setupWizardNavigationReducer(state, { type: 'llm_complete' });
+    expect(state.step).toBe('github');
+    state = setupWizardNavigationReducer(state, { type: 'github_complete' });
+    expect(state.step).toBe('vercel');
+    expect(setupWizardNavigationReducer(state, { type: 'vercel_complete' }).step).toBe('credentials');
+  });
 });
 
 describe('project command handlers', () => {

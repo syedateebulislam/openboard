@@ -9,6 +9,7 @@ import type { DashboardUpdateResult } from './services/project/DashboardUpdateSe
 import type { PipelineEvent, PipelineEventSink } from './services/project/pipelinePhases.js';
 import { TOTAL_STEPS, phaseStep, phaseStepLabel } from './services/project/pipelinePhases.js';
 import { classifyAgentError } from './utils/errorCodes.js';
+import { modeAllowsDeploy } from './config/appModes.js';
 import type { BoardConfig } from './types/board.js';
 import type { SetupPartResult } from './services/config/SetupService.js';
 import { bannerVersionLine } from './version.js';
@@ -42,6 +43,7 @@ const cli = meow(`
                         shopping, subscriptions, utilities, invoices, custom
     --prompt            User prompt for initial generation or dashboard update
     --mode              App mode (agent setup): local (Ollama/LM Studio + local preview),
+                        hybrid-local (Ollama/LM Studio + GitHub + live Vercel web app),
                         hybrid (cloud LLM + local preview), remote (cloud LLM +
                         GitHub + live Vercel web app)
     --effort            LLM execution effort: low, medium, high, max (agent setup)
@@ -66,6 +68,7 @@ const cli = meow(`
     $ openboard agent setup mode --mode local
     $ openboard agent setup all --mode remote --provider openai --api-key sk-... --github-token ghp_... --vercel-token ... --username admin --password secret123
     $ openboard agent setup all --mode local --provider ollama --username admin --password secret123
+    $ openboard agent setup all --mode hybrid-local --provider ollama --github-token ghp_... --vercel-token ... --username admin --password secret123
     $ openboard agent setup status --json
     $ openboard agent create --data ./data/uber.csv --name "Uber Data" --json
     $ openboard agent update --dashboard uber-data --prompt "Add a monthly trend chart"
@@ -472,7 +475,7 @@ if (!command || command === 'start') {
       else {
         console.log(`Mode: ${status.modeDescription}`);
         console.log(`LLM: ${status.llm ? `${status.llm.provider} (${status.llm.model ?? 'default'}, effort: ${status.llm.effort ?? 'medium'})` : 'not configured'}`);
-        if (status.mode === 'remote') {
+        if (modeAllowsDeploy(status.mode)) {
           console.log(`GitHub: ${status.github ? status.github.username ?? 'configured' : 'not configured'}`);
           console.log(`Vercel: ${status.vercel ? 'configured' : 'not configured'}`);
         } else {

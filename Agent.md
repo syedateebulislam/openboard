@@ -15,7 +15,7 @@ openboard agent update --dashboard "uber-rides" --prompt "Add a monthly trend ch
 
 Parse stdout JSON for `success`, `dashboardSelector`, `deployUrl`, and `errorCode` on failure. Progress streams to stderr.
 
-Mode note: in `local` and `hybrid` app modes the pipeline intentionally ends after the local build — `deployUrl` is absent and the GitHub/Vercel phases are skipped. Only `remote` mode produces a live URL.
+Mode note: in the `local` and `hybrid` app modes the pipeline intentionally ends after the local build — `deployUrl` is absent and the GitHub/Vercel phases are skipped. The `hybrid-local` and `remote` modes produce a live URL.
 
 ---
 
@@ -42,15 +42,18 @@ OpenBoard is configured around an **app mode** — set it first, because it deci
 | Mode | LLM | Output | GitHub/Vercel |
 |---|---|---|---|
 | `local` | Ollama or LM Studio (on-machine) | Local preview only | Not used — refused by setup |
+| `hybrid-local` | Ollama or LM Studio (on-machine) | Live Vercel web app | Required |
 | `hybrid` | Any cloud provider | Local preview only | Not used — refused by setup |
-| `remote` | Any provider | Live Vercel web app | Required |
+| `remote` | Any cloud provider | Live Vercel web app | Required |
+
+The mode is two independent axes — where the LLM runs and whether the pipeline deploys. `local`/`hybrid-local` accept only `ollama` and `lmstudio`; `hybrid`/`remote` accept only cloud providers and refuse the local ones. A provider that does not fit is refused with an error naming the mode that does fit.
 
 An agent can set everything up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
 
-- App mode: `openboard agent setup mode --mode local|hybrid|remote` (unset behaves as `remote`).
-- LLM provider: OpenAI API, OpenAI Codex login, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, Ollama, or LM Studio (`local` mode: Ollama/LM Studio only).
-- GitHub token or authenticated GitHub CLI (`remote` mode only).
-- Vercel token or Vercel Git integration (`remote` mode only).
+- App mode: `openboard agent setup mode --mode local|hybrid-local|hybrid|remote` (unset behaves as `remote`).
+- LLM provider: OpenAI API, OpenAI Codex login, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, Ollama, or LM Studio (`local`/`hybrid-local` modes: Ollama/LM Studio only).
+- GitHub token or authenticated GitHub CLI (`hybrid-local`/`remote` modes only).
+- Vercel token or Vercel Git integration (`hybrid-local`/`remote` modes only).
 - Dashboard login credentials.
 
 Install from npm (the package is `openboard-cli`; the installed command is `openboard`):
@@ -97,11 +100,16 @@ openboard agent setup all --mode local --provider lmstudio \
   --base-url "http://127.0.0.1:1234/v1" \
   --username admin --password "at-least-8-chars" --json
 
+# Local LLM, but still deployed — nothing is sent to an LLM vendor:
+openboard agent setup all --mode hybrid-local --provider ollama \
+  --github-token "ghp_..." --vercel-token "..." \
+  --username admin --password "at-least-8-chars" --json
+
 # Or one piece at a time:
 openboard agent setup mode --mode hybrid
 openboard agent setup llm --provider anthropic --api-key "sk-ant-..."
-openboard agent setup github --github-token "ghp_..."     # remote mode only
-openboard agent setup vercel --vercel-token "..."          # remote mode only
+openboard agent setup github --github-token "ghp_..."     # deploying modes only
+openboard agent setup vercel --vercel-token "..."          # deploying modes only
 openboard agent setup dashboard --username admin --password "at-least-8-chars"
 openboard agent setup billers --scripts-dir "/path/to/invoice_fetchers" --biller-email "you@gmail.com" --biller-app-password "..."
 openboard agent setup status --json
@@ -175,7 +183,7 @@ Flags:
 
 | Flag | For | Meaning |
 |---|---|---|
-| `--mode` | mode | `local` (Ollama/LM Studio + local preview), `hybrid` (cloud LLM + local preview), `remote` (cloud LLM + GitHub + live Vercel app) |
+| `--mode` | mode | `local` (Ollama/LM Studio + local preview), `hybrid-local` (Ollama/LM Studio + GitHub + live Vercel app), `hybrid` (cloud LLM + local preview), `remote` (cloud LLM + GitHub + live Vercel app) |
 | `--provider` | llm | `openai`, `openai-codex`, `anthropic`, `gemini`, `moonshot`, `xai`, `mistral`, `openrouter`, `ollama`, or `lmstudio` |
 | `--model` | llm | Optional; a sensible default is used per provider |
 | `--api-key` | llm | API key (not needed for `ollama` or `lmstudio`; for `openai-codex` it triggers a headless `codex login --with-api-key`) |

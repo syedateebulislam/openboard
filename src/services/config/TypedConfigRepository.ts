@@ -1,5 +1,5 @@
 import { defaultModelFor, normalizeEffort } from '../../config/llmCatalog.js';
-import { getAppMode, providerAllowedInMode } from '../../config/appModes.js';
+import { getAppMode, providerAllowedInMode, providerModeMismatchMessage } from '../../config/appModes.js';
 import type { AppMode } from '../../config/appModes.js';
 import type { LLMConfig, LLMProviderName } from '../../types/llm.js';
 import {
@@ -47,13 +47,7 @@ export class TypedConfigRepository {
     if (!llm) throw new Error('No LLM provider configured. Configure LLM settings first.');
     const mode = getAppMode(this.store);
     if (!providerAllowedInMode(llm.provider, mode)) {
-      const guidance = mode === 'local'
-        ? 'Local only mode generates with Ollama or LM Studio on your machine.'
-        : 'Hybrid mode supports cloud LLM providers only; choose Local only or All remote to use a local provider.';
-      throw new Error(
-        `LLM provider "${llm.provider}" is not allowed in ${mode} mode — ${guidance} ` +
-        'Switch the provider (Settings > Update LLM provider) or change the mode (Settings > App mode).',
-      );
+      throw new Error(providerModeMismatchMessage(llm.provider, mode));
     }
     return llm;
   }

@@ -74,19 +74,26 @@ what you will get at the end — and what leaves your machine:
 
 1. **Local only** — local LLM (Ollama or LM Studio) + local preview only. Nothing leaves
    your machine: no cloud LLM, no GitHub, no Vercel.
-2. **Hybrid** — cloud LLM (Codex/Claude/GPT/…) + local preview only. Prompts
-   and data summaries go to your LLM provider; no GitHub push, no live
+2. **Hybrid (local LLM)** — local LLM (Ollama or LM Studio) + GitHub + a live
+   Vercel web app. Generation stays on your machine — no prompts or data
+   summaries reach an LLM provider — and only the built dashboard and its data
+   are published. Pick this when you want a URL you can open on your phone but
+   your data must never reach an LLM vendor.
+3. **Hybrid (cloud LLM)** — cloud LLM (Codex/Claude/GPT/…) + local preview only.
+   Prompts and data summaries go to your LLM provider; no GitHub push, no live
    deployment.
-3. **All remote** — cloud LLM + GitHub + a live Vercel web app.
+4. **All remote** — cloud LLM + GitHub + a live Vercel web app.
 
-Privacy-conscious users should pick Local only or Hybrid; the deploy/push
-features simply do not exist in those modes.
+The two axes are independent: modes 1 and 2 keep generation on your machine,
+modes 1 and 3 publish nothing. Deploy/push simply do not exist in modes 1 and 3,
+and the cloud providers are not offered in modes 1 and 2.
 
 After the mode, the wizard walks through the steps that apply:
 
-1. LLM provider (Local only mode offers Ollama and LM Studio)
-2. GitHub token *(All remote mode only)*
-3. Vercel token *(All remote mode only)*
+1. LLM provider (the local-LLM modes offer Ollama and LM Studio; the cloud modes
+   offer the cloud providers)
+2. GitHub token *(the deploying modes only)*
+3. Vercel token *(the deploying modes only)*
 4. Dashboard login credentials
 
 Supported LLM providers:
@@ -109,8 +116,12 @@ catalog. It was reviewed against provider documentation on July 18, 2026;
 actual availability can still vary by API account, plan, and region.
 
 The mode and every setting can be changed later from Settings (Settings > App
-mode). Switching to All remote later asks for GitHub/Vercel tokens; switching
-to Local only requires either the Ollama or LM Studio provider.
+mode). Switching to a deploying mode later asks for GitHub/Vercel tokens;
+switching to a local-LLM mode requires either the Ollama or LM Studio provider.
+If your configured provider does not fit the new mode, Settings says so and
+names the mode that does fit — for example, All remote with Ollama configured
+points you at Hybrid (local LLM), which is the same setup with the provider
+allowed.
 
 ## Create A Dashboard
 
@@ -258,7 +269,7 @@ Removing a dashboard runs a full cleanup so the deployed app matches the registr
 2. Deletes the dashboard's orphaned component files that no remaining dashboard uses.
 3. Deletes the dashboard's protected API data (`api/_data/<slug>.json` and its entry in the shared data module).
 4. Removes it from the OpenBoard registry and removes its local prompt-history file.
-5. Refreshes the master Overview tab, then rebuilds (and pushes/deploys in All remote mode).
+5. Refreshes the master Overview tab, then rebuilds (and pushes/deploys in the deploying modes).
 
 If code cleanup fails, the dashboard is left registered so the live app is never left half-removed. Removing the last dashboard restores the empty starter app.
 
@@ -278,8 +289,8 @@ Settings supports:
 
 - App mode
 - LLM provider
-- GitHub token *(All remote mode only)*
-- Vercel token *(All remote mode only)*
+- GitHub token *(the deploying modes only)*
+- Vercel token *(the deploying modes only)*
 - Dashboard login
 - Re-run onboarding
 

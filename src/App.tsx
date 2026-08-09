@@ -32,6 +32,7 @@ import {
   getAppMode,
   modeAllowsDeploy,
   providerAllowedInMode,
+  providerModeMismatchMessage,
   type AppMode,
 } from './config/appModes.js';
 import { DEFAULT_MODELS, LLM_PROVIDER_CHOICES, MODEL_CHOICES } from './config/llmCatalog.js';
@@ -68,7 +69,7 @@ const SETTINGS_DETAIL: Record<string, string> = {
   back: 'Return to the main menu.',
 };
 
-function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [highlighted, setHighlighted] = useState('mode');
 
   useInput((_input, key) => {
@@ -78,8 +79,9 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
   const mode = getAppMode();
   const remote = modeAllowsDeploy(mode);
 
-  // GitHub/Vercel tokens only matter in All remote mode — hiding them keeps
-  // the privacy contract visible: local/hybrid never talk to GitHub/Vercel.
+  // GitHub/Vercel tokens only matter in the deploying modes — hiding them keeps
+  // the privacy contract visible: the preview-only modes never talk to
+  // GitHub/Vercel.
   const items = [
     { label: 'App mode', value: 'mode' },
     { label: 'LLM provider', value: 'llm' },
@@ -120,7 +122,7 @@ function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [status, setStatus] = useState('');
   // Detail for the highlighted option renders below the list — each mode is
   // described once instead of a legend duplicating the select entries.
@@ -149,10 +151,10 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
     const notes: string[] = [`Mode set to: ${describeAppMode(selected)}`];
     const provider = config.get('llm.provider') as string | undefined;
     if (provider && !providerAllowedInMode(provider, selected)) {
-      notes.push(`Your LLM provider "${provider}" is not available in this mode — update it under Settings > Update LLM provider (Ollama and LM Studio run locally).`);
+      notes.push(providerModeMismatchMessage(provider, selected));
     }
     if (modeAllowsDeploy(selected) && !config.has('vercel.token')) {
-      notes.push('All remote mode needs GitHub/Vercel tokens — add them in Settings.');
+      notes.push(`${appModeInfo(selected).label} mode needs GitHub/Vercel tokens — add them in Settings.`);
     }
     setStatus(notes.join('\n'));
   };
@@ -182,7 +184,7 @@ function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   );
 }
 
-function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [step, setStep] = useState<'username' | 'password'>('username');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -259,7 +261,7 @@ function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) => void
   );
 }
 
-function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -332,7 +334,7 @@ const LLM_PROVIDER_ITEMS: Array<{ label: string; value: LLMProviderName | 'back'
   { label: '← Go Back', value: 'back' },
 ];
 
-function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [step, setStep] = useState<LLMSettingsStep>('provider');
   const [provider, setProvider] = useState<LLMProviderName>('openai');
   const [apiKey, setApiKey] = useState('');
@@ -513,7 +515,7 @@ function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   );
 }
 
-function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -568,7 +570,7 @@ function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) => void }
   );
 }
 
-function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+export function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   useInput((_input, key) => {
     if (key.escape) onNavigate('welcome');
   });

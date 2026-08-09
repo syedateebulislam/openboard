@@ -550,7 +550,13 @@
 .card + .card,
 .grid-2 + .card, .grid-3 + .card, .grid-4 + .card,
 .card + .grid-2, .card + .grid-3, .card + .grid-4 { margin-top: 1.5rem; }
-/* KPI cards in a grid row are always equal-sized — never let one span wider. */
+/* ...but inside a grid the `gap` already does that spacing, and the rule above
+   would also match card siblings in a grid row. Because grid cells stretch to
+   the tallest item, that margin pushes every card after the first down inside
+   its own cell — leaving the first card visibly taller than the rest of the
+   row. Reset it so a row of cards reads as one band. */
+.grid-2 > .card, .grid-3 > .card, .grid-4 > .card { margin-top: 0; }
+/* Cards in a grid row are always equal-sized — never let one span wider. */
 .grid-2 > .kpi-card, .grid-3 > .kpi-card, .grid-4 > .kpi-card {
   grid-column: span 1 !important;
   min-width: 0;

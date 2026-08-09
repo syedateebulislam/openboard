@@ -1,8 +1,9 @@
 /**
  * Phase 11 — headless mode setup (`openboard agent setup mode`).
  *
- * The mode gates every later setup part: local restricts the LLM to Ollama or LM Studio,
- * and local/hybrid refuse GitHub/Vercel tokens (they are never used).
+ * The mode gates every later setup part along two axes: local/hybrid-local restrict the
+ * LLM to Ollama or LM Studio, hybrid/remote restrict it to cloud providers, and
+ * local/hybrid refuse GitHub/Vercel tokens (they are never used).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -57,7 +58,7 @@ describe('SetupService modes', () => {
       const r = setup.configureMode('cloudy');
       expect(r.configured).toBe(false);
       expect(r.errorCode).toBe('E_VALIDATION');
-      expect(r.error).toContain('local, hybrid, remote');
+      expect(r.error).toContain('local, hybrid-local, hybrid, remote');
     });
 
     it('warns when the saved provider conflicts with the new mode', () => {
@@ -105,13 +106,40 @@ describe('SetupService modes', () => {
       expect(vercel.error).toContain('hybrid');
     });
 
-    it('remote mode keeps the full pipeline configurable', async () => {
+    it('hybrid-local mode takes a local LLM and GitHub/Vercel tokens', async () => {
+      const { setup } = newService();
+      setup.configureMode('hybrid-local');
+
+      expect((await setup.configureLLM({ provider: 'ollama' })).configured).toBe(true);
+
+      const cloud = await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' });
+      expect(cloud.configured).toBe(false);
+      expect(cloud.error).toContain('All remote');
+
+      expect((await setup.configureGitHub('ghp_token')).configured).toBe(true);
+      expect((await setup.configureVercel('vc_token')).configured).toBe(true);
+    });
+
+    it('remote mode keeps the full pipeline configurable, cloud LLMs only', async () => {
       const { setup } = newService();
       setup.configureMode('remote');
 
       expect((await setup.configureLLM({ provider: 'openai', apiKey: 'sk-test' })).configured).toBe(true);
       expect((await setup.configureGitHub('ghp_token')).configured).toBe(true);
       expect((await setup.configureVercel('vc_token')).configured).toBe(true);
+
+      // Local LLM + deploy is hybrid-local's cell now; the refusal says so.
+      const ollama = await setup.configureLLM({ provider: 'ollama' });
+      expect(ollama.configured).toBe(false);
+      expect(ollama.error).toContain('Hybrid (local LLM)');
+    });
+
+    it('refusing GitHub points at the deploying mode on the same LLM axis', async () => {
+      const { setup } = newService();
+      setup.configureMode('local');
+      const github = await setup.configureGitHub('ghp_token');
+      expect(github.configured).toBe(false);
+      expect(github.error).toContain('--mode hybrid-local');
     });
 
     it('unset mode behaves as remote (backward compatible)', async () => {

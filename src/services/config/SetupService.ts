@@ -20,11 +20,14 @@ import type { LLMConfig, LLMEffort } from '../../types/llm.js';
 import { LLM_EFFORTS, LLM_PROVIDER_NAMES, defaultModelFor, isValidEffort } from '../../config/llmCatalog.js';
 import {
   APP_MODE_IDS,
+  allowedProvidersForMode,
+  deployModeSuggestion,
   describeAppMode,
   getAppMode,
   isValidAppMode,
   modeAllowsDeploy,
   providerAllowedInMode,
+  providerModeMismatchMessage,
   type AppMode,
 } from '../../config/appModes.js';
 import type { AgentErrorCode } from '../../utils/errorCodes.js';
@@ -161,10 +164,8 @@ export class SetupService {
 
     const provider = this.config.get('llm.provider') as string | undefined;
     if (provider && !providerAllowedInMode(provider, trimmed)) {
-      const recommendation = trimmed === 'local'
-        ? 'choose `ollama` or `lmstudio`'
-        : 'choose a cloud provider';
-      notes.push(`Warning: configured LLM provider "${provider}" is not allowed in this mode — ${recommendation}.`);
+      const allowed = allowedProvidersForMode(trimmed).map((p) => `\`${p}\``).join(' or ');
+      notes.push(`Warning: configured LLM provider "${provider}" is not allowed in this mode — choose ${allowed}.`);
     }
     return { configured: true, detail: `Mode set to ${trimmed} (${notes.join(' ')})` };
   }
@@ -177,12 +178,9 @@ export class SetupService {
 
     const mode = getAppMode(this.config);
     if (!providerAllowedInMode(provider, mode)) {
-      const guidance = mode === 'local'
-        ? 'Local only mode uses Ollama or LM Studio.'
-        : 'Hybrid mode lists cloud LLM providers only; local providers are available in Local only and All remote modes.';
       return {
         configured: false,
-        error: `Provider "${provider}" is not allowed in ${mode} mode — ${guidance}`,
+        error: providerModeMismatchMessage(provider, mode),
         errorCode: 'E_VALIDATION',
       };
     }
@@ -254,7 +252,7 @@ export class SetupService {
     if (!modeAllowsDeploy(mode)) {
       return {
         configured: false,
-        error: `GitHub is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode remote.`,
+        error: `GitHub is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode ${deployModeSuggestion(mode).id}.`,
         errorCode: 'E_VALIDATION',
       };
     }
@@ -277,7 +275,7 @@ export class SetupService {
     if (!modeAllowsDeploy(mode)) {
       return {
         configured: false,
-        error: `Vercel is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode remote.`,
+        error: `Vercel is not used in ${mode} mode (${describeAppMode(mode)}). Switch first: openboard agent setup mode --mode ${deployModeSuggestion(mode).id}.`,
         errorCode: 'E_VALIDATION',
       };
     }

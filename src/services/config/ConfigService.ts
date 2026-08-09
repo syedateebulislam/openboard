@@ -26,9 +26,12 @@ import { LLM_PROVIDER_NAMES } from '../../config/llmCatalog.js';
 
 const LLMProviderSchema = z.enum(LLM_PROVIDER_NAMES as [string, ...string[]]);
 
-// Privacy modes: local (Ollama/LM Studio + local preview), hybrid (cloud LLM + local
-// preview), remote (cloud LLM + GitHub + Vercel). See src/config/appModes.ts.
-const AppModeSchema = z.enum(['local', 'hybrid', 'remote']);
+// Privacy modes: local (local LLM + local preview), hybrid-local (local LLM + GitHub +
+// Vercel), hybrid (cloud LLM + local preview), remote (cloud LLM + GitHub + Vercel).
+// Kept as a literal rather than derived from APP_MODE_IDS: appModes.ts imports this
+// module, so importing it back would be circular. Keep the two lists in sync.
+// See src/config/appModes.ts.
+const AppModeSchema = z.enum(['local', 'hybrid-local', 'hybrid', 'remote']);
 
 const AppModeConfigSchema = z.object({
   mode: AppModeSchema.optional(),
