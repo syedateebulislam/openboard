@@ -181,6 +181,32 @@ export class ScreenAudit {
         }).length,
         tableCount: tables.length,
         emptyTables: tables.filter((table) => table.querySelectorAll('tbody tr').length === 0).length,
+        // Cards sharing a grid row must share a top edge. Grid cells stretch to
+        // the tallest item, so a stray top margin on a card does not move the
+        // row — it shortens that card inside its own cell, and the one card
+        // without the margin reads as oversized. Rows are grouped by bottom
+        // edge because that is the part stretching keeps identical; a card
+        // deliberately not stretched lands in a group of one and is ignored,
+        // as is every card in a single-column (mobile) layout.
+        misalignedRows: (() => {
+          const skews: number[] = [];
+          for (const grid of document.querySelectorAll('.grid-2, .grid-3, .grid-4')) {
+            const rows = new Map<number, number[]>();
+            for (const child of [...grid.children]) {
+              if (!child.classList.contains('card') || !visible(child)) continue;
+              const rect = child.getBoundingClientRect();
+              const key = Math.round(rect.bottom);
+              if (!rows.has(key)) rows.set(key, []);
+              rows.get(key)!.push(Math.round(rect.top));
+            }
+            for (const tops of rows.values()) {
+              if (tops.length < 2) continue;
+              const skew = Math.max(...tops) - Math.min(...tops);
+              if (skew > 1) skews.push(skew);
+            }
+          }
+          return skews;
+        })(),
         // Horizontal overflow: the page itself scrolling sideways is a layout
         // bug; an inner container with its own overflow-x is intentional.
         docScrollWidth: document.documentElement.scrollWidth,
@@ -220,6 +246,16 @@ export class ScreenAudit {
     if (probe.emptyTables > 0) {
       // A table with no rows and no empty state looks identical to one still loading.
       add('warning', 'empty-table', `${probe.emptyTables} of ${probe.tableCount} tables have no rows.`);
+    }
+
+    if (probe.misalignedRows.length > 0) {
+      const worst = Math.max(...probe.misalignedRows);
+      add(
+        'error',
+        'misaligned-card-row',
+        `${probe.misalignedRows.length} card row(s) have uneven top edges (worst ${worst}px) — ` +
+          'one card in the row renders taller than its neighbours.',
+      );
     }
 
     if (probe.docScrollWidth > probe.docClientWidth + 2) {
