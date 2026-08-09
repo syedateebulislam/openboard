@@ -1,9 +1,9 @@
 /**
  * Shared types for the biller invoice-fetcher integration.
  *
- * OpenBoard does not parse invoice mail itself: it drives a folder of external,
+ * OpenBoardCLI does not parse invoice mail itself: it drives a folder of external,
  * per-biller Python fetchers (one dedicated `fetch_<biller>.py` per biller) that
- * read Gmail over IMAP and append rows to a per-biller CSV. OpenBoard owns
+ * read Gmail over IMAP and append rows to a per-biller CSV. OpenBoardCLI owns
  * discovery, enablement, scheduling, and turning changed CSVs into dashboards.
  *
  * This is deliberately independent of the Gmail OAuth integration in
@@ -19,7 +19,7 @@ import type { BoardConfig } from './board.js';
 /**
  * Canonical home for the fetcher scripts.
  *
- * Nesting them under OpenBoard's own state directory keeps everything the
+ * Nesting them under OpenBoardCLI's own state directory keeps everything the
  * feature owns in one place, and the depth is deliberate: the scripts derive
  * their paths from `parents[2]`, so this puts their credentials at
  * <base>/billers/secrets/ and their CSVs at <base>/billers/data/invoices/
@@ -49,7 +49,7 @@ export interface BillerSettings {
   scriptsDir?: string;
   /** Gmail address the fetchers log in as. */
   email?: string;
-  /** Gmail App Password (16 chars, no spaces). Stored encrypted in OpenBoard config. */
+  /** Gmail App Password (16 chars, no spaces). Stored encrypted in OpenBoardCLI config. */
   appPassword?: string;
   /** Biller keys the user has switched on. Empty means nothing runs. */
   enabledKeys: string[];
@@ -88,7 +88,7 @@ export interface BillerRunResult {
  * Results from one request to run enabled billers.
  *
  * It remains an array so existing callers can iterate the biller outcomes, but
- * records when no outcome exists because another OpenBoard process owns the
+ * records when no outcome exists because another OpenBoardCLI process owns the
  * project lock. An empty array alone is ambiguous: it can also mean that no
  * billers are enabled.
  */

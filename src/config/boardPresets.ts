@@ -1,5 +1,5 @@
 /**
- * Board preset definitions for OpenBoard.
+ * Board preset definitions for OpenBoardCLI.
  * Each preset provides a domain-specific starting configuration:
  * default LLM prompt, data column hints, and UI metadata.
  */

@@ -137,7 +137,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     newMsg(
       'system',
-      'Add a biller by showing OpenBoard one of its emails.\n\nEnter the address these receipts arrive from — for example noreply@bigbasket.com.',
+      'Add a biller by showing OpenBoardCLI one of its emails.\n\nEnter the address these receipts arrive from — for example noreply@bigbasket.com.',
     ),
   ]);
   const [stage, setStage] = useState<Stage>('sender');
@@ -305,7 +305,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
             if (!compiled.ok) return `py_compile failed:\n${compiled.error}`;
 
             if (!writer.isDiscoverable(writtenPath, settings.scriptsDir!, proposalValue.key)) {
-              return 'The script compiled but OpenBoard cannot discover it. KEY and DISPLAY_NAME must be plain string literals at the start of a line.';
+              return 'The script compiled but OpenBoardCLI cannot discover it. KEY and DISPLAY_NAME must be plain string literals at the start of a line.';
             }
 
             // Grade against the sample first: it is offline, deterministic, and
@@ -489,7 +489,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
       >
         <Text bold color={UI_COLORS.logo}>Biller Studio</Text>
         <Text color={UI_COLORS.subtitle}>LLM - {providerName}</Text>
-        <Text color={UI_COLORS.subtitle}>Teach OpenBoard a new invoice source from one sample email</Text>
+        <Text color={UI_COLORS.subtitle}>Teach OpenBoardCLI a new invoice source from one sample email</Text>
       </Box>
 
       <Box height={logHeight} overflow="hidden">

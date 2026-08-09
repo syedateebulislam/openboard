@@ -169,7 +169,7 @@ describe('Biller invoice fetchers', () => {
       expect(String(config.getRaw('billers.appPassword'))).toMatch(/^enc:/);
     });
 
-    it('defaults the scripts folder inside OpenBoard, at the depth the scripts expect', () => {
+    it('defaults the scripts folder inside OpenBoardCLI, at the depth the scripts expect', () => {
       // The scripts resolve their paths from parents[2], so the default must sit
       // exactly two levels below the folder that should hold secrets/ and data/.
       const dir = defaultScriptsDir();

@@ -10,7 +10,7 @@ import { summariseFailures } from '../../src/utils/summariseFailures.js';
 
 describe('summariseFailures', () => {
   it('collapses one shared cause into a single counted entry', () => {
-    const locked = 'Project is locked by another OpenBoard run (pid 2700, since 2026-08-03T19:08:07.690Z).';
+    const locked = 'Project is locked by another OpenBoardCLI run (pid 2700, since 2026-08-03T19:08:07.690Z).';
     const line = summariseFailures(Array(9).fill(locked));
     expect(line).toBe(`${locked} (×9)`);
     // The observed report was this sentence nine times over.

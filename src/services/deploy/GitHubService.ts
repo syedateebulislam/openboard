@@ -73,7 +73,7 @@ async function getGitHubIdentityFromToken(): Promise<{ login: string; email: str
     const response = await fetch('https://api.github.com/user', {
       headers: {
         Authorization: `Bearer ${token}`,
-        'User-Agent': 'OpenBoard-TUI',
+        'User-Agent': 'OpenBoardCLI-TUI',
       },
     });
     if (!response.ok) return undefined;
@@ -146,7 +146,7 @@ export class GitHubService {
       const missing = patterns.filter(pattern => !existing.split(/\r?\n/).includes(pattern));
       if (missing.length > 0) {
         const block = [
-          '# OpenBoard: raw dashboard data is deployed via Vercel CLI upload but never pushed to GitHub.',
+          '# OpenBoardCLI: raw dashboard data is deployed via Vercel CLI upload but never pushed to GitHub.',
           ...missing,
         ].join('\n');
         const next = existing.length > 0 && !existing.endsWith('\n')
@@ -192,12 +192,16 @@ export class GitHubService {
         success: false,
         error: [
           'Git commit email is not configured.',
-          'Set a valid Git email with `git config --global user.email "you@example.com"` or save a GitHub token in OpenBoard Settings.',
+          'Set a valid Git email with `git config --global user.email "you@example.com"` or save a GitHub token in OpenBoardCLI Settings.',
         ].join(' '),
       };
     }
 
-    const name = configuredName && configuredName !== 'OpenBoard' ? configuredName : author.login;
+    // Both spellings are our own placeholder, never a real author: `OpenBoard`
+    // is what older versions wrote into git config, so it still has to be
+    // recognised or those repos keep committing under the placeholder.
+    const isPlaceholderName = configuredName === 'OpenBoardCLI' || configuredName === 'OpenBoard';
+    const name = configuredName && !isPlaceholderName ? configuredName : author.login;
     let result = await runGitCommand(['config', 'user.name', name], projectDir, 5_000);
     if (result.code !== 0) return { success: false, error: result.stderr || result.stdout };
 
@@ -270,7 +274,7 @@ export class GitHubService {
     if (!authorResult.success) return authorResult;
 
     const commitResult = await runGitCommand(
-      ['commit', '--allow-empty', '-m', 'Fix OpenBoard deployment author'],
+      ['commit', '--allow-empty', '-m', 'Fix OpenBoardCLI deployment author'],
       projectDir,
       30_000,
       onProgress,

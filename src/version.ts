@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the OpenBoard version.
+ * Single source of truth for the OpenBoardCLI version.
  *
  * Read straight from package.json so the banner (TUI welcome screen and the
  * `--version` flag) can never drift from the published package version again.

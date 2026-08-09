@@ -38,7 +38,7 @@ function DashboardContent() {
           aria-label="Go to home tab"
         >
           <BrandLogo />
-          <h1 className="app-title">OpenBoard</h1>
+          <h1 className="app-title">OpenBoardCLI</h1>
         </button>
         <div className="app-header-side app-header-actions">
           <span className="app-greeting">
@@ -57,7 +57,7 @@ function DashboardContent() {
             <p className="kpi-label">Welcome</p>
             <p className="kpi-value">Dashboard Ready</p>
             <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-              Your OpenBoard master UI is ready. Add dashboards as tabs from OpenBoard.
+              Your OpenBoardCLI master UI is ready. Add dashboards as tabs from OpenBoardCLI.
             </p>
           </div> : (
             <ErrorBoundary key={activeTab} tabLabel={tabs.find((tab) => tab.id === activeTab)?.label}>

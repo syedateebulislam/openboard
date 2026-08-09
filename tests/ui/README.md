@@ -1,6 +1,6 @@
 # UI flow tests
 
-Drives a **real browser** over a generated OpenBoard app: every dashboard tab, at
+Drives a **real browser** over a generated OpenBoardCLI app: every dashboard tab, at
 several viewports and both themes, capturing a screenshot per screen and running
 machine-checkable assertions against it.
 
@@ -83,7 +83,7 @@ The richest installed workspace under `projects/` wins. Override with:
 OPENBOARD_UI_WORKSPACE="C:/path/to/workspace" npm run test:ui
 ```
 
-**Close OpenBoard first**, or let its fetch finish. It regenerates dashboards in
+**Close OpenBoardCLI first**, or let its fetch finish. It regenerates dashboards in
 place, and a suite photographing a directory being rewritten underneath it
 produces diffs nobody can reproduce. A smoke test warns when the manifest was
 touched in the last minute.

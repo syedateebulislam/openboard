@@ -1,5 +1,5 @@
 /**
- * SetupWizard — mode-first TUI setup wizard for OpenBoard initial configuration.
+ * SetupWizard — mode-first TUI setup wizard for OpenBoardCLI initial configuration.
  *
  * Guides the user through:
  *  Step 1: App mode — Local only / Hybrid (local LLM) / Hybrid (cloud LLM) /
@@ -777,7 +777,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
         } else {
           setStep1Validation({
             status: 'error',
-            message: result.error ?? 'Codex login failed. Re-select OpenAI Codex here to retry — OpenBoard signs in to its own codex home.',
+            message: result.error ?? 'Codex login failed. Re-select OpenAI Codex here to retry — OpenBoardCLI signs in to its own codex home.',
           });
         }
         return;
@@ -849,7 +849,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       const response = await fetch('https://api.github.com/user', {
         headers: {
           Authorization: `Bearer ${githubToken.trim()}`,
-          'User-Agent': 'OpenBoard-TUI',
+          'User-Agent': 'OpenBoardCLI-TUI',
         },
       });
 
@@ -981,7 +981,7 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
       {/* Title */}
       <Box marginBottom={1}>
         <Text bold color={UI_COLORS.logo}>
-          ⚡ OpenBoard Setup Wizard
+          ⚡ OpenBoardCLI Setup Wizard
         </Text>
       </Box>
 

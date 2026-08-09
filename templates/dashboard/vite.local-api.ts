@@ -80,7 +80,7 @@ async function handleAuth(req: IncomingMessage, res: ServerResponse, env: LocalE
   const password = typeof body.password === 'string' ? body.password : ''
   const hash = passwordHash(env)
   if (!env.DASHBOARD_USERNAME || !hash || !env.JWT_SECRET) {
-    send(res, 500, { error: 'Local preview credentials are not configured. Restart preview from OpenBoard.' })
+    send(res, 500, { error: 'Local preview credentials are not configured. Restart preview from OpenBoardCLI.' })
     return
   }
 

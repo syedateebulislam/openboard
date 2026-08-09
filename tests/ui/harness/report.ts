@@ -54,7 +54,7 @@ export function writeReport(): { records: ScreenRecord[]; errors: number; warnin
   writeFileSync(join(UI_OUT, 'ui-report.json'), JSON.stringify({ records, errors, warnings }, null, 2), 'utf-8');
 
   const lines: string[] = [
-    '# OpenBoard UI report',
+    '# OpenBoardCLI UI report',
     '',
     `${records.length} screens captured · **${errors} error(s)**, ${warnings} warning(s).`,
     '',

@@ -71,7 +71,7 @@ const DENIED_CONSTRUCTS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\b(shutil|ctypes|multiprocessing|threading)\b/, reason: 'system access' },
   { pattern: /\bbase64\b/, reason: 'base64 (obfuscation vector; no fetcher needs it)' },
   { pattern: /\bsetattr\s*\(\s*__builtins__/, reason: 'builtins tampering' },
-  // Only the two variables OpenBoard sets may be read. load_credentials() in
+  // Only the two variables OpenBoardCLI sets may be read. load_credentials() in
   // the skeleton needs them; anything else in the environment (other API keys,
   // tokens from the parent process) is none of a fetcher's business.
   { pattern: /\bos\s*\.\s*environ\b/, reason: 'reading environment variables other than its own credentials' },

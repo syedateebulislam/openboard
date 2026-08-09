@@ -1,5 +1,5 @@
 /**
- * Configuration type definitions for OpenBoard.
+ * Configuration type definitions for OpenBoardCLI.
  * These match the Zod schema in ConfigService.
  */
 

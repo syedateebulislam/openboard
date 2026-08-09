@@ -37,7 +37,7 @@ describe('classifyAgentError', () => {
     ['Missing required --data <csv|json> for agent create.', 'E_VALIDATION'],
     ['Dashboard not found: uber-rides', 'E_DASHBOARD_NOT_FOUND'],
     ['Run not found: run-2026-06-10-abc', 'E_RUN_NOT_FOUND'],
-    ['Project is locked by another OpenBoard run (pid 123, since ...)', 'E_LOCKED'],
+    ['Project is locked by another OpenBoardCLI run (pid 123, since ...)', 'E_LOCKED'],
     ['ENOENT: no such file or directory', 'E_DATA_NOT_FOUND'],
     ['No LLM provider configured. Configure LLM settings first.', 'E_NO_LLM'],
     ['LLM did not return any writable files.', 'E_LLM_EMPTY'],
@@ -306,9 +306,9 @@ describe('ProjectLockService', () => {
     expect(first.success).toBe(true);
     const second = ProjectLockService.acquire(projectDir);
     expect(second.success).toBe(false);
-    // Not "another OpenBoard run": it is this one, and saying otherwise sent a
+    // Not "another OpenBoardCLI run": it is this one, and saying otherwise sent a
     // user hunting for a second instance that did not exist.
-    expect(second.error).toContain('Another OpenBoard operation');
+    expect(second.error).toContain('Another OpenBoardCLI operation');
     first.release();
   });
 

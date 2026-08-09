@@ -1,14 +1,14 @@
 import { Globe, Github, Package } from 'lucide-react';
 
 /**
- * HeaderLinks — OpenBoard project links shown on the left side of the app
+ * HeaderLinks — OpenBoardCLI project links shown on the left side of the app
  * header. Shell component: never removed or rewritten by dashboard
  * generation; synced from the template on every deploy.
  */
 const LINKS = [
   {
     href: 'https://openboard-site.vercel.app/#human',
-    label: 'OpenBoard website',
+    label: 'OpenBoardCLI website',
     Icon: Globe,
   },
   {
@@ -25,7 +25,7 @@ const LINKS = [
 
 export function HeaderLinks() {
   return (
-    <nav className="header-links" aria-label="OpenBoard project links">
+    <nav className="header-links" aria-label="OpenBoardCLI project links">
       {LINKS.map(({ href, label, Icon }) => (
         <a
           key={href}

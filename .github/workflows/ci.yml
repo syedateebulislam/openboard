@@ -33,7 +33,7 @@ jobs:
       # Some unit tests commit inside scaffolded projects; runners ship with
       # no git identity, which ensureCommitAuthor correctly rejects.
       - run: |
-          git config --global user.name "OpenBoard CI"
+          git config --global user.name "OpenBoardCLI CI"
           git config --global user.email "ci@openboard.dev"
       - run: npm ci
       - run: npm run lint
@@ -57,7 +57,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: |
-          git config --global user.name "OpenBoard CI"
+          git config --global user.name "OpenBoardCLI CI"
           git config --global user.email "ci@openboard.dev"
       - run: npm ci
       - run: npm run test:integration

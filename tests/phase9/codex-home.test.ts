@@ -1,7 +1,7 @@
 /**
  * Phase 9 — OpenAI Codex auth isolation.
  *
- * OpenBoard runs codex with its own CODEX_HOME so its ChatGPT/Codex login is
+ * OpenBoardCLI runs codex with its own CODEX_HOME so its ChatGPT/Codex login is
  * not invalidated by OpenClaw or manual `codex` usage rotating a shared token.
  */
 

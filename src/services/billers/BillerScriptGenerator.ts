@@ -485,7 +485,7 @@ export class BillerScriptGenerator {
       'skeleton, so it must be complete and at the same indentation — a top-level',
       '`def` starts at column 0. Do not emit the marker comments themselves, and do',
       'not include imports, helpers, run() or main(): those are outside the regions',
-      'and are supplied by OpenBoard.',
+      'and are supplied by OpenBoardCLI.',
     ];
 
     const askForWholeFile = [
@@ -505,7 +505,7 @@ export class BillerScriptGenerator {
       '',
       isPdf
         ? 'This biller puts its receipt in a PDF attachment, so the reference below is the PDF-reading fetcher — it keeps a guarded pdfplumber import, an attachment loop and a dedupe on a business key.'
-        : 'This is the fetcher OpenBoard will build from.',
+        : 'This is the fetcher OpenBoardCLI will build from.',
       '',
       ...(names.length > 0 ? askForRegions : askForWholeFile),
       '',

@@ -121,7 +121,7 @@ export async function login(page: Page, session: Session): Promise<void> {
   await page.locator('#password').fill(session.password);
   await page.locator('button[type="submit"]').first().click();
   // The dashboard nav only exists once authenticated.
-  await page.waitForSelector('nav[aria-label="OpenBoard dashboards"]', { timeout: 20_000 });
+  await page.waitForSelector('nav[aria-label="OpenBoardCLI dashboards"]', { timeout: 20_000 });
 }
 
 /** CSS-escape an id that came from generated content. */
@@ -151,7 +151,7 @@ export async function openDashboard(page: Page, id: string): Promise<void> {
 
   if (!(await tab.isVisible().catch(() => false))) {
     // Try each category until the tab we want is revealed.
-    const groups = page.locator('nav[aria-label="OpenBoard dashboards"] .tab-group > button');
+    const groups = page.locator('nav[aria-label="OpenBoardCLI dashboards"] .tab-group > button');
     for (let index = 0; index < await groups.count(); index++) {
       await groups.nth(index).click();
       if (await tab.isVisible().catch(() => false)) break;

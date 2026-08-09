@@ -1,7 +1,7 @@
 /**
  * BillerDiscoveryService — find the per-biller invoice fetchers on disk.
  *
- * The scripts folder is user-configured and machine-specific (OpenBoard ships
+ * The scripts folder is user-configured and machine-specific (OpenBoardCLI ships
  * on npm; these scripts do not), and the user adds new `fetch_<biller>.py`
  * files over time, so the biller list is always discovered, never hardcoded.
  *
@@ -164,7 +164,7 @@ export function validateScriptsDir(scriptsDir: string): ScriptsDirValidation {
 }
 
 /**
- * Where the fetchers that ship with OpenBoard live inside the installed package.
+ * Where the fetchers that ship with OpenBoardCLI live inside the installed package.
  *
  * Same dev-vs-bundle split as the prompt loaders, but the depth is this file's,
  * not theirs: from dist/ the package root is one level up; from
@@ -216,14 +216,14 @@ export function installBundledScripts(targetDir: string): InstallResult {
 
 /**
  * The helper that reads credentials from the environment, inserted into
- * fetchers written before OpenBoard stopped using a plaintext file.
+ * fetchers written before OpenBoardCLI stopped using a plaintext file.
  */
 const LOAD_CREDENTIALS_HELPER = `
 
 def load_credentials() -> dict:
     """Gmail IMAP credentials, preferring the environment over the disk.
 
-    OpenBoard passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
+    OpenBoardCLI passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
     this process so the App Password never has to be written to a file. Running
     the script by hand still works: it falls back to the credentials JSON this
     fetcher has always read.
@@ -310,7 +310,7 @@ type FetcherMigration = (source: string, eol: Eol) => string | undefined;
 /**
  * Repair a fetcher damaged by the first version of the credentials migration,
  * which rewrote the call sites *after* inserting the helper and so rewrote the
- * helper's own fallback into a call to itself. Harmless under OpenBoard, which
+ * helper's own fallback into a call to itself. Harmless under OpenBoardCLI, which
  * sets the environment and returns before reaching it — but a standalone run
  * would recurse until it blew the stack.
  */
@@ -374,7 +374,7 @@ export function migrateFetcherSource(source: string): string | undefined {
  * Upgrade every installed fetcher that still expects the plaintext credentials
  * file.
  *
- * OpenBoard <= 1.9.0 wrote secrets/gmail_app_credentials.json and the fetchers
+ * OpenBoardCLI <= 1.9.0 wrote secrets/gmail_app_credentials.json and the fetchers
  * read it directly. That file is now deleted on sight, so a fetcher installed
  * before the change fails on every run with FileNotFoundError. installBundled
  * Scripts cannot help: it never overwrites, precisely so hand-edited fetchers

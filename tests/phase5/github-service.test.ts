@@ -147,7 +147,7 @@ describe('GitHubService', () => {
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess()); // git add .
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('M src/App.tsx')); // git status
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('openboard@local')); // git config --get user.email
-      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('OpenBoard')); // git config --get user.name
+      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('OpenBoardCLI')); // git config --get user.name
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess()); // git config user.name
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess()); // git config user.email
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('[main abc1234] Initial commit')); // commit
@@ -183,10 +183,10 @@ describe('GitHubService', () => {
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('')); // git status
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('openboard@local')); // git log author
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('openboard@local')); // git config --get user.email
-      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('OpenBoard')); // git config --get user.name
+      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('OpenBoardCLI')); // git config --get user.name
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess()); // git config user.name
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess()); // git config user.email
-      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('[main abc1234] Fix OpenBoard deployment author')); // empty commit
+      mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('[main abc1234] Fix OpenBoardCLI deployment author')); // empty commit
       mockCrossSpawn.mockResolvedValueOnce(mockSpawnSuccess('abc1234567890')); // rev-parse
 
       const result = await GitHubService.commit('/test/project', 'No changes');
@@ -195,7 +195,7 @@ describe('GitHubService', () => {
       expect(result.commitHash).toBe('abc1234567890');
       expect(mockCrossSpawn).toHaveBeenCalledWith(
         'git',
-        ['commit', '--allow-empty', '-m', 'Fix OpenBoard deployment author'],
+        ['commit', '--allow-empty', '-m', 'Fix OpenBoardCLI deployment author'],
         expect.objectContaining({ cwd: '/test/project', useShell: false }),
       );
     });

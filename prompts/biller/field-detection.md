@@ -1,4 +1,4 @@
-You are analysing one receipt/invoice email so OpenBoard can build a fetcher for it.
+You are analysing one receipt/invoice email so OpenBoardCLI can build a fetcher for it.
 
 The text below is the email body after `BeautifulSoup(html, "html.parser").get_text("\n", strip=True)`. That means every visual element became its own line, so **a label and its value are usually on separate lines**. Any regex you propose later must account for that.
 

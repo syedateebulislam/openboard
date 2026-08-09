@@ -1,5 +1,5 @@
 /**
- * logger.ts — Structured logger for OpenBoard TUI and services.
+ * logger.ts — Structured logger for OpenBoardCLI TUI and services.
  *
  * Writes to:
  *  - Terminal (via chalk, only when not in test mode)

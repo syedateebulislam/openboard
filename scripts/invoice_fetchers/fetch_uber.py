@@ -79,7 +79,7 @@ def read_json(path) -> dict:
 def load_credentials() -> dict:
     """Gmail IMAP credentials, preferring the environment over the disk.
 
-    OpenBoard passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
+    OpenBoardCLI passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
     this process so the App Password never has to be written to a file. Running
     the script by hand still works: it falls back to the credentials JSON this
     fetcher has always read.

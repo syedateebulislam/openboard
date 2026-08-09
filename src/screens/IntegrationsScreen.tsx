@@ -1,9 +1,9 @@
 /**
- * IntegrationsScreen — where OpenBoard's data comes from.
+ * IntegrationsScreen — where OpenBoardCLI's data comes from.
  *
  * Gmail is the only source today, so this is a one-row list. It exists as a
  * level anyway: invoice fetching was buried under Settings, which framed a
- * primary way of getting data into OpenBoard as a preference. With the parent
+ * primary way of getting data into OpenBoardCLI as a preference. With the parent
  * here, the next source is a new row rather than a reorganisation.
  */
 import React, { useState } from 'react';

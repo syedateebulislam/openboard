@@ -1,7 +1,7 @@
 /**
  * ProjectManager — Orchestrates per-board project lifecycle.
  *
- * In normal app usage, OpenBoard uses one shared deployable/runnable project
+ * In normal app usage, OpenBoardCLI uses one shared deployable/runnable project
  * folder inside `projects/`, then adds each dashboard as a tab in that app.
  * Tests and explicit callers can still pass a projectsRoot to exercise
  * per-board scaffolding behavior.
@@ -100,7 +100,7 @@ export class ProjectManager {
 
   constructor(projectsRoot?: string, templatesDir?: string) {
     this.sharedWorkspace = projectsRoot === undefined;
-    // Default: projects/ inside the OpenBoard root
+    // Default: projects/ inside the OpenBoardCLI root
     if (projectsRoot) {
       this.projectsRoot = projectsRoot;
     } else {
@@ -137,7 +137,7 @@ export class ProjectManager {
 
         await templateService.scaffold(projectDir, {
           boardName: this.sharedWorkspace ? 'openboard-workspace' : board.name,
-          boardTitle: this.sharedWorkspace ? 'OpenBoard' : board.title,
+          boardTitle: this.sharedWorkspace ? 'OpenBoardCLI' : board.title,
         });
 
         if (this.sharedWorkspace) {
@@ -487,7 +487,7 @@ export class ProjectManager {
     this.dedupeAppDashboards(projectDir, onProgress);
 
     // 4c. Refresh product-owned shell files (design system + brand assets)
-    //     from the template so existing workspaces pick up OpenBoard UI
+    //     from the template so existing workspaces pick up OpenBoardCLI UI
     //     updates without a re-scaffold.
     this.syncProductShellFiles(projectDir, onProgress);
 
@@ -669,7 +669,7 @@ export class ProjectManager {
   }
 
   /**
-   * Product-owned shell files: the OpenBoard design system and brand assets
+   * Product-owned shell files: the OpenBoardCLI design system and brand assets
    * every generated app must share. Refreshed from the template on each
    * pre-deploy pass so existing workspaces pick up UI updates. LLM-owned
    * files (App.tsx, dashboard components) are never touched here. None of

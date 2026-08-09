@@ -1,5 +1,5 @@
 /**
- * AuthService — Password hashing and JWT secret generation for OpenBoard.
+ * AuthService — Password hashing and JWT secret generation for OpenBoardCLI.
  *
  * Used during setup wizard to prepare credentials that will be stored as
  * Vercel environment variables on the deployed dashboard.

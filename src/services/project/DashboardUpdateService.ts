@@ -150,7 +150,7 @@ export async function removeDashboardFromGeneratedApp(
   const currentApp = readFileSync(appPath, 'utf-8');
   const prompt = `${SYSTEM_PROMPT}
 
-Task: remove one dashboard from the existing shared OpenBoard app.
+Task: remove one dashboard from the existing shared OpenBoardCLI app.
 
 Dashboard to remove:
 - Title: ${removedBoard.title}
@@ -170,7 +170,7 @@ Requirements:
 2. Remove the tab, route/branch, imports, labels, and visible content for "${removedBoard.title}".
 3. Preserve AuthProvider, LoginPage, useAuth, the header user greeting (render the signed-in user as "Hi, <username>" via <span className="app-greeting">), and logout behavior.
 4. Preserve every remaining dashboard and its imports, and preserve the master 'Overview' tab (id 'master') as the first tab if present.
-5. Preserve the OpenBoard header shell exactly: <HeaderLinks /> on the left, the clickable app-brand button with <h1 className="app-title">OpenBoard</h1>, and the greeting/ThemeToggle/Logout on the right.
+5. Preserve the OpenBoardCLI header shell exactly: <HeaderLinks /> on the left, the clickable app-brand button with <h1 className="app-title">OpenBoardCLI</h1>, and the greeting/ThemeToggle/Logout on the right.
 6. Do not modify unrelated styling or auth behavior, and do not re-add a Welcome tab while dashboards remain.`;
 
   const response = await llm.complete({
@@ -321,7 +321,7 @@ export class DashboardUpdateService {
         uiQuality: options.quality,
       };
 
-      reporter.log(`Preparing OpenBoard workspace for "${board.title}"...`);
+      reporter.log(`Preparing OpenBoardCLI workspace for "${board.title}"...`);
       const scaffold = await this.projectManager.scaffold(board);
       if (!scaffold.success || !scaffold.projectDir) {
         return this.failure(run, { board }, `Scaffold failed: ${scaffold.error}`);
@@ -513,7 +513,7 @@ export class DashboardUpdateService {
 
       const prompt = `Regenerate/update the "${board.title}" dashboard tab using the latest data source.
 
-This is a non-interactive OpenBoard update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent must remain the same as the saved prompt history.
+This is a non-interactive OpenBoardCLI update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent must remain the same as the saved prompt history.
 
 Dashboard:
 - Title: ${board.title}
@@ -534,7 +534,7 @@ Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
 3. Return one primary exported dashboard component plus only its required helper files.
-4. Do not return App.tsx, navigation, authentication, generated/dashboardManifest.tsx, or components/MasterDashboard.tsx; OpenBoard owns those files.
+4. Do not return App.tsx, navigation, authentication, generated/dashboardManifest.tsx, or components/MasterDashboard.tsx; OpenBoardCLI owns those files.
 5. Return all changed files using the required //CODE_START format.`;
 
       const writtenFiles = await this.generateAndWriteFiles(board, prompt, reporter, run);
@@ -638,7 +638,7 @@ Requirements:
       //    changes registry data; the manifest is regenerated before build.
       reporter.phase('generate');
       if (remainingBoards.length === 0) {
-        reporter.log('Removing the last dashboard — restoring the empty OpenBoard shell...');
+        reporter.log('Removing the last dashboard — restoring the empty OpenBoardCLI shell...');
         await this.templateService.restoreAppShell(projectDir);
         await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
         this.registry.setMasterState(undefined);
@@ -927,7 +927,7 @@ Requirements:
   }
 
   /**
-   * Remove EVERY dashboard: reset the generated app to the empty OpenBoard
+   * Remove EVERY dashboard: reset the generated app to the empty OpenBoardCLI
    * shell, delete all dashboard components + protected data, clear the registry
    * + prompt history, then build/push/deploy the shared workspace once. The
    * workspace folder and GitHub/Vercel project are kept. Used by the TUI
@@ -956,7 +956,7 @@ Requirements:
       }
 
       reporter.phase('generate');
-      reporter.log('Resetting the generated app to the empty OpenBoard shell...');
+      reporter.log('Resetting the generated app to the empty OpenBoardCLI shell...');
       await this.templateService.restoreAppShell(projectDir);
       await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
       this.registry.setMasterState(undefined);
@@ -985,7 +985,7 @@ Requirements:
       const placeholder: BoardConfig = {
         id: 'all',
         name: 'openboard-workspace',
-        title: 'OpenBoard',
+        title: 'OpenBoardCLI',
         type: 'custom',
         outputDir: projectDir,
         dataFiles: [],
@@ -1211,9 +1211,9 @@ Requirements:
     const boards = this.registry.listBoards();
     const intent = resolveInitialIntent({ userPrompt, type: board.type, typeProvided });
 
-    return `Generate an initial dashboard tab for "${board.title}" inside the existing OpenBoard master React app.
+    return `Generate an initial dashboard tab for "${board.title}" inside the existing OpenBoardCLI master React app.
 
-This request is coming from an automation agent through the non-interactive OpenBoard CLI.
+This request is coming from an automation agent through the non-interactive OpenBoardCLI CLI.
 
 Dashboard:
 - Title: ${board.title}
@@ -1357,7 +1357,7 @@ Requirements:
       (file) => file.path !== 'App.tsx' && !file.path.startsWith('generated/'),
     );
     if (files.length !== extracted.length) {
-      reporter.log('Ignored LLM App.tsx/generated output; OpenBoard owns shell and tab composition.');
+      reporter.log('Ignored LLM App.tsx/generated output; OpenBoardCLI owns shell and tab composition.');
     }
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir || files.length === 0) return [];

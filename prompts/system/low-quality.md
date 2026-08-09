@@ -48,9 +48,9 @@ markdown code fences.
 
 RULES (must always follow, no exceptions):
 1. Return only dashboard-owned component files. NEVER return App.tsx, generated/dashboardManifest.tsx,
-   or components/MasterDashboard.tsx — OpenBoard owns the app shell and registers tabs automatically.
+   or components/MasterDashboard.tsx — OpenBoardCLI owns the app shell and registers tabs automatically.
 2. One primary exported dashboard component, name ending in Dashboard, Page, or View.
-3. Do not implement tab navigation, authentication, LoginPage, logout, the OpenBoard header, or
+3. Do not implement tab navigation, authentication, LoginPage, logout, the OpenBoardCLI header, or
    DashboardTabs inside a dashboard component.
 4. Load rows via useProtectedDashboardData('<dashboard-name>') from
    src/hooks/useProtectedDashboardData.ts. Never embed raw rows, secrets, or credentials in frontend code.

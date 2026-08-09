@@ -2,7 +2,7 @@
  * GmailIntegrationScreen — invoice fetching, under Integrations › Gmail.
  *
  * Was "Invoice Fetchers" under Settings. Reading invoices out of a mailbox is
- * how data gets into OpenBoard, not a preference about how it behaves, so it
+ * how data gets into OpenBoardCLI, not a preference about how it behaves, so it
  * belongs beside the other sources rather than beneath the credentials.
  *
  * The screen used to spend twelve lines before its first option: a title, a
@@ -92,22 +92,22 @@ function describeNextRun(msRemaining: number): string {
  * moment it matters.
  */
 const ROW_DETAIL: Record<string, string> = {
-  install: 'Copies the fetchers shipped with OpenBoard into its own folder.',
+  install: 'Copies the fetchers shipped with OpenBoardCLI into its own folder.',
   dir: 'Folder holding your fetch_<biller>.py scripts.',
   email: 'The Gmail account the fetchers sign in as.',
   password: 'A 16-character Google App Password, not your Gmail password. Encrypted, and passed to fetchers at run time — never written to disk.',
-  'add-biller': 'Describe one sample email and OpenBoard writes the fetcher for it.',
-  interval: 'How often enabled fetchers run, while OpenBoard is open.',
+  'add-biller': 'Describe one sample email and OpenBoardCLI writes the fetcher for it.',
+  interval: 'How often enabled fetchers run, while OpenBoardCLI is open.',
   sync: 'Run every enabled fetcher now.',
   stop: 'Stop the fetch in progress. Billers already done are kept, and the schedule stays anchored.',
-  rescan: 'Re-read the scripts folder to pick up fetchers added outside OpenBoard.',
+  rescan: 'Re-read the scripts folder to pick up fetchers added outside OpenBoardCLI.',
   clear: 'Forget the address and App Password. Revoke it in your Google account to cut access off.',
   back: 'Return to Integrations.',
 };
 
 /** Guidance for the input steps, which have no highlighted row to describe. */
 const STEP_DETAIL: Record<string, string> = {
-  'scripts-dir': "Keep them in OpenBoard's folder (pre-filled) so invoices live alongside. Quotes are fine.",
+  'scripts-dir': "Keep them in OpenBoardCLI's folder (pre-filled) so invoices live alongside. Quotes are fine.",
   email: 'The Gmail account the fetchers sign in as.',
   'app-password': 'Create one at myaccount.google.com/apppasswords — 16 characters, not your Gmail password.',
   interval: 'Whole minutes. Runs are scheduled from the last fetch.',
@@ -315,7 +315,7 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   const clearCredentials = () => {
     config.delete('billers.email');
     config.delete('billers.appPassword');
-    setStatus('Gmail address and App Password cleared from OpenBoard. The credentials file on disk was left in place — delete it manually if you want it gone.');
+    setStatus('Gmail address and App Password cleared from OpenBoardCLI. The credentials file on disk was left in place — delete it manually if you want it gone.');
     changed();
   };
 
@@ -387,7 +387,7 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     hasDir && hasEmail && hasPassword && `${settings.enabledKeys.length}/${billers.length} billers on`,
     settings.lastRunAt && `last ${new Date(settings.lastRunAt).toLocaleTimeString()}`,
     // Derived from the same lastRunAt anchor the scheduler uses. The loop only
-    // runs while OpenBoard is open, which the wording has to stay honest about.
+    // runs while OpenBoardCLI is open, which the wording has to stay honest about.
     // While a fetch is in flight, say so instead of showing a countdown. The
     // schedule anchors at the start of a run, so the two together previously
     // read as "due now" for the whole run and looked like nothing was happening.
@@ -424,7 +424,7 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
             mailbox read access, so revoke it in your Google account to cut access off.
           </Text>
           <Text color={UI_COLORS.subtitle}>
-            Fetchers need Python 3 with beautifulsoup4. Fetching runs only while OpenBoard is open.
+            Fetchers need Python 3 with beautifulsoup4. Fetching runs only while OpenBoardCLI is open.
           </Text>
         </Box>
       )}

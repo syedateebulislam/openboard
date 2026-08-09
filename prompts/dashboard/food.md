@@ -1,6 +1,6 @@
 Build an engaging, mobile-first food & dining dashboard tab for this dataset that works for any delivery or restaurant export (Swiggy, Zomato, Instamart, UberEats, or similar) — never hardcode an app's schema; infer the useful fields dynamically from the column names and value patterns in the data.
 
-Data model (OpenBoard):
+Data model (OpenBoardCLI):
 - This dashboard tab loads its real rows at runtime from `useProtectedDashboardData('<dashboard-name>')`. There is NO file upload — derive every metric, chart, and table from that hook's rows.
 - Dynamically detect the meaningful columns, case-insensitively: order date (order_date/ordered_at/delivered_at/document_date/email_date — prefer the actual order date), paid amount (total_paid/grand_total/amount — prefer the final paid amount), restaurant/merchant/store, items/description, delivery/platform/packaging fees, discount, taxes, payment method, currency.
 - Normalize rows in a `utils/` helper: parse amounts safely, parse dates with date-fns across common formats, never throw on bad input. Mark a row excluded when no valid amount or date is found, and keep an exclusion reason.
@@ -12,4 +12,4 @@ Layout (top to bottom):
 - Chart hygiene: explicit Recharts margin on every chart; horizontal bars need a fixed YAxis width (~140) with an ellipsis tickFormatter; cap dense time-axis ticks; format axis numbers compactly (12.4k); never render a pie/donut for a dimension with fewer than 2 meaningful values.
 - A REQUIRED "Recent Records" raw-data table at the bottom using the `.data-table` class: rows sorted by order date DESCENDING (the 10 most recent orders visible by default) with client-side pagination (10/25/50/100), column sorting, and a text search. Sticky header, horizontal scroll on small screens.
 
-Keep it cohesive with the OpenBoard design system: shared utility classes and CSS variables only (never hardcoded colors), `var(--chart-N)` series colors, currency/number/date formatting via Intl and date-fns, main tab component plus small components in `components/` and pure helpers in `utils/`. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.
+Keep it cohesive with the OpenBoardCLI design system: shared utility classes and CSS variables only (never hardcoded colors), `var(--chart-N)` series colors, currency/number/date formatting via Intl and date-fns, main tab component plus small components in `components/` and pure helpers in `utils/`. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.

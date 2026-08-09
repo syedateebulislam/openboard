@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample one email so OpenBoard can learn a new biller.
+"""Sample one email so OpenBoardCLI can learn a new biller.
 
 Not a fetcher. This script writes no CSV and keeps no state — it connects to
 Gmail, finds messages from a sender (optionally narrowed by subject), and
@@ -63,7 +63,7 @@ def read_json(path) -> dict:
 def load_credentials() -> dict:
     """Gmail IMAP credentials, preferring the environment over the disk.
 
-    OpenBoard passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
+    OpenBoardCLI passes OPENBOARD_GMAIL_EMAIL and OPENBOARD_GMAIL_APP_PASSWORD to
     this process so the App Password never has to be written to a file. Running
     the script by hand still works: it falls back to the credentials JSON the
     fetchers have always read.

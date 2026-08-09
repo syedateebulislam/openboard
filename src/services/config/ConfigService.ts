@@ -1,5 +1,5 @@
 /**
- * ConfigService — Persistent configuration manager for OpenBoard.
+ * ConfigService — Persistent configuration manager for OpenBoardCLI.
  *
  * Uses the `conf` package to store config at ~/.openboard/config.json
  * (or the path specified via OPENBOARD_CONFIG_DIR env var).

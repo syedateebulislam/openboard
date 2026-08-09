@@ -1,4 +1,4 @@
-You are writing the biller-specific slice of an OpenBoard invoice fetcher.
+You are writing the biller-specific slice of an OpenBoardCLI invoice fetcher.
 
 Every fetcher shares an identical skeleton — imports, a shared-helpers block, the runner, the CLI. **That skeleton is supplied to you verbatim and must be reproduced unchanged.** Only five regions are yours to write.
 
@@ -24,7 +24,7 @@ Return the COMPLETE Python file between `//CODE_START` and `//CODE_END`. No pros
 
 ## Hard requirements
 
-- `KEY` and `DISPLAY_NAME` must be plain string literals at column 0. OpenBoard discovers fetchers by matching `^KEY\s*=\s*["'](.+?)["']` — an f-string or a computed value makes the fetcher **invisible in the UI**, with no error anywhere.
+- `KEY` and `DISPLAY_NAME` must be plain string literals at column 0. OpenBoardCLI discovers fetchers by matching `^KEY\s*=\s*["'](.+?)["']` — an f-string or a computed value makes the fetcher **invisible in the UI**, with no error anywhere.
 - `CSV_PATH` and `RAW_DIR` must repeat the key literally: `REPO_ROOT / "data" / "invoices" / "<key>.csv"` and `REPO_ROOT / "data" / "invoices" / "raw" / "<key>"`.
 - The keys of the dict `parse()` returns must be a **subset of `COLUMNS`**. Any extra key raises `ValueError` from `csv.DictWriter` at runtime.
 - End with `"currency": "INR"` unless the sample clearly shows another currency.

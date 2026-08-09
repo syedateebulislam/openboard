@@ -201,7 +201,7 @@ async function upsertProjectEnvironment(
         value,
         type: 'encrypted',
         target: [target],
-        comment: 'Managed by OpenBoard dashboard authentication',
+        comment: 'Managed by OpenBoardCLI dashboard authentication',
       })))),
   });
   const text = await response.text();
@@ -365,7 +365,7 @@ function normalizeAuthError(error: string): string {
   ) {
     return [
       'Vercel is not authenticated.',
-      'Re-enter the Vercel token in OpenBoard Settings with access to the personal/team scope for this project, or run `vercel login` manually.',
+      'Re-enter the Vercel token in OpenBoardCLI Settings with access to the personal/team scope for this project, or run `vercel login` manually.',
       text,
     ].join('\n');
   }

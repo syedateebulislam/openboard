@@ -7,7 +7,7 @@
  * generation, and it is why a request could be severed mid-file.
  *
  * The skeletons now carry markers; the model returns only the marked bodies and
- * OpenBoard splices them into its own copy. These tests pin the two properties
+ * OpenBoardCLI splices them into its own copy. These tests pin the two properties
  * that make that safe: splicing is lossless, and a malformed skeleton or reply
  * fails loudly rather than producing a quietly broken file.
  */
@@ -76,7 +76,7 @@ describe('the shipped skeletons', () => {
 
   it('keep the marked regions outside the shared helpers', () => {
     // REPO_ROOT and the credential path are shared; marking them would let a
-    // generated fetcher redirect where OpenBoard reads and writes.
+    // generated fetcher redirect where OpenBoardCLI reads and writes.
     const config = parseRegions(HTML).find((r) => r.name === 'CONFIG')!;
     expect(config.body).toContain('KEY = ');
     expect(config.body).not.toContain('REPO_ROOT =');

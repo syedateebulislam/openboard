@@ -3,7 +3,7 @@
 One script per biller. Each connects to Gmail over IMAP, finds that biller's
 invoice emails, parses them, and appends a row per invoice to its own CSV.
 
-OpenBoard discovers, schedules and runs them, then builds a dashboard from the
+OpenBoardCLI discovers, schedules and runs them, then builds a dashboard from the
 CSV — but it never edits them. They are ordinary Python scripts you can run by
 hand, and you are meant to add your own.
 
@@ -31,7 +31,7 @@ CSV_PATH = REPO_ROOT / "data" / "invoices" / f"{KEY}.csv"
 RAW_DIR  = REPO_ROOT / "data" / "invoices" / "raw" / KEY
 ```
 
-That last point is what lets OpenBoard find your output without being told: it
+That last point is what lets OpenBoardCLI find your output without being told: it
 reads the CSV back from the same derived location.
 
 4. A `load_credentials()` that prefers the environment, so the App Password never
@@ -46,8 +46,8 @@ def load_credentials() -> dict:
     return read_json(CREDENTIALS_PATH)   # standalone runs still work
 ```
 
-OpenBoard sets those two variables on the process it spawns. The file fallback is
-only for running a fetcher by hand; OpenBoard no longer writes it, and deletes any
+OpenBoardCLI sets those two variables on the process it spawns. The file fallback is
+only for running a fetcher by hand; OpenBoardCLI no longer writes it, and deletes any
 copy left by an older version. A fetcher written against the old contract is
 patched in place on the next run, so existing scripts keep working.
 
@@ -56,7 +56,7 @@ scripts sitting in the same folder stay out of the biller list — that is why
 `probe_biller.py` and `parse_sample.py`, which Biller Studio uses, never appear
 as billers.
 
-## Let OpenBoard write it for you
+## Let OpenBoardCLI write it for you
 
 You do not have to write any of this by hand. **Integrations → Gmail →
 `✚ Add a biller`** takes a sender address and a subject
@@ -65,7 +65,7 @@ contract — then compiles it, checks what it extracts, and dry-runs it against
 your mailbox before saving. Hand-writing is still supported and is the right
 choice when the parsing is unusual.
 
-## Contract OpenBoard relies on
+## Contract OpenBoardCLI relies on
 
 | | |
 |---|---|
@@ -73,7 +73,7 @@ choice when the parsing is unusual.
 | Credentials | `OPENBOARD_GMAIL_EMAIL` / `OPENBOARD_GMAIL_APP_PASSWORD` from the environment, falling back to `{"email": ..., "app_password": ...}` at the derived path for standalone runs |
 | Output | append rows to `CSV_PATH`; write the header only when the file is new |
 | Dedup | record handled message UIDs in `RAW_DIR/state.json` so re-runs are incremental |
-| Exit code | `0` on success. Note OpenBoard also scans output for fatal errors, because these scripts catch connection failures and still exit `0` |
+| Exit code | `0` on success. Note OpenBoardCLI also scans output for fatal errors, because these scripts catch connection failures and still exit `0` |
 
 Only numeric and enum arguments are ever passed, and only files directly inside
 the configured folder are executed.
