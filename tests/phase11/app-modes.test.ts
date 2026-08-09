@@ -173,6 +173,32 @@ describe('mode persistence in ConfigService', () => {
     expect(() => config.set('app.mode', 'cloud')).toThrow(/Invalid app mode/);
   });
 
+  it('reads an unset mode with a local provider as hybrid-local', () => {
+    // Upgrade path: these installs predate modes and were never asked to pick
+    // one. Defaulting them to remote would refuse the Ollama/LM Studio setup
+    // they already had working, since remote is cloud-only.
+    const config = new ConfigService(configDir);
+    config.set('llm.provider', 'ollama');
+    expect(getAppMode(config)).toBe('hybrid-local');
+    expect(providerAllowedInMode('ollama', getAppMode(config))).toBe(true);
+
+    config.set('llm.provider', 'lmstudio');
+    expect(getAppMode(new ConfigService(configDir))).toBe('hybrid-local');
+  });
+
+  it('still defaults to remote for an unset mode on a cloud provider', () => {
+    const config = new ConfigService(configDir);
+    config.set('llm.provider', 'openai');
+    expect(getAppMode(config)).toBe('remote');
+  });
+
+  it('never lets the inferred mode override an explicitly stored one', () => {
+    const config = new ConfigService(configDir);
+    config.set('llm.provider', 'ollama');
+    config.set('app.mode', 'local');
+    expect(getAppMode(config)).toBe('local');
+  });
+
   it('falls back to remote for corrupted stored values', () => {
     const config = new ConfigService(configDir);
     config.set('app', { mode: undefined });

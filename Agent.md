@@ -50,7 +50,7 @@ The mode is two independent axes — where the LLM runs and whether the pipeline
 
 An agent can set everything up headlessly via `openboard agent setup` (see [Headless Setup](#headless-setup)), including `openai-codex` (access token / API key, or device-auth that the agent relays to the user).
 
-- App mode: `openboard agent setup mode --mode local|hybrid-local|hybrid|remote` (unset behaves as `remote`).
+- App mode: `openboard agent setup mode --mode local|hybrid-local|hybrid|remote` (unset behaves as `remote`, or as `hybrid-local` when the configured provider is `ollama`/`lmstudio`, so pre-mode installs on a local LLM keep working).
 - LLM provider: OpenAI API, OpenAI Codex login, Anthropic, Google Gemini, Moonshot, xAI, Mistral AI, OpenRouter, Ollama, or LM Studio (`local`/`hybrid-local` modes: Ollama/LM Studio only).
 - GitHub token or authenticated GitHub CLI (`hybrid-local`/`remote` modes only).
 - Vercel token or Vercel Git integration (`hybrid-local`/`remote` modes only).

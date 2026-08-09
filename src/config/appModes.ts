@@ -100,10 +100,26 @@ export function describeAppMode(mode: AppMode): string {
   return `${info.label} — ${info.summary}`;
 }
 
-/** Read the configured mode; unset configs keep today's full-pipeline behavior. */
+/**
+ * Read the configured mode; unset configs keep the full-pipeline behavior they
+ * had before modes existed.
+ *
+ * With one exception, and it is the whole reason this is not a one-liner:
+ * `remote` accepts cloud providers only, so defaulting a config that has never
+ * named a mode to `remote` would start refusing an already-working Ollama or
+ * LM Studio setup. Those installs are read as `hybrid-local` — the same
+ * full pipeline, on the axis their provider already put them on. An explicitly
+ * stored mode always wins; this only fills in a blank.
+ */
 export function getAppMode(config = new ConfigService()): AppMode {
   const value = config.get('app.mode');
-  return isValidAppMode(value) ? value : DEFAULT_APP_MODE;
+  if (isValidAppMode(value)) return value;
+
+  const provider = config.get('llm.provider');
+  if (typeof provider === 'string' && (LOCAL_PROVIDERS as string[]).includes(provider)) {
+    return 'hybrid-local';
+  }
+  return DEFAULT_APP_MODE;
 }
 
 export function setAppMode(mode: AppMode, config = new ConfigService()): void {
