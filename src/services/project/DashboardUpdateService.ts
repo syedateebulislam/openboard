@@ -1537,8 +1537,9 @@ Requirements:
       return this.failure(run, { board, writtenFiles }, buildResult.error ?? 'Build failed.');
     }
 
-    // Mode contract: only All remote publishes. Local/hybrid pipelines end at
-    // the local build — the user previews the dashboard on their machine.
+    // Mode contract: only the deploying modes publish. The preview-only
+    // pipelines (local, hybrid) end at the local build — the user previews the
+    // dashboard on their machine.
     const mode = getAppMode();
     if (!modeAllowsDeploy(mode)) {
       reporter.log(`Mode is ${mode} — GitHub push and Vercel deploy are skipped by design.`);

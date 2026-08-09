@@ -52,7 +52,7 @@ export interface ChatCommandSuggestion {
   color: 'cyan' | 'yellow' | 'green' | 'magenta';
 }
 
-/** Commands that publish outside the machine — hidden outside All remote mode. */
+/** Commands that publish outside the machine — hidden in the preview-only modes. */
 const REMOTE_ONLY_COMMANDS = new Set(['/deploy', '/push']);
 
 export const CHAT_COMMANDS: ChatCommandSuggestion[] = [

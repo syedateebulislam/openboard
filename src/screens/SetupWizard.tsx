@@ -2,12 +2,12 @@
  * SetupWizard — mode-first TUI setup wizard for OpenBoard initial configuration.
  *
  * Guides the user through:
- *  Step 1: App mode — Local only / Hybrid / All remote. Picked FIRST so the
- *          user knows from the beginning what the end result is and what
- *          leaves their machine.
- *  Step 2: LLM provider (filtered by mode: Local only ⇒ Ollama/LM Studio) + key + model
- *  Step 3: GitHub Personal Access Token   (All remote mode only)
- *  Step 4: Vercel API token               (All remote mode only)
+ *  Step 1: App mode — Local only / Hybrid (local LLM) / Hybrid (cloud LLM) /
+ *          All remote. Picked FIRST so the user knows from the beginning what
+ *          the end result is and what leaves their machine.
+ *  Step 2: LLM provider (filtered by mode: local-LLM modes ⇒ Ollama/LM Studio) + key + model
+ *  Step 3: GitHub Personal Access Token   (deploying modes only)
+ *  Step 4: Vercel API token               (deploying modes only)
  *  Step 5: Dashboard username + password → bcrypt hash + JWT secret
  *
  * Uses Ink for TUI rendering, ink-text-input for text fields.
@@ -440,7 +440,7 @@ function Step2GitHub({ stepLabel, token, validation, onTokenChange, onSubmit, on
     <Box flexDirection="column">
       <SectionHeader
         title={`${stepLabel}: GitHub Integration`}
-        subtitle="All remote mode: create a repo and push dashboard code to GitHub"
+        subtitle="Create a repo and push dashboard code to GitHub"
       />
 
       {mode === 'menu' && (
@@ -510,7 +510,7 @@ function Step3Vercel({ stepLabel, token, validation, onTokenChange, onSubmit, on
     <Box flexDirection="column">
       <SectionHeader
         title={`${stepLabel}: Vercel Deployment`}
-        subtitle="All remote mode: required for the live web app deployment"
+        subtitle="Required for the live web app deployment"
       />
 
       {mode === 'menu' && (
@@ -717,13 +717,16 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   // -------------------------------------------------------------------------
   const handleModeSelect = useCallback((selected: AppMode) => {
     config.set('app.mode', selected);
-    if (selected === 'local') {
-      // Local only: generation must stay on-machine.
-      setLLMProvider('ollama');
-      setLLMModel(DEFAULT_MODELS.ollama);
+    // Re-seed the staged provider whenever the mode rules it out — both ways,
+    // so going back and switching between a local-LLM and a cloud-LLM mode
+    // never carries a provider the next step would refuse.
+    const allowed = allowedProvidersForMode(selected);
+    if (!allowed.includes(llmProvider)) {
+      setLLMProvider(allowed[0]);
+      setLLMModel(DEFAULT_MODELS[allowed[0]]);
     }
     dispatchNavigation({ type: 'select_mode', mode: selected });
-  }, [config]);
+  }, [config, llmProvider]);
 
   // Validation states
   const [step1Validation, setStep1Validation] = useState<ValidationState>({ status: 'idle' });
