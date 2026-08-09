@@ -32,6 +32,7 @@ import {
   getAppMode,
   modeAllowsDeploy,
   providerAllowedInMode,
+  providerModeMismatchMessage,
   type AppMode,
 } from './config/appModes.js';
 import { DEFAULT_MODELS, LLM_PROVIDER_CHOICES, MODEL_CHOICES } from './config/llmCatalog.js';
@@ -78,8 +79,9 @@ export function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) =>
   const mode = getAppMode();
   const remote = modeAllowsDeploy(mode);
 
-  // GitHub/Vercel tokens only matter in All remote mode — hiding them keeps
-  // the privacy contract visible: local/hybrid never talk to GitHub/Vercel.
+  // GitHub/Vercel tokens only matter in the deploying modes — hiding them keeps
+  // the privacy contract visible: the preview-only modes never talk to
+  // GitHub/Vercel.
   const items = [
     { label: 'App mode', value: 'mode' },
     { label: 'LLM provider', value: 'llm' },
@@ -149,10 +151,10 @@ export function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => voi
     const notes: string[] = [`Mode set to: ${describeAppMode(selected)}`];
     const provider = config.get('llm.provider') as string | undefined;
     if (provider && !providerAllowedInMode(provider, selected)) {
-      notes.push(`Your LLM provider "${provider}" is not available in this mode — update it under Settings > Update LLM provider (Ollama and LM Studio run locally).`);
+      notes.push(providerModeMismatchMessage(provider, selected));
     }
     if (modeAllowsDeploy(selected) && !config.has('vercel.token')) {
-      notes.push('All remote mode needs GitHub/Vercel tokens — add them in Settings.');
+      notes.push(`${appModeInfo(selected).label} mode needs GitHub/Vercel tokens — add them in Settings.`);
     }
     setStatus(notes.join('\n'));
   };

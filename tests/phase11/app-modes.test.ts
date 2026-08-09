@@ -2,10 +2,12 @@
  * Phase 11 — privacy-first app modes.
  *
  * The mode is the first choice in every setup surface so the user knows from
- * the beginning what the end result is:
- *   1. local  — local LLM (Ollama/LM Studio) + local preview only
- *   2. hybrid — cloud LLM + local preview only
- *   3. remote — cloud LLM + GitHub + live Vercel web app
+ * the beginning what the end result is. It is two independent axes — where the
+ * LLM runs, and whether the pipeline deploys — so there are four:
+ *   1. local        — local LLM (Ollama/LM Studio) + local preview only
+ *   2. hybrid-local — local LLM (Ollama/LM Studio) + GitHub + live Vercel app
+ *   3. hybrid       — cloud LLM + local preview only
+ *   4. remote       — cloud LLM + GitHub + live Vercel web app
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -15,6 +17,7 @@ import { tmpdir } from 'node:os';
 import {
   APP_MODES,
   allowedProvidersForMode,
+  appModeInfo,
   blockedDeployMessage,
   describeAppMode,
   getAppMode,
@@ -22,6 +25,7 @@ import {
   modeAllowsCloudLLM,
   modeAllowsDeploy,
   providerAllowedInMode,
+  providerModeMismatchMessage,
 } from '../../src/config/appModes.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
 import { chatCommandsForMode, commandsTextForMode, helpTextForMode, CHAT_COMMANDS } from '../../src/utils/commandParser.js';
@@ -41,8 +45,14 @@ afterEach(() => {
 });
 
 describe('app mode model', () => {
-  it('lists modes privacy-first: local, then hybrid, then remote', () => {
-    expect(APP_MODES.map((m) => m.id)).toEqual(['local', 'hybrid', 'remote']);
+  it('lists modes privacy-first, local-LLM modes before cloud-LLM ones', () => {
+    expect(APP_MODES.map((m) => m.id)).toEqual(['local', 'hybrid-local', 'hybrid', 'remote']);
+  });
+
+  it('covers the full LLM x deploy matrix exactly once', () => {
+    const cells = APP_MODES.map((m) => `${m.llm}/${m.deploy}`);
+    expect(new Set(cells).size).toBe(4);
+    expect(cells).toHaveLength(4);
   });
 
   it('every mode states what the user gets at the end', () => {
@@ -52,12 +62,20 @@ describe('app mode model', () => {
       expect(mode.detail.length).toBeGreaterThan(0);
     }
     expect(describeAppMode('local')).toContain('local preview');
+    expect(describeAppMode('hybrid-local')).toContain('Vercel');
     expect(describeAppMode('hybrid')).toContain('local preview');
     expect(describeAppMode('remote')).toContain('Vercel');
   });
 
+  it('labels tell the two hybrids apart', () => {
+    expect(describeAppMode('hybrid-local')).not.toEqual(describeAppMode('hybrid'));
+    expect(appModeInfo('hybrid-local').label).toContain('local LLM');
+    expect(appModeInfo('hybrid').label).toContain('cloud LLM');
+  });
+
   it('validates mode ids', () => {
     expect(isValidAppMode('local')).toBe(true);
+    expect(isValidAppMode('hybrid-local')).toBe(true);
     expect(isValidAppMode('hybrid')).toBe(true);
     expect(isValidAppMode('remote')).toBe(true);
     expect(isValidAppMode('cloud')).toBe(false);
@@ -73,6 +91,16 @@ describe('app mode model', () => {
     expect(providerAllowedInMode('lmstudio', 'local')).toBe(true);
   });
 
+  it('hybrid-local mode deploys but keeps generation on the machine', () => {
+    expect(modeAllowsCloudLLM('hybrid-local')).toBe(false);
+    expect(modeAllowsDeploy('hybrid-local')).toBe(true);
+    expect(allowedProvidersForMode('hybrid-local')).toEqual(['ollama', 'lmstudio']);
+    expect(providerAllowedInMode('ollama', 'hybrid-local')).toBe(true);
+    expect(providerAllowedInMode('lmstudio', 'hybrid-local')).toBe(true);
+    expect(providerAllowedInMode('openai', 'hybrid-local')).toBe(false);
+    expect(providerAllowedInMode('anthropic', 'hybrid-local')).toBe(false);
+  });
+
   it('hybrid mode allows cloud LLMs but not deploys', () => {
     expect(modeAllowsCloudLLM('hybrid')).toBe(true);
     expect(modeAllowsDeploy('hybrid')).toBe(false);
@@ -82,12 +110,14 @@ describe('app mode model', () => {
     expect(providerAllowedInMode('lmstudio', 'hybrid')).toBe(false);
   });
 
-  it('remote mode allows the full pipeline', () => {
+  it('remote mode deploys and is cloud-LLM only', () => {
     expect(modeAllowsCloudLLM('remote')).toBe(true);
     expect(modeAllowsDeploy('remote')).toBe(true);
-    expect(allowedProvidersForMode('remote')).toContain('ollama');
-    expect(allowedProvidersForMode('remote')).toContain('lmstudio');
     expect(allowedProvidersForMode('remote')).toContain('openai');
+    // Narrowed: "local LLM + deploy" is hybrid-local's cell, not remote's, so
+    // each mode stays one honest promise instead of two overlapping ones.
+    expect(allowedProvidersForMode('remote')).not.toContain('ollama');
+    expect(allowedProvidersForMode('remote')).not.toContain('lmstudio');
   });
 
   it('blockedDeployMessage explains the mode and points at /preview + Settings', () => {
@@ -95,6 +125,24 @@ describe('app mode model', () => {
     expect(message).toContain('Hybrid');
     expect(message).toContain('/preview');
     expect(message).toContain('All remote');
+  });
+
+  it('blockedDeployMessage keeps the user on their own LLM axis', () => {
+    // A Local only user wanting a live app should be sent to Hybrid (local LLM),
+    // not told to start sending prompts to a cloud provider.
+    const message = blockedDeployMessage('local', 'push');
+    expect(message).toContain('Hybrid (local LLM)');
+    expect(message).not.toContain('All remote');
+  });
+
+  it('providerModeMismatchMessage names the mode that fits the provider', () => {
+    const message = providerModeMismatchMessage('ollama', 'remote');
+    expect(message).toContain('ollama');
+    expect(message).toContain('remote');
+    expect(message).toContain('Hybrid (local LLM)');
+
+    const reverse = providerModeMismatchMessage('openai', 'hybrid-local');
+    expect(reverse).toContain('All remote');
   });
 });
 
@@ -108,6 +156,16 @@ describe('mode persistence in ConfigService', () => {
     config.set('app.mode', 'local');
     expect(getAppMode(config)).toBe('local');
     expect(getAppMode(new ConfigService(configDir))).toBe('local');
+  });
+
+  it('accepts every advertised mode id (config schema stays in sync)', () => {
+    // The Zod enum in ConfigService is a separate literal from APP_MODE_IDS —
+    // this is what catches the two drifting apart.
+    for (const mode of APP_MODES) {
+      const config = new ConfigService(configDir);
+      config.set('app.mode', mode.id);
+      expect(getAppMode(new ConfigService(configDir))).toBe(mode.id);
+    }
   });
 
   it('rejects invalid mode values on set', () => {

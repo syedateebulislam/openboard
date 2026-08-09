@@ -73,7 +73,7 @@ src/
   theme.ts                          TUI color tokens
   constants/loadingRemarks.ts        Internal chat loading remarks
   config/
-    appModes.ts                     local / hybrid / remote mode contract
+    appModes.ts                     local / hybrid-local / hybrid / remote mode contract
     llmCatalog.ts                   provider + model + effort catalog
     boardPresets.ts                 dashboard category presets
     dashboardPrompts.ts             per-category prompt tuning
