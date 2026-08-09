@@ -2,7 +2,7 @@
  * Phase 18 — navigation shape and the shared screen shell.
  *
  * Two complaints drove this. Invoice fetching lived under Settings, which
- * framed a primary way of getting data into OpenBoard as a preference. And the
+ * framed a primary way of getting data into OpenBoardCLI as a preference. And the
  * screens had each grown their own header, footer and phrasing — nine different
  * sentences for "press escape to go back" — so the TUI read as several
  * applications stitched together.
@@ -91,7 +91,7 @@ describe('main menu', () => {
   });
 
   it('keeps the banner on the entry screen', () => {
-    expect(render(<WelcomeScreen onNavigate={() => {}} />).lastFrame() ?? '').toContain('O p e n B o a r d');
+    expect(render(<WelcomeScreen onNavigate={() => {}} />).lastFrame() ?? '').toContain('[>_] OpenBoardCLI');
   });
 });
 

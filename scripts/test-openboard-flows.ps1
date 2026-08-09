@@ -104,7 +104,7 @@ function Write-TestConfig {
 
 function Assert-Built {
   if (!(Test-Path -LiteralPath $OpenBoard)) {
-    Write-Host "dist/index.js not found. Building OpenBoard first..." -ForegroundColor Yellow
+    Write-Host "dist/index.js not found. Building OpenBoardCLI first..." -ForegroundColor Yellow
     Push-Location $RepoRoot
     try {
       npm run build
@@ -125,7 +125,7 @@ $env:OPENBOARD_REDUCE_MOTION = "1"
 try {
   Assert-Built
 
-  Invoke-FlowCase "version" @("--version") @(0) @("O p e n B o a r d", "v1.0.0")
+  Invoke-FlowCase "version" @("--version") @(0) @("[>_] OpenBoardCLI")
   Invoke-FlowCase "help" @("--help") @(0) @("Usage", "agent create", "update")
   Invoke-FlowCase "start rejects non-tty" @("start") @(1) @("requires an interactive terminal")
   Invoke-FlowCase "unknown command" @("definitely-not-a-command") @(1) @("Unknown command")
@@ -197,4 +197,4 @@ if ($failed.Count -gt 0) {
   exit 1
 }
 
-Write-Host "All selected OpenBoard flow cases passed." -ForegroundColor Green
+Write-Host "All selected OpenBoardCLI flow cases passed." -ForegroundColor Green

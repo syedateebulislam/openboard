@@ -1,5 +1,5 @@
 /**
- * ChatScreen — Primary LLM interaction interface for OpenBoard.
+ * ChatScreen — Primary LLM interaction interface for OpenBoardCLI.
  *
  * Users type natural language messages to generate or modify dashboard
  * components. Special commands (/deploy, /push, /build, /help, etc.) are
@@ -178,7 +178,7 @@ function reportDeployResult(
   if (pushedToGitHub && isVercelAuthError(deployResult.error)) {
     onProgress('Pushed to GitHub. Vercel Git integration should deploy this commit automatically.');
     onProgress('Direct Vercel CLI deploy was skipped because local Vercel auth is not available.');
-    onProgress('   Re-enter the Vercel token in Settings only if you want OpenBoard to run direct CLI deploys and set Vercel env vars.');
+    onProgress('   Re-enter the Vercel token in Settings only if you want OpenBoardCLI to run direct CLI deploys and set Vercel env vars.');
     return;
   }
 
@@ -531,7 +531,7 @@ export function ChatScreen({
     }
 
     return [
-      'OpenBoard Doctor',
+      'OpenBoardCLI Doctor',
       `Mode: ${describeAppMode(doctorMode)}`,
       ...checks.map(([label, ok]) => `${ok ? 'OK' : 'WARN'} ${label}: ${yesNo(Boolean(ok))}`),
       '',
@@ -695,7 +695,7 @@ ${boards.map((b) => `- ${b.title} (${b.name}, ${b.type})`).join('\n')}
 
 For the current board "${board.title}":
 - Return ONLY this board's dashboard component(s) (e.g. components/${board.title.replace(/[^A-Za-z0-9]/g, '')}Dashboard.tsx) and any helper files they need.
-- Do NOT return App.tsx, generated/dashboardManifest.tsx, tab/navigation code, authentication files, components/MasterDashboard.tsx, or components/ErrorBoundary.tsx — OpenBoard owns the app shell and registers dashboard tabs automatically at build time.
+- Do NOT return App.tsx, generated/dashboardManifest.tsx, tab/navigation code, authentication files, components/MasterDashboard.tsx, or components/ErrorBoundary.tsx — OpenBoardCLI owns the app shell and registers dashboard tabs automatically at build time.
 - Do not rename the app/header to "${board.title}". Use "${board.title}" only as a content heading.
 - Prefer dashboard-specific component names and files so additions do not overwrite other dashboards.`;
         }
@@ -748,7 +748,7 @@ For the current board "${board.title}":
           file.path !== 'components/ErrorBoundary.tsx',
       );
       if (files.length !== extracted.length) {
-        addMsg(newMsg('system', 'Skipped App.tsx/layout files from the response — OpenBoard manages the app layout, tabs, and Overview automatically.'));
+        addMsg(newMsg('system', 'Skipped App.tsx/layout files from the response — OpenBoardCLI manages the app layout, tabs, and Overview automatically.'));
       }
       if (files.length === 0) return [];
 
@@ -950,7 +950,7 @@ For the current board "${board.title}":
     const featureClause = board.uiQuality === 'low'
       ? 'Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.'
       : 'Include at least 2-3 charts and some metric/stat cards.';
-    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoard master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. ${featureClause} Return only this dashboard's component files — OpenBoard registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".`;
+    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoardCLI master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. ${featureClause} Return only this dashboard's component files — OpenBoardCLI registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoardCLI"; do not replace it with "${board.title}".`;
 
     addMsg(newMsg('system', 'Auto-generating initial dashboard from your data...'));
     setIsLoading(true);
@@ -1282,7 +1282,7 @@ For the current board "${board.title}":
         const fetcher = new BillerFetcherService();
 
         if (!settings.scriptsDir) {
-          addMsg(newMsg('system', 'Invoice fetchers are not set up. Open Settings › Invoice fetchers (/config) to point OpenBoard at your fetcher scripts.'));
+          addMsg(newMsg('system', 'Invoice fetchers are not set up. Open Settings › Invoice fetchers (/config) to point OpenBoardCLI at your fetcher scripts.'));
           return;
         }
 
@@ -1522,7 +1522,7 @@ For the current board "${board.title}":
 
         const history = new PromptHistoryService().read(board.id);
         if (history.length === 0) {
-          addMsg(newMsg('error', 'No prompt history found for this dashboard. Make a manual LLM change first so OpenBoard knows what to recreate on update.'));
+          addMsg(newMsg('error', 'No prompt history found for this dashboard. Make a manual LLM change first so OpenBoardCLI knows what to recreate on update.'));
           return;
         }
 
@@ -1557,7 +1557,7 @@ For the current board "${board.title}":
 
           const updatePrompt = `Regenerate/update the "${board.title}" dashboard tab using the latest data source.
 
-This is an OpenBoard update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent should remain the same as the saved prompt history.
+This is an OpenBoardCLI update run. The data file (CSV/Excel/JSON) may have changed, but the dashboard intent should remain the same as the saved prompt history.
 
 Dashboard:
 - Title: ${board.title}
@@ -1574,8 +1574,8 @@ ${promptHistory}
 Requirements:
 1. Preserve the same dashboard tab and user-requested insights represented by the prompt history.
 2. Update metrics, charts, tables, and data processing to reflect the latest data analysis.
-3. Preserve other dashboard tabs in the shared OpenBoard app.
-4. Keep the centered master header text exactly "OpenBoard"; do not replace it with "${board.title}".
+3. Preserve other dashboard tabs in the shared OpenBoardCLI app.
+4. Keep the centered master header text exactly "OpenBoardCLI"; do not replace it with "${board.title}".
 5. Load real dashboard rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts.
 6. Do NOT embed raw source rows or sensitive data in App.tsx, component files, or src/data files.
 7. Return all changed files using the required //CODE_START format.${board.uiQuality === 'low' ? '\n8. Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.' : ''}`;

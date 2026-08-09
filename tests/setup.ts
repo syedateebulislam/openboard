@@ -3,7 +3,7 @@
  * TEST SETUP & GLOBAL CONFIGURATION
  * ============================================================================
  *
- * This file initializes the test environment for the entire OpenBoard test suite.
+ * This file initializes the test environment for the entire OpenBoardCLI test suite.
  * It runs before any test file and provides:
  *
  * 1. Global mocks for external services (GitHub API, Vercel API, LLM providers)

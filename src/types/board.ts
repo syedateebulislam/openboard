@@ -1,5 +1,5 @@
 /**
- * Board type definitions for OpenBoard.
+ * Board type definitions for OpenBoardCLI.
  * Represents a generated analytics dashboard project.
  */
 

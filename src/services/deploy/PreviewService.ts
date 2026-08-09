@@ -72,7 +72,7 @@ export class PreviewService {
       const url = `http://127.0.0.1:${selectedPort}`;
 
       // Pass the port directly to Vite. Vite does not read the generic PORT
-      // environment variable, which previously made OpenBoard report a URL
+      // environment variable, which previously made OpenBoardCLI report a URL
       // different from the port Vite actually selected.
       const proc = crossSpawnLive('npm', [
         'run',

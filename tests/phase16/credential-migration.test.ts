@@ -76,7 +76,7 @@ describe('migrateFetcherSource', () => {
   });
 
   it('keeps the file-based path as a standalone fallback', () => {
-    // Running a fetcher by hand, outside OpenBoard, must still work.
+    // Running a fetcher by hand, outside OpenBoardCLI, must still work.
     const migrated = migrateFetcherSource(legacyFetcher())!;
     expect(migrated).toContain('return read_json(CREDENTIALS_PATH)');
     expect(migrated).toContain('OPENBOARD_GMAIL_APP_PASSWORD');

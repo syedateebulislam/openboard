@@ -34,7 +34,7 @@ test.describe('authentication', () => {
 
   test('signs in and reaches the dashboards', async ({ page, capture, session }) => {
     await login(page, session);
-    await expect(page.locator('nav[aria-label="OpenBoard dashboards"]')).toBeVisible();
+    await expect(page.locator('nav[aria-label="OpenBoardCLI dashboards"]')).toBeVisible();
 
     const findings = await capture({ name: 'auth/signed-in' });
     expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
@@ -45,7 +45,7 @@ test.describe('authentication', () => {
     // every dashboard deep-link is broken.
     await login(page, session);
     await page.reload();
-    await expect(page.locator('nav[aria-label="OpenBoard dashboards"]')).toBeVisible();
+    await expect(page.locator('nav[aria-label="OpenBoardCLI dashboards"]')).toBeVisible();
     await expect(page.locator('#username')).toHaveCount(0);
   });
 });

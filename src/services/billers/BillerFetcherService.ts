@@ -5,7 +5,7 @@
  * One run per biller is: hash its CSV → spawn the script → hash again. An
  * unchanged hash means the fetcher found no new invoices, so the dashboard step
  * is skipped entirely and no LLM call happens. This change-gate mirrors the
- * user's existing external run_biller_cron.py, which OpenBoard is replacing.
+ * user's existing external run_biller_cron.py, which OpenBoardCLI is replacing.
  *
  * Credentials note: the Gmail App Password is handed to each fetcher through
  * the spawned process's environment, never written to disk. It previously went
@@ -96,7 +96,7 @@ export function describeFetchError(raw: string): string {
   // Python was missing whenever a script could not open a file — which sent a
   // real credentials bug looking like a broken PATH.
   if (/FileNotFoundError.*gmail_app_credentials|gmail_app_credentials.*No such file/is.test(text)) {
-    return 'This fetcher still reads the old plaintext credentials file, which OpenBoard no longer creates. It will be upgraded automatically on the next run — if you keep seeing this, use "Rescan billers folder" or reinstall the bundled fetchers.';
+    return 'This fetcher still reads the old plaintext credentials file, which OpenBoardCLI no longer creates. It will be upgraded automatically on the next run — if you keep seeing this, use "Rescan billers folder" or reinstall the bundled fetchers.';
   }
   if (/Traceback \(most recent call last\)/.test(text)) {
     const lastLine = text.split(/\r?\n/).filter(Boolean).pop() ?? '';
@@ -124,7 +124,7 @@ export function describeFetchError(raw: string): string {
   }
   if (/FileNotFoundError.*gmail_app_credentials/i.test(text)) {
     // Reaching this means the fetcher fell through to its standalone file path,
-    // so it never saw the environment OpenBoard sets. Usually an old copy of
+    // so it never saw the environment OpenBoardCLI sets. Usually an old copy of
     // the script that predates load_credentials().
     return 'This fetcher could not read its credentials from the environment. Reinstall the bundled fetchers from Settings › Invoice fetchers, then try again.';
   }
@@ -171,7 +171,7 @@ export class BillerFetcherService {
   }
 
   /**
-   * Delete the plaintext credentials file written by OpenBoard <= 1.8.0.
+   * Delete the plaintext credentials file written by OpenBoardCLI <= 1.8.0.
    *
    * Upgrading alone would otherwise leave the App Password readable on disk
    * forever: nothing reads the file any more, so nothing would ever clean it

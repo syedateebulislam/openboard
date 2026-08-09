@@ -477,7 +477,7 @@ describe('Bulk dashboard operations', () => {
   // ── TemplateService.restoreAppShell ─────────────────────────────────────────
 
   describe('TemplateService.restoreAppShell', () => {
-    it('overwrites App.tsx with the blank OpenBoard shell', async () => {
+    it('overwrites App.tsx with the blank OpenBoardCLI shell', async () => {
       const ts = new RealTemplateService();
       const srcDir = join(workspace, 'src');
       mkdirSync(srcDir, { recursive: true });
@@ -486,7 +486,7 @@ describe('Bulk dashboard operations', () => {
       await ts.restoreAppShell(workspace);
 
       const restored = readFileSync(join(srcDir, 'App.tsx'), 'utf-8');
-      expect(restored).toContain('OpenBoard');
+      expect(restored).toContain('OpenBoardCLI');
       expect(restored).toContain('BrandLogo');
       expect(restored).toContain('AuthProvider');
       expect(restored).not.toContain('a fully custom multi-tab app');

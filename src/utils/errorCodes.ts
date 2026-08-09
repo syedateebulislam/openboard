@@ -22,7 +22,7 @@ export type AgentErrorCode =
   | 'E_DEPLOY_AUTH'         // Vercel auth missing/invalid
   | 'E_DEPLOY_FAILED'       // Vercel deploy failed
   | 'E_VERIFY_FAILED'       // post-deploy verification failed
-  | 'E_LOCKED'              // another OpenBoard run holds the project lock
+  | 'E_LOCKED'              // another OpenBoardCLI run holds the project lock
   | 'E_RUN_NOT_FOUND'       // resume: run id not found
   | 'E_UNKNOWN';
 
@@ -104,7 +104,7 @@ export function describeLLMError(error: string | undefined | null, providerName?
     return (
       `The LLM request${provider} timed out before the model finished. ` +
       `A local model on modest hardware can take tens of minutes for one dashboard or fetcher; ` +
-      `OpenBoard now waits 45 minutes for a local server, so hitting this means the model is slower than that. ` +
+      `OpenBoardCLI now waits 45 minutes for a local server, so hitting this means the model is slower than that. ` +
       `Use a smaller/quantised model, or lower the UI quality to shorten the answer — retrying the same prompt will take just as long. ` +
       `Details: ${cleaned}`
     );
@@ -120,7 +120,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   { pattern: /^Missing required|^Invalid --|^Unknown agent action/i, code: 'E_VALIDATION' },
   { pattern: /Dashboard not found/i, code: 'E_DASHBOARD_NOT_FOUND' },
   { pattern: /Run not found/i, code: 'E_RUN_NOT_FOUND' },
-  { pattern: /locked by another OpenBoard run/i, code: 'E_LOCKED' },
+  { pattern: /locked by another OpenBoardCLI run/i, code: 'E_LOCKED' },
   { pattern: /File not found|ENOENT|no such file/i, code: 'E_DATA_NOT_FOUND' },
   { pattern: /Unsupported (?:data|file) (?:format|type)|Failed to parse|parse error/i, code: 'E_DATA_PARSE' },
   { pattern: /No LLM provider configured/i, code: 'E_NO_LLM' },

@@ -18,7 +18,7 @@ function getInitialTheme(): Theme {
 }
 
 /**
- * Theme state for the OpenBoard shell. Applies `data-theme` to <html> so the
+ * Theme state for the OpenBoardCLI shell. Applies `data-theme` to <html> so the
  * CSS variable system in App.css switches palettes, and persists the choice.
  */
 export function useTheme() {

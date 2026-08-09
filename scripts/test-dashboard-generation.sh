@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # test-dashboard-generation.sh
-# End-to-end test: verifies OpenBoard can scaffold and generate a sample dashboard
+# End-to-end test: verifies OpenBoardCLI can scaffold and generate a sample dashboard
 # using the OpenAI provider.
 #
 # Usage:
@@ -458,7 +458,7 @@ TOTAL=$((PASS + FAIL))
 echo -e "  Total: ${TOTAL}  |  ${GREEN}Passed: ${PASS}${NC}  |  ${RED}Failed: ${FAIL}${NC}"
 
 if [ "$FAIL" -eq 0 ]; then
-  echo -e "  ${GREEN}All tests passed! OpenBoard can generate dashboards.${NC}"
+  echo -e "  ${GREEN}All tests passed! OpenBoardCLI can generate dashboards.${NC}"
   echo -e "${CYAN}================================================================${NC}"
   exit 0
 else

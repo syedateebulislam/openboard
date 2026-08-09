@@ -207,13 +207,13 @@ describe('VercelService', () => {
   describe('link', () => {
     it('should run vercel link --yes and return success', async () => {
       const dir = makeTempDir();
-      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'OpenBoard Workspace' }));
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'OpenBoardCLI Workspace' }));
       mockCrossSpawn.mockResolvedValueOnce(mockSuccess('Linked to project'));
       const result = await VercelService.link(dir);
       expect(result.success).toBe(true);
       expect(mockCrossSpawn).toHaveBeenCalledWith(
         'vercel',
-        ['link', '--yes', '--project', 'openboard-workspace'],
+        ['link', '--yes', '--project', 'openboardcli-workspace'],
         expect.objectContaining({ cwd: dir }),
       );
       rmSync(dir, { recursive: true, force: true });
@@ -241,14 +241,14 @@ describe('VercelService', () => {
 
     it('should link through Vercel API when a token is configured', async () => {
       const dir = makeTempDir();
-      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'OpenBoard Workspace' }));
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'OpenBoardCLI Workspace' }));
       new ConfigService().setEncrypted('vercel.token', 'vcp_test_token_123');
       const fetchMock = vi.fn().mockResolvedValueOnce({
         status: 200,
         text: async () => JSON.stringify({
           id: 'prj_123',
           accountId: 'team_123',
-          name: 'openboard-workspace',
+          name: 'openboardcli-workspace',
         }),
       });
       vi.stubGlobal('fetch', fetchMock);
@@ -258,7 +258,7 @@ describe('VercelService', () => {
       expect(result.success).toBe(true);
       expect(mockCrossSpawn).not.toHaveBeenCalled();
       expect(fetchMock).toHaveBeenCalledWith(
-        'https://api.vercel.com/v9/projects/openboard-workspace',
+        'https://api.vercel.com/v9/projects/openboardcli-workspace',
         expect.objectContaining({
           method: 'GET',
           headers: expect.objectContaining({ authorization: 'Bearer vcp_test_token_123' }),

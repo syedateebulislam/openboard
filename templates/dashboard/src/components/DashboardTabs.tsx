@@ -18,7 +18,7 @@ interface DashboardTabsProps {
 }
 
 /**
- * OpenBoard dashboard navigation.
+ * OpenBoardCLI dashboard navigation.
  *
  * Desktop: a frosted liquid-glass pill bar. Ungrouped tabs render as pills;
  * tabs that carry a `group` collapse into one glass dropdown per category
@@ -118,7 +118,7 @@ export function DashboardTabs({ tabs, activeId, onSelect }: DashboardTabsProps) 
   const hasGroups = entries.some((entry) => entry.group !== null);
 
   return (
-    <nav ref={navRef} className={`app-tabs${open ? ' open' : ''}`} aria-label="OpenBoard dashboards">
+    <nav ref={navRef} className={`app-tabs${open ? ' open' : ''}`} aria-label="OpenBoardCLI dashboards">
       <button
         type="button"
         className="tabs-toggler"
@@ -140,7 +140,7 @@ export function DashboardTabs({ tabs, activeId, onSelect }: DashboardTabsProps) 
           className="tabs-list"
           id="dashboard-tablist"
           role="tablist"
-          aria-label="OpenBoard dashboards"
+          aria-label="OpenBoardCLI dashboards"
         >
           {tabs.map((tab) => {
             const selected = active?.id === tab.id;

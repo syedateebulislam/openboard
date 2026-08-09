@@ -4,7 +4,7 @@
  * Biller Studio hands the model a whole fetcher and asks for a whole fetcher
  * back, so ~78% of every generation is the model retyping helpers, the runner
  * and the CLI that are already on disk. Markers let it return only the parts
- * that differ, which OpenBoard splices into its own copy.
+ * that differ, which OpenBoardCLI splices into its own copy.
  *
  * The markers are comments, so a marked fetcher is still ordinary Python and
  * still runs standalone.

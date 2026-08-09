@@ -1,5 +1,5 @@
 /**
- * LLMService — Provider factory facade for OpenBoard LLM integrations.
+ * LLMService — Provider factory facade for OpenBoardCLI LLM integrations.
  *
  * Creates the appropriate LLMProvider implementation based on the user's
  * configured LLM settings (set during setup wizard and stored in ConfigService).

@@ -2,7 +2,7 @@ import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 
 /**
- * Dark/light mode switch for the OpenBoard header. Must stay in the master
+ * Dark/light mode switch for the OpenBoardCLI header. Must stay in the master
  * shell header on every dashboard update.
  */
 export function ThemeToggle() {

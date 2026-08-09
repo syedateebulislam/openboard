@@ -8,7 +8,7 @@
  * 43s of generation, and it is why a request could be severed mid-file.
  *
  * The skeletons now carry marker comments around the parts that actually differ
- * per biller. The model returns only those, and OpenBoard splices them into its
+ * per biller. The model returns only those, and OpenBoardCLI splices them into its
  * own copy of the skeleton — so the boilerplate is ours, not model-authored,
  * and the assembled file still goes through every existing check.
  *

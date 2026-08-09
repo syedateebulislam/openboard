@@ -67,7 +67,7 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/billers', category: 'data', color: 'magenta', description: 'Invoice fetcher status; /billers sync runs them, enable/disable toggles one' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
-  { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoard readiness' },
+  { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoardCLI readiness' },
   { command: '/status', category: 'info', color: 'green', description: 'Show dashboard/project status' },
   { command: '/model', category: 'info', color: 'green', description: 'Show or switch the LLM model and effort' },
   { command: '/config', category: 'info', color: 'green', description: 'Open settings' },

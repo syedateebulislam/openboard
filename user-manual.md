@@ -1,10 +1,10 @@
-﻿# OpenBoard User Manual
+﻿# OpenBoardCLI User Manual
 
-This manual is for humans using the OpenBoard terminal UI.
+This manual is for humans using the OpenBoardCLI terminal UI.
 
-## What OpenBoard Does
+## What OpenBoardCLI Does
 
-OpenBoard turns CSV/Excel/JSON data into a deployed analytics app. It creates one shared React app called the OpenBoard workspace. Each dashboard you add becomes a tab in that app; tab composition is managed by OpenBoard itself, so one change can never break another dashboard's tab.
+OpenBoardCLI turns CSV/Excel/JSON data into a deployed analytics app. It creates one shared React app called the OpenBoardCLI workspace. Each dashboard you add becomes a tab in that app; tab composition is managed by OpenBoardCLI itself, so one change can never break another dashboard's tab.
 
 The workflow is:
 
@@ -30,7 +30,7 @@ npm run build
 node dist/index.js start
 ```
 
-`openboard --version` shows the OpenBoard banner. `openboard --help` shows CLI commands.
+`openboard --version` shows the OpenBoardCLI banner. `openboard --help` shows CLI commands.
 
 ## Main Menu
 
@@ -38,7 +38,7 @@ The TUI opens with:
 
 ```text
 ╔═══════════════════════════════════════╗
-║        [_-_] O p e n B o a r d        ║
+║           [>_] OpenBoardCLI           ║
 ║     Analytics Dashboard Generator     ║
 ║                v2.2.0                 ║
 ╚═══════════════════════════════════════╝
@@ -134,7 +134,7 @@ allowed.
 5. Enter a CSV/XLSX/JSON file path. Pasted paths may be surrounded by quotes (e.g. Windows Explorer's "Copy as path") — they're stripped automatically.
 6. Enter the dashboard name.
 7. Confirm after data analysis.
-8. OpenBoard enters the internal LLM chat.
+8. OpenBoardCLI enters the internal LLM chat.
 
 If no LLM is configured yet, step 1 shows a warning up front pointing to Setup.
 If the data file can't be read or the name is invalid, ESC returns you to that
@@ -155,7 +155,7 @@ LLM - <provider> · <model> · effort: <level> · Mode: <app mode>
 Chat to create or modify this dashboard
 ```
 
-OpenBoard auto-generates the first dashboard from your data only on this first creation flow.
+OpenBoardCLI auto-generates the first dashboard from your data only on this first creation flow.
 
 ## Modify An Existing Dashboard
 
@@ -175,7 +175,7 @@ Chat roles:
 |---|---|
 | `You` | Your message (green) |
 | `LLM` | Model response (yellow) |
-| `Sys` | OpenBoard system/status message (cyan — informational, never an error) |
+| `Sys` | OpenBoardCLI system/status message (cyan — informational, never an error) |
 | `Err` | Error (red — the only red messages) |
 
 Errors are always shown in plain, actionable language — a bad API key,
@@ -188,7 +188,7 @@ The first system message is:
 Sys: Type a message to generate components or use slash commands (/help for list)
 ```
 
-While waiting for the first response token, OpenBoard shows a compact spinner and a playful loading line (rotates every 10 seconds). Once the model starts streaming — or a build/deploy pipeline starts — a single elapsed-time/progress indicator takes over. Pipeline steps are numbered against the running operation (a plain `/build` shows `[1/1] Building project`).
+While waiting for the first response token, OpenBoardCLI shows a compact spinner and a playful loading line (rotates every 10 seconds). Once the model starts streaming — or a build/deploy pipeline starts — a single elapsed-time/progress indicator takes over. Pipeline steps are numbered against the running operation (a plain `/build` shows `[1/1] Building project`).
 
 ## Chat Commands
 
@@ -214,7 +214,7 @@ Commands must start with `/`.
 | `/commands` | Show command palette |
 | `/help` | Show command help |
 
-When you start typing `/`, OpenBoard shows matching command suggestions with color coding.
+When you start typing `/`, OpenBoardCLI shows matching command suggestions with color coding.
 
 ## Deploy
 
@@ -251,7 +251,7 @@ Use `/update` when the linked CSV/JSON file changed and you want the same dashbo
 You: /update
 ```
 
-OpenBoard reads the linked data file, uses saved prompt history, asks the LLM to update the dashboard tab, then builds, pushes, and deploys.
+OpenBoardCLI reads the linked data file, uses saved prompt history, asks the LLM to update the dashboard tab, then builds, pushes, and deploys.
 
 ## Dashboard List
 
@@ -265,10 +265,10 @@ The Dashboards menu lets you:
 
 Removing a dashboard runs a full cleanup so the deployed app matches the registry:
 
-1. Deterministically removes its tab from OpenBoard's dashboard manifest (no LLM involved).
+1. Deterministically removes its tab from OpenBoardCLI's dashboard manifest (no LLM involved).
 2. Deletes the dashboard's orphaned component files that no remaining dashboard uses.
 3. Deletes the dashboard's protected API data (`api/_data/<slug>.json` and its entry in the shared data module).
-4. Removes it from the OpenBoard registry and removes its local prompt-history file.
+4. Removes it from the OpenBoardCLI registry and removes its local prompt-history file.
 5. Refreshes the master Overview tab, then rebuilds (and pushes/deploys in the deploying modes).
 
 If code cleanup fails, the dashboard is left registered so the live app is never left half-removed. Removing the last dashboard restores the empty starter app.
@@ -298,21 +298,21 @@ Use Settings when tokens cannot be decrypted or external auth fails.
 
 ## Integrations → Gmail
 
-Turn invoice emails into per-biller spending dashboards. OpenBoard ships
+Turn invoice emails into per-biller spending dashboards. OpenBoardCLI ships
 ready-made fetchers for **Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy
 Instamart, Uber, Urban Company and Zomato**, and will drive any
 `fetch_<biller>.py` you write yourself. Each one reads Gmail over IMAP and
-appends rows to `data/invoices/<biller>.csv`; OpenBoard enables them, runs them
+appends rows to `data/invoices/<biller>.csv`; OpenBoardCLI enables them, runs them
 on a schedule, and turns each biller's invoices into its own dashboard.
 
-The quickest start is **Install the fetchers bundled with OpenBoard**, offered
+The quickest start is **Install the fetchers bundled with OpenBoardCLI**, offered
 as the first option when nothing is set up yet. It copies them into the folder
 below and configures the path in one step. Running it again only adds fetchers
 that are missing — anything you have edited is left untouched.
 
-**Where to keep everything.** OpenBoard suggests — and pre-fills — one canonical
+**Where to keep everything.** OpenBoardCLI suggests — and pre-fills — one canonical
 layout, so the scripts, your invoice data, and the credentials they need all sit
-together under OpenBoard's own folder:
+together under OpenBoardCLI's own folder:
 
 ```text
 ~/.openboard/billers/
@@ -329,10 +329,10 @@ if you already keep them somewhere, but that folder must have the same
 
 Integrations → Gmail, in this order:
 
-0. **Install the fetchers bundled with OpenBoard** — offered first when nothing
+0. **Install the fetchers bundled with OpenBoardCLI** — offered first when nothing
    is configured. Skip this only if you keep your own scripts elsewhere.
 1. **Invoice scripts folder** — the folder holding your `fetch_*.py` files (paste
-   with or without quotes). OpenBoard reads each script's own `KEY` and
+   with or without quotes). OpenBoardCLI reads each script's own `KEY` and
    `DISPLAY_NAME` constants to build the biller list, so nothing is hardcoded and
    `fetch_pending_invoices.py` / `run_backfill_invoices_new.py` are ignored (they
    are not per-biller fetchers).
@@ -353,17 +353,17 @@ Integrations → Gmail, in this order:
    terminated; billers already finished keep their invoices, and the schedule
    stays anchored so stopping does not cause a full re-fetch next time.
 
-Fetching runs in-process, only while OpenBoard is open — no background daemon. The
+Fetching runs in-process, only while OpenBoardCLI is open — no background daemon. The
 meta line reads `fetching now` during a run and `next in …` otherwise. The last run
-time is remembered between sessions, so reopening OpenBoard does not re-fetch
+time is remembered between sessions, so reopening OpenBoardCLI does not re-fetch
 everything; an overdue run starts shortly after launch.
 
 The schedule is anchored when a run **starts**, not when it finishes. A fetch across
-many billers takes minutes, and quitting OpenBoard part-way used to discard the
+many billers takes minutes, and quitting OpenBoardCLI part-way used to discard the
 record of work that had already happened — so the next launch found the schedule
 overdue and fetched everything again.
 
-After each biller runs, OpenBoard compares its CSV before and after. New invoices
+After each biller runs, OpenBoardCLI compares its CSV before and after. New invoices
 refresh that biller's dashboard (using the closest category preset — Zomato and
 Swiggy become Food, Uber and Rapido become Travel, Amazon becomes Shopping). If a
 biller has data but no dashboard yet — common when you bring an existing CSV with
@@ -378,12 +378,12 @@ is still there; PgUp/PgDn scroll it.
 ### Add your own biller (Biller Studio)
 
 The eight bundled fetchers will not cover your billers. Choose **`✚ Add a new
-biller (Biller Studio)`** and OpenBoard writes one for you.
+biller (Biller Studio)`** and OpenBoardCLI writes one for you.
 
 1. **Sender address** — where those receipts come from, e.g. `noreply@bigbasket.com`.
 2. **Subject contains** — a fragment that separates receipts from marketing mail,
    e.g. `Your order`. Enter `-` to match every email from that sender.
-3. OpenBoard finds one real matching email and **shows you the exact text** it
+3. OpenBoardCLI finds one real matching email and **shows you the exact text** it
    wants to send to your LLM provider, with the character count. Nothing leaves
    your machine until you type `yes`.
 4. It lists the fields it can extract, each with the value it found, so you can
@@ -411,7 +411,7 @@ subprocess or `eval` is refused, because the sample email is text somebody else
 wrote. Fetchers need **Python 3 with `beautifulsoup4`** (plus `pdfplumber` for
 PDF billers).
 
-## Files OpenBoard Uses
+## Files OpenBoardCLI Uses
 
 ```text
 ~/.openboard/config.json
@@ -423,7 +423,7 @@ When invoice fetchers are configured, these live next to your scripts folder
 (two levels above it, where the scripts themselves expect them):
 
 ```text
-<repo>/secrets/gmail_app_credentials.json   (written by OpenBoard, plain text)
+<repo>/secrets/gmail_app_credentials.json   (written by OpenBoardCLI, plain text)
 <repo>/data/invoices/<biller>.csv           (written by each fetcher)
 <repo>/data/invoices/raw/<biller>/          (raw mail + per-biller dedup state)
 ```
@@ -456,7 +456,7 @@ Re-enter the Vercel token in Settings. If you rely on Git integration, confirm d
 
 ### GitHub author blocked by Vercel
 
-OpenBoard repairs `openboard@local` commits by using the saved GitHub username or token identity before pushing.
+OpenBoardCLI repairs `openboard@local` commits by using the saved GitHub username or token identity before pushing.
 
 ### Dashboard did not update
 
@@ -468,7 +468,7 @@ Check:
 
 ### Build failed
 
-Try a smaller prompt or ask the LLM to simplify the dashboard. OpenBoard also runs pre-deploy checks to relax common generated-code build blockers. If every automatic repair attempt returns no code at all, the error explains this directly — it usually means a local "thinking" model spent its whole response budget on internal reasoning. Switch that dashboard to Low quality (or a smaller/non-reasoning local model), or increase the model's max output tokens in your local server settings.
+Try a smaller prompt or ask the LLM to simplify the dashboard. OpenBoardCLI also runs pre-deploy checks to relax common generated-code build blockers. If every automatic repair attempt returns no code at all, the error explains this directly — it usually means a local "thinking" model spent its whole response budget on internal reasoning. Switch that dashboard to Low quality (or a smaller/non-reasoning local model), or increase the model's max output tokens in your local server settings.
 
 ### A dashboard tab shows "failed to load"
 

@@ -1,5 +1,5 @@
 /**
- * Serve a generated OpenBoard app for the UI suite.
+ * Serve a generated OpenBoardCLI app for the UI suite.
  *
  * The generated app is behind a login, and the workspace `.env` stores only a
  * bcrypt hash — the plaintext password is not recoverable, so the suite cannot

@@ -198,7 +198,7 @@ export function codexReasoningEffort(effort: LLMEffort | undefined): 'low' | 'me
 
 /**
  * Migrate model aliases that the API catalog may expose but ChatGPT-backed
- * Codex does not accept. Existing OpenBoard configs can contain the old bare
+ * Codex does not accept. Existing OpenBoardCLI configs can contain the old bare
  * `gpt-5.6` value, so normalize it at runtime instead of breaking regeneration.
  */
 export function normalizeCodexSubscriptionModel(model: string): string {

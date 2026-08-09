@@ -1,5 +1,5 @@
 /**
- * Deployment type definitions for OpenBoard.
+ * Deployment type definitions for OpenBoardCLI.
  * Covers GitHub repository creation and Vercel deployment.
  */
 

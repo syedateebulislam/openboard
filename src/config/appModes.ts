@@ -1,7 +1,7 @@
 /**
  * App modes — the privacy contract the user picks before anything else.
  *
- * The mode is the FIRST choice OpenBoard asks for, so the user knows from the
+ * The mode is the FIRST choice OpenBoardCLI asks for, so the user knows from the
  * beginning exactly what the end result is and what leaves their machine.
  *
  * A mode is a point on two independent axes — where generation runs, and where

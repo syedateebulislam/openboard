@@ -1,7 +1,7 @@
 /**
- * SetupService — non-interactive OpenBoard configuration.
+ * SetupService — non-interactive OpenBoardCLI configuration.
  *
- * Mirrors the TUI setup wizard so an automation agent can configure OpenBoard
+ * Mirrors the TUI setup wizard so an automation agent can configure OpenBoardCLI
  * (LLM provider, GitHub token, Vercel token, dashboard login) without opening
  * the interactive UI. Each credential is validated before it is saved, and
  * secrets are stored encrypted exactly as the TUI stores them.
@@ -37,7 +37,7 @@ import { discoverBillers, validateScriptsDir } from '../billers/BillerDiscoveryS
 
 export type ProgressFn = (line: string) => void;
 
-/** Providers OpenBoard's setup supports (subset of the LLMConfig union). */
+/** Providers OpenBoardCLI's setup supports (subset of the LLMConfig union). */
 const PROVIDERS = LLM_PROVIDER_NAMES;
 type SetupProvider = LLMConfig['provider'];
 
@@ -98,7 +98,7 @@ export interface SetupDeps {
   ghLogin(token: string): Promise<void>;
   validateVercelToken(token: string): Promise<{ success: boolean; error?: string }>;
   /**
-   * Sign codex in (OpenBoard's isolated codex home) when not already logged in:
+   * Sign codex in (OpenBoardCLI's isolated codex home) when not already logged in:
    * an access token or API key is fully headless; otherwise device-auth streams
    * a URL/code via onProgress.
    */
@@ -110,7 +110,7 @@ const defaultDeps: SetupDeps = {
   validateGitHubToken: async (token) => {
     try {
       const res = await fetch('https://api.github.com/user', {
-        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'OpenBoard-CLI', Accept: 'application/vnd.github+json' },
+        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'OpenBoardCLI', Accept: 'application/vnd.github+json' },
       });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
@@ -208,7 +208,7 @@ export class SetupService {
 
     // Codex: if not already signed in, sign in headlessly (access token / API
     // key) or via device-auth (URL+code streamed through onProgress). The codex
-    // CLI holds the auth in OpenBoard's isolated codex home — no key is stored.
+    // CLI holds the auth in OpenBoardCLI's isolated codex home — no key is stored.
     if (provider === 'openai-codex') {
       let validation = await this.deps.validateLLM(llmConfig);
       if (!validation.valid) {

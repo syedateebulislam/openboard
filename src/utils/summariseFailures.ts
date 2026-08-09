@@ -4,7 +4,7 @@
  * Batch operations fail as a group far more often than individually: one
  * project lock, one missing workspace, one dead network. Joining every result's
  * error verbatim then repeats a single cause once per dashboard — a real report
- * read "Project is locked by another OpenBoard run (pid 2700, since ...). Retry
+ * read "Project is locked by another OpenBoardCLI run (pid 2700, since ...). Retry
  * after it finishes." nine times in one line, filling the log pane and pushing
  * everything that led up to it out of view.
  *

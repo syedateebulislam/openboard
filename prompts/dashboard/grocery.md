@@ -1,6 +1,6 @@
 Build an engaging, mobile-first grocery-spend dashboard tab for this dataset that works for any store, app, or receipt export — never hardcode store names; infer the useful fields dynamically from the column names and value patterns in the data.
 
-Data model (OpenBoard):
+Data model (OpenBoardCLI):
 - This dashboard tab loads its real rows at runtime from `useProtectedDashboardData('<dashboard-name>')`. There is NO file upload — the rows are already parsed and served behind authentication. Derive every metric, chart, and table from that hook's rows.
 - Dynamically detect the meaningful columns from row keys, case-insensitively: purchase/order date, store/merchant/vendor, item/product/description, unit price/amount/total, quantity, category, and any budget field — prefer a final paid amount over a subtotal.
 - Normalize each row into a common internal shape in a `utils/` helper: parse prices and quantities safely (strip currency symbols, commas, spaces), handle missing/negative values, parse dates with date-fns across common formats, and never throw on bad input. Mark a row excluded when no valid amount or date is found, and keep an exclusion reason.
@@ -13,4 +13,4 @@ Layout (top to bottom):
 - A REQUIRED "Recent Records" raw-data table at the bottom using the `.data-table` class: render the hook rows sorted by purchase date DESCENDING (the 10 most recent purchases visible by default) with client-side pagination (page sizes 10/25/50/100), column sorting, and a text search, plus computed columns (normalized price, normalized date, normalized store, included flag, exclusion reason). Sticky header, horizontal scroll on small screens.
 - A compact data-quality panel: total rows, included, excluded, missing-price rows, invalid-date rows, duplicates, and a short note on which columns were auto-detected as date/store/item/price/quantity/category.
 
-Keep it cohesive with the OpenBoard design system: use the shared utility classes and CSS variables (never hardcoded colors), `var(--chart-N)` for series colors, currency/number/date formatting via Intl and date-fns, and split the work into a main tab component plus small components in `components/` and pure helpers in `utils/`. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.
+Keep it cohesive with the OpenBoardCLI design system: use the shared utility classes and CSS variables (never hardcoded colors), `var(--chart-N)` for series colors, currency/number/date formatting via Intl and date-fns, and split the work into a main tab component plus small components in `components/` and pure helpers in `utils/`. Do not add new dependencies, do not embed raw rows in source, and do not build any upload UI.

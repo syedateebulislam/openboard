@@ -19,9 +19,9 @@ Mode note: in the `local` and `hybrid` app modes the pipeline intentionally ends
 
 ---
 
-This file is for automation agents, scheduled jobs, and cron-style tools that need to create or update OpenBoard dashboards without opening the interactive TUI.
+This file is for automation agents, scheduled jobs, and cron-style tools that need to create or update OpenBoardCLI dashboards without opening the interactive TUI.
 
-OpenBoard owns the complete workflow:
+OpenBoardCLI owns the complete workflow:
 
 ```mermaid
 flowchart TD
@@ -37,7 +37,7 @@ flowchart TD
 
 ## Prerequisites
 
-OpenBoard is configured around an **app mode** — set it first, because it decides which other parts are needed (and allowed):
+OpenBoardCLI is configured around an **app mode** — set it first, because it decides which other parts are needed (and allowed):
 
 | Mode | LLM | Output | GitHub/Vercel |
 |---|---|---|---|
@@ -80,7 +80,7 @@ node dist/index.js --help
 
 ## Headless Setup
 
-Configure OpenBoard without the interactive TUI — give an agent the tokens and it wires everything up. Each credential is validated before it is saved (encrypted at rest). `openboard agent setup status` shows what is configured.
+Configure OpenBoardCLI without the interactive TUI — give an agent the tokens and it wires everything up. Each credential is validated before it is saved (encrypted at rest). `openboard agent setup status` shows what is configured.
 
 ```bash
 # All remote (full pipeline) in one call — mode is applied first:
@@ -121,7 +121,7 @@ In the TUI these live under **Integrations → Gmail**.
 
 Per-biller invoice scripts (one `fetch_<biller>.py` each, reading Gmail over IMAP and appending to `data/invoices/<biller>.csv`). They authenticate over IMAP with a Gmail App Password.
 
-OpenBoard ships fetchers for Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy Instamart, Uber, Urban Company and Zomato inside the package at `scripts/invoice_fetchers/`. A human installs them with one keypress in the TUI; there is no headless installer, because writing executable scripts onto a machine should be an explicit human action. Point `--scripts-dir` at your own folder to use your own instead.
+OpenBoardCLI ships fetchers for Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy Instamart, Uber, Urban Company and Zomato inside the package at `scripts/invoice_fetchers/`. A human installs them with one keypress in the TUI; there is no headless installer, because writing executable scripts onto a machine should be an explicit human action. Point `--scripts-dir` at your own folder to use your own instead.
 
 There is no interactive step here, so an agent can configure it completely:
 
@@ -140,7 +140,7 @@ openboard agent billers sync --json
 openboard agent billers sync --biller zomato --json
 ```
 
-Billers are **discovered, never hardcoded**: OpenBoard scans `--scripts-dir` for `fetch_*.py` files and reads each script's own `KEY`/`DISPLAY_NAME` constants. `fetch_pending_invoices.py` and `run_backfill_invoices_new.py` are excluded (they are not per-biller fetchers). `--biller-key` accepts only discovered keys and *replaces* the enabled set; `status` lists the valid keys.
+Billers are **discovered, never hardcoded**: OpenBoardCLI scans `--scripts-dir` for `fetch_*.py` files and reads each script's own `KEY`/`DISPLAY_NAME` constants. `fetch_pending_invoices.py` and `run_backfill_invoices_new.py` are excluded (they are not per-biller fetchers). `--biller-key` accepts only discovered keys and *replaces* the enabled set; `status` lists the valid keys.
 
 Each biller's CSV is hashed before and after its run. Changed output refreshes that biller's dashboard (mapped to a category preset — `zomato`/`swiggy_*` → food, `uber_rides`/`rapido`/`amazon_pay` → travel, `amazon` → shopping, `urban_company` → utilities, otherwise custom) via the normal update pipeline. Unchanged output ends the run with no LLM call **only if a dashboard already exists**; a biller with data but no dashboard gets one built from the CSV already on disk, so adopting an existing CSV does not require waiting for new mail.
 
@@ -157,7 +157,7 @@ Each biller's CSV is hashed before and after its run. Changed output refreshes t
 
 `ok: true, changed: false` alone cannot tell a healthy no-op from a biller with nothing to look at — read `dashboardExists` for that.
 
-Credentials are passed to each fetcher through its **process environment** (`OPENBOARD_GMAIL_EMAIL`, `OPENBOARD_GMAIL_APP_PASSWORD`), never written to disk. Fetchers installed by OpenBoard ≤ 1.9.0 read a plaintext file instead; they are patched in place on the next run, preserving any edits.
+Credentials are passed to each fetcher through its **process environment** (`OPENBOARD_GMAIL_EMAIL`, `OPENBOARD_GMAIL_APP_PASSWORD`), never written to disk. Fetchers installed by OpenBoardCLI ≤ 1.9.0 read a plaintext file instead; they are patched in place on the next run, preserving any edits.
 
 Fetches are serialised by a lock on the billers root. If a TUI scheduler tick or another `billers sync` is already running, this one returns `results: []` and logs that it was skipped rather than racing it — so a cron-driven sync overlapping an open TUI is safe.
 
@@ -177,7 +177,7 @@ Flags:
 | `--biller-since-days` | How far back each fetcher searches (default 30) |
 | `--biller` | `billers sync` only: run just this one biller |
 
-OpenBoard writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` in plain text because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Owner-only (`0600`) permissions are requested but only apply on POSIX — on Windows the file inherits the folder's ACLs. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
+OpenBoardCLI writes `<scripts-dir>/../../secrets/gmail_app_credentials.json` in plain text because the Python fetchers cannot decrypt anything; its own copy of the password stays encrypted in `~/.openboard/config.json`. Owner-only (`0600`) permissions are requested but only apply on POSIX — on Windows the file inherits the folder's ACLs. Only `python`/`python3`/`py` are ever spawned, only on `.py` files directly inside the configured folder, and only with numeric/enum arguments.
 
 Flags:
 
@@ -198,7 +198,7 @@ Secrets can also come from env vars (preferred — flags can appear in process l
 
 ### OpenAI Codex sign-in (headless)
 
-`setup llm --provider openai-codex` signs codex in if it isn't already, using OpenBoard's isolated codex home — no TUI required. Three modes, in priority order:
+`setup llm --provider openai-codex` signs codex in if it isn't already, using OpenBoardCLI's isolated codex home — no TUI required. Three modes, in priority order:
 
 ```bash
 # 1. Fully headless with a ChatGPT/Codex access token (or OPENBOARD_CODEX_ACCESS_TOKEN):
@@ -215,12 +215,12 @@ openboard agent setup llm --provider openai-codex --json
 For device-auth, the URL and code stream to **stderr** (stdout stays clean JSON), so an agent can forward them to the user (e.g. via chat). The command blocks until sign-in completes or times out (~10 min).
 
 Notes:
-- No codex key/token is stored by OpenBoard — the codex CLI holds the auth in `~/.openboard/codex-home`.
+- No codex key/token is stored by OpenBoardCLI — the codex CLI holds the auth in `~/.openboard/codex-home`.
 - On failure, JSON includes a per-part `errorCode` (`E_VALIDATION`, `E_LLM_FAILED`, `E_DEPLOY_AUTH`).
 
 ## Create Dashboard
 
-Use this when the agent has a new CSV/JSON data source and wants OpenBoard to add a new tab to the shared dashboard app.
+Use this when the agent has a new CSV/JSON data source and wants OpenBoardCLI to add a new tab to the shared dashboard app.
 
 ```bash
 openboard agent create --data "<csv-or-json-path>" --name "<dashboard title>"
@@ -310,7 +310,7 @@ Each dashboard is regenerated from its own linked data with the same prompt; das
 
 ## Remove All Dashboards
 
-Remove every dashboard at once. The generated app is reset to the empty OpenBoard shell (auth, brand logo, and theme toggle preserved), all dashboard components + protected data are deleted, the registry is cleared, and the app is redeployed once. The workspace folder and GitHub/Vercel project are kept.
+Remove every dashboard at once. The generated app is reset to the empty OpenBoardCLI shell (auth, brand logo, and theme toggle preserved), all dashboard components + protected data are deleted, the registry is cleared, and the app is redeployed once. The workspace folder and GitHub/Vercel project are kept.
 
 ```bash
 openboard agent remove --all --json
@@ -357,7 +357,7 @@ Returns a `plan` (title, selector, type, rowCount, columnCount, dataSummary) wit
 
 ## Idempotency
 
-Pass `--idempotency-key <key>` to `agent create`. If a previous run with the same key succeeded, OpenBoard returns that run's result (`"reused": true`) instead of creating a duplicate dashboard. Use this when your orchestrator retries on timeout.
+Pass `--idempotency-key <key>` to `agent create`. If a previous run with the same key succeeded, OpenBoardCLI returns that run's result (`"reused": true`) instead of creating a duplicate dashboard. Use this when your orchestrator retries on timeout.
 
 ## Resume
 
@@ -473,9 +473,9 @@ Agent create failed: No LLM provider configured. Configure LLM settings first.
 
 ## File Rules
 
-Agents should not edit OpenBoard config, prompt-history, or generated app files directly unless explicitly asked.
+Agents should not edit OpenBoardCLI config, prompt-history, or generated app files directly unless explicitly asked.
 
-OpenBoard stores:
+OpenBoardCLI stores:
 
 ```text
 ~/.openboard/config.json
@@ -499,7 +499,7 @@ Use `openboard agent create` when:
 
 - The user provides a new data file.
 - There is no existing dashboard selector.
-- A new tab should be added to the shared OpenBoard UI.
+- A new tab should be added to the shared OpenBoardCLI UI.
 
 Use `openboard agent update` when:
 

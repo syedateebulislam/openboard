@@ -125,7 +125,7 @@ export class TemplateService {
    * @returns the project-relative paths that were synced
    */
   async syncShellFiles(outputDir: string, vars?: ScaffoldVars): Promise<string[]> {
-    const effectiveVars = vars ?? { boardName: 'openboard-workspace', boardTitle: 'OpenBoard' };
+    const effectiveVars = vars ?? { boardName: 'openboard-workspace', boardTitle: 'OpenBoardCLI' };
     // Files are independent — copy them concurrently.
     const results = await Promise.all(SHELL_SYNC_FILES.map(async (relPath) => {
       const srcPath = resolve(this.templatesDir, relPath);
@@ -141,7 +141,7 @@ export class TemplateService {
   }
 
   /**
-   * Reset src/App.tsx to the blank OpenBoard shell from the template. Used by
+   * Reset src/App.tsx to the blank OpenBoardCLI shell from the template. Used by
    * "remove all dashboards" to deterministically clear every tab while keeping
    * the auth shell, brand logo, and theme toggle. The template App.tsx has no
    * {{TEMPLATE}} variables, so a direct copy is safe.

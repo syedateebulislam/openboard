@@ -112,7 +112,7 @@ describe('messageText', () => {
 
   it('falls back to reasoning_content when content is empty', () => {
     // Observed verbatim in the session log: content "" beside 4,603 reasoning
-    // tokens, which read to OpenBoard as a model that said nothing.
+    // tokens, which read to OpenBoardCLI as a model that said nothing.
     expect(messageText({ content: '', reasoning_content: 'the answer' })).toBe('the answer');
     expect(messageText({ content: '   ', reasoning_content: 'the answer' })).toBe('the answer');
   });

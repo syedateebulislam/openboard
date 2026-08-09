@@ -1,5 +1,5 @@
 /**
- * LLM (Large Language Model) type definitions for OpenBoard.
+ * LLM (Large Language Model) type definitions for OpenBoardCLI.
  */
 
 export type LLMProviderName =

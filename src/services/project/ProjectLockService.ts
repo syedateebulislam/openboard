@@ -1,5 +1,5 @@
 /**
- * ProjectLockService — per-project-directory lockfile so concurrent OpenBoard
+ * ProjectLockService — per-project-directory lockfile so concurrent OpenBoardCLI
  * runs (e.g. a cron `update --all` overlapping a manual TUI deploy) don't
  * mutate the same generated workspace at once.
  *
@@ -104,7 +104,7 @@ export class ProjectLockService {
         if (existing?.pid === process.pid && HELD.has(lockPath)) {
           return {
             success: false,
-            error: 'Another OpenBoard operation is already working on this project. Wait for it to finish.',
+            error: 'Another OpenBoardCLI operation is already working on this project. Wait for it to finish.',
             release: () => {},
           };
         }
@@ -118,7 +118,7 @@ export class ProjectLockService {
             // The path matters: pids get recycled, so a lock left by a crashed
             // run can look alive for the full staleness window. Without it the
             // user has no way out but to wait.
-            error: `Project is locked by another OpenBoard run (pid ${existing!.pid}, since ${existing!.createdAt}). ` +
+            error: `Project is locked by another OpenBoardCLI run (pid ${existing!.pid}, since ${existing!.createdAt}). ` +
               `Retry after it finishes, or delete ${lockPath} if no other run is active.`,
             release: () => {},
           };

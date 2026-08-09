@@ -1,6 +1,6 @@
 /* ============================================================================
-   OpenBoard Design System — shared utility layer for the master shell and
-   every generated dashboard tab. The visual identity matches the OpenBoard
+   OpenBoardCLI Design System — shared utility layer for the master shell and
+   every generated dashboard tab. The visual identity matches the OpenBoardCLI
    website (openboard-site): warm near-black surfaces, copper accent,
    monospace labels, graph-paper background. Components must style themselves
    with these variables and utility classes (never hardcoded hex colors) so

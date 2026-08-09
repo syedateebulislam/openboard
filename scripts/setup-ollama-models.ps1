@@ -1,7 +1,7 @@
-# OpenBoard Ollama Models Setup Script
+# OpenBoardCLI Ollama Models Setup Script
 # Pulls all recommended models under 15GB
 
-Write-Host "🦙 OpenBoard Ollama Models Setup" -ForegroundColor Magenta
+Write-Host "🦙 OpenBoardCLI Ollama Models Setup" -ForegroundColor Magenta
 Write-Host "=================================" -ForegroundColor Magenta
 Write-Host ""
 
@@ -158,7 +158,7 @@ Write-Host ""
 Write-Host "List installed models:" -ForegroundColor Yellow
 Write-Host "  ollama list" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Use with OpenBoard:" -ForegroundColor Yellow
+Write-Host "Use with OpenBoardCLI:" -ForegroundColor Yellow
 Write-Host "  openboard" -ForegroundColor Cyan
 Write-Host "  → Select Ollama" -ForegroundColor Gray
 Write-Host "  → Select your model from the menu" -ForegroundColor Gray

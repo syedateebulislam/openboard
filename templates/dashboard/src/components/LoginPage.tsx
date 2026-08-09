@@ -37,7 +37,7 @@ export function LoginPage() {
         <div className="app-header-side" />
         <div className="app-brand">
           <BrandLogo />
-          <h1 className="app-title">OpenBoard</h1>
+          <h1 className="app-title">OpenBoardCLI</h1>
         </div>
         <div className="app-header-side" />
       </header>

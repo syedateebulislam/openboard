@@ -58,7 +58,7 @@ export class DataParserService {
     // Lazy import — ExcelJS is only loaded when an Excel file is parsed.
     const { default: ExcelJS } = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
-    // Feed ExcelJS a stream so OpenBoard does not retain a duplicate file buffer.
+    // Feed ExcelJS a stream so OpenBoardCLI does not retain a duplicate file buffer.
     await workbook.xlsx.read(createReadStream(filePath));
     const sheet = workbook.worksheets[0];
     if (!sheet) {

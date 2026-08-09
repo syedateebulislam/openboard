@@ -48,7 +48,7 @@ export type Screen =
   | 'deploy'
   | 'integrations'
   // Gmail sits under Integrations, not Settings: reading invoices is a way data
-  // gets into OpenBoard, not a preference about how it behaves.
+  // gets into OpenBoardCLI, not a preference about how it behaves.
   | 'integrations-gmail'
   | 'settings'
   | 'settings-mode'
@@ -60,7 +60,7 @@ export type Screen =
 
 /** One line per settings row, shown for the highlighted one. */
 const SETTINGS_DETAIL: Record<string, string> = {
-  mode: 'What OpenBoard produces — and what leaves your machine.',
+  mode: 'What OpenBoardCLI produces — and what leaves your machine.',
   llm: 'Which model generates dashboards, and where it runs.',
   github: 'Token used to push the generated app. Encrypted locally.',
   vercel: 'Token used to deploy. Encrypted locally.',
@@ -280,7 +280,7 @@ export function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
       const response = await fetch('https://api.github.com/user', {
         headers: {
           Authorization: `Bearer ${trimmed}`,
-          'User-Agent': 'OpenBoard-TUI',
+          'User-Agent': 'OpenBoardCLI-TUI',
         },
       });
 

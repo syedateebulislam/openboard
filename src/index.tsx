@@ -19,7 +19,7 @@ const cli = meow(`
     $ openboard [command] [options]
 
   Commands
-    start          Launch the OpenBoard TUI
+    start          Launch the OpenBoardCLI TUI
     update         Update dashboards non-interactively
     rollback       Roll a dashboard back to the previous deploy
     agent          Agent automation commands:
@@ -195,7 +195,7 @@ if (cli.flags.version) {
   const B = '\x1b[1m';
   const R = '\x1b[0m';
   console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
-  console.log(`${B}${F}║${L}        [_-_] O p e n B o a r d        ${F}║${R}`);
+  console.log(`${B}${F}║${L}           [>_] OpenBoardCLI           ${F}║${R}`);
   console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
   console.log(`${B}${F}║${S}${bannerVersionLine()}${F}║${R}`);
   console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
@@ -311,7 +311,7 @@ function boardStatus(board: BoardConfig) {
 if (!command || command === 'start') {
   // Check if running in interactive terminal (TTY)
   if (!process.stdin.isTTY) {
-    console.error('Error: OpenBoard requires an interactive terminal (TTY).');
+    console.error('Error: OpenBoardCLI requires an interactive terminal (TTY).');
     console.error('Please run this command directly in your terminal, not via pipes or redirects.');
     process.exit(1);
   }
@@ -679,7 +679,7 @@ if (!command || command === 'start') {
     }
     if (jsonMode) printJson(successPayload('remove-all', removeResult));
     else {
-      console.log('Removed all dashboards. The generated app now shows the empty OpenBoard shell.');
+      console.log('Removed all dashboards. The generated app now shows the empty OpenBoardCLI shell.');
       if (removeResult.deployUrl) console.log(`Deployment: ${removeResult.deployUrl}`);
     }
     process.exit(0);

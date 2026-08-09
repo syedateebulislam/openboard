@@ -8,7 +8,7 @@
  * one test with the actual compiler message.
  *
  * It also records the workspace's own mtimes, because the workspace is a live
- * directory: OpenBoard regenerates dashboards there while it runs, and a suite
+ * directory: OpenBoardCLI regenerates dashboards there while it runs, and a suite
  * that photographs a target being rewritten underneath it will produce diffs
  * nobody can reproduce.
  */
@@ -37,13 +37,13 @@ test.describe('smoke', () => {
     const tabs = dashboardTabs(workspace);
     expect(tabs.length, 'the manifest should declare at least one dashboard').toBeGreaterThan(0);
 
-    // A dashboard rewritten in the last minute means OpenBoard is generating
+    // A dashboard rewritten in the last minute means OpenBoardCLI is generating
     // right now; screenshots taken against that are not reproducible.
     const manifest = join(workspace, 'src', 'generated', 'dashboardManifest.tsx');
     const ageMs = Date.now() - statSync(manifest).mtimeMs;
     expect(
       ageMs,
-      'The workspace was modified seconds ago — close OpenBoard (or let its fetch finish) before capturing screenshots.',
+      'The workspace was modified seconds ago — close OpenBoardCLI (or let its fetch finish) before capturing screenshots.',
     ).toBeGreaterThan(60_000);
   });
 });

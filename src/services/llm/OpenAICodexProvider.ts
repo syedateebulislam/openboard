@@ -31,16 +31,16 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 type ProgressCallback = (line: string) => void;
 
 /**
- * OpenBoard runs codex with a dedicated CODEX_HOME so its ChatGPT/Codex login
+ * OpenBoardCLI runs codex with a dedicated CODEX_HOME so its ChatGPT/Codex login
  * is isolated from OpenClaw and any manual `codex` usage. Sharing one home
  * means a rotating chatgpt refresh token gets invalidated whenever another
  * process refreshes it — the "auth dies after ~1 hour, re-login fixes it"
- * symptom. With its own home, OpenBoard logs in once and codex keeps it
+ * symptom. With its own home, OpenBoardCLI logs in once and codex keeps it
  * refreshed.
  *
  * The location is OPENBOARD_CODEX_HOME (override) or ~/.openboard/codex-home.
  * The ambient CODEX_HOME is intentionally IGNORED: when a parent tool like
- * OpenClaw spawns `openboard agent`, OpenBoard would otherwise inherit that
+ * OpenClaw spawns `openboard agent`, OpenBoardCLI would otherwise inherit that
  * tool's CODEX_HOME — a differently authed home — making the codex subprocess
  * look "not logged in". Pinning our own home keeps the agent CLI working
  * regardless of who launched it.
@@ -197,7 +197,7 @@ export class OpenAICodexProvider implements LLMProvider {
 
   static async loginWithBrowser(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
-      onProgress?.(`Signing in to OpenBoard's own codex home: ${codexHome()}`);
+      onProgress?.(`Signing in to OpenBoardCLI's own codex home: ${codexHome()}`);
       onProgress?.('A browser window will open for OpenAI Codex sign-in. Complete it, then return here.');
       onProgress?.('Headless/remote? Run: codex login --device-auth (with CODEX_HOME set to the path above).');
       return await runCodexLoginCommand(['login'], onProgress);
@@ -214,7 +214,7 @@ export class OpenAICodexProvider implements LLMProvider {
    */
   static async loginWithDeviceAuth(onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
-      onProgress?.(`Signing in to OpenBoard's own codex home: ${codexHome()}`);
+      onProgress?.(`Signing in to OpenBoardCLI's own codex home: ${codexHome()}`);
       onProgress?.('Open the URL below and enter the code to authorize OpenAI Codex:');
       return await runCodexLoginCommand(['login', '--device-auth'], onProgress, undefined, 10 * 60_000);
     } catch (err: unknown) {
@@ -226,7 +226,7 @@ export class OpenAICodexProvider implements LLMProvider {
   /** Fully headless sign-in from a ChatGPT/Codex access token (read via stdin). */
   static async loginWithAccessToken(token: string, onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
-      onProgress?.(`Signing in to OpenBoard's own codex home with an access token: ${codexHome()}`);
+      onProgress?.(`Signing in to OpenBoardCLI's own codex home with an access token: ${codexHome()}`);
       return await runCodexLoginCommand(['login', '--with-access-token'], onProgress, token, 60_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -237,7 +237,7 @@ export class OpenAICodexProvider implements LLMProvider {
   /** Fully headless sign-in from an OpenAI API key (read via stdin). */
   static async loginWithApiKey(apiKey: string, onProgress?: ProgressCallback): Promise<LLMValidationResult> {
     try {
-      onProgress?.(`Signing in to OpenBoard's own codex home with an API key: ${codexHome()}`);
+      onProgress?.(`Signing in to OpenBoardCLI's own codex home with an API key: ${codexHome()}`);
       return await runCodexLoginCommand(['login', '--with-api-key'], onProgress, apiKey, 60_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -314,7 +314,7 @@ export class OpenAICodexProvider implements LLMProvider {
       const rawError = result.stderr || result.stdout || 'Codex exec failed';
       if (isCodexAuthError(rawError)) {
         throw new Error(
-          `OpenAI Codex is not signed in for OpenBoard. OpenBoard keeps its own codex login at ${codexHome()} ` +
+          `OpenAI Codex is not signed in for OpenBoardCLI. OpenBoardCLI keeps its own codex login at ${codexHome()} ` +
           `(separate from other tools). Open "openboard" → Settings → LLM → OpenAI Codex to sign in once, then retry.`,
         );
       }

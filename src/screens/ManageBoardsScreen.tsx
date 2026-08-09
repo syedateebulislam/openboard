@@ -208,7 +208,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
         return;
       }
       setPendingRemoveId(boardId);
-      log.append(`Confirm removal for "${board.title}". Cleanup will run before OpenBoard removes it from the registry.`);
+      log.append(`Confirm removal for "${board.title}". Cleanup will run before OpenBoardCLI removes it from the registry.`);
       return;
     }
 

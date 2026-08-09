@@ -20,7 +20,7 @@ const DETAIL: Record<string, string> = {
   integrations: 'Where your data comes from — Gmail invoices, and more later.',
   'manage-boards': 'Create, modify and regenerate your dashboards.',
   settings: 'Mode, provider and credentials.',
-  exit: 'Close OpenBoard.',
+  exit: 'Close OpenBoardCLI.',
 };
 
 export function WelcomeScreen({ onNavigate }: Props) {
@@ -62,7 +62,9 @@ export function WelcomeScreen({ onNavigate }: Props) {
         <Text bold color={UI_COLORS.border}>╔═══════════════════════════════════════╗</Text>
         <Text>
           <Text bold color={UI_COLORS.border}>║</Text>
-          <Text bold color={UI_COLORS.logo}>        [_-_] O p e n B o a r d        </Text>
+          {/* String literal, not JSX text: a bare `>` is not valid JSX, and it
+              keeps the 39-char padding explicit rather than significant whitespace. */}
+          <Text bold color={UI_COLORS.logo}>{'           [>_] OpenBoardCLI           '}</Text>
           <Text bold color={UI_COLORS.border}>║</Text>
         </Text>
         <Text>
