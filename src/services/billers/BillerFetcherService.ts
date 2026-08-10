@@ -37,11 +37,24 @@ import {
   repoRootFor,
 } from './BillerDiscoveryService.js';
 import { ProjectLockService } from '../project/ProjectLockService.js';
+import { toneLine } from '../../utils/logTone.js';
 
 export type ProgressCallback = (line: string) => void;
 
 /** Interpreters we are willing to spawn. Distinct from BuildService's npm/npx list. */
 const PYTHON_COMMANDS = ['python', 'python3', 'py'] as const;
+
+/**
+ * First-dashboard builds one unattended fetch may perform.
+ *
+ * Removing every dashboard leaves each enabled biller needing one, and each is
+ * a full LLM build plus a project build. Six enabled billers turned a routine
+ * scheduled fetch into six of them back to back — twenty minutes of TUI that
+ * looked hung, with nothing on screen saying that was the plan. One per run
+ * makes the background loop's cost predictable; the missing tabs still arrive,
+ * one per fetch, and the run says which are outstanding.
+ */
+export const MAX_BACKFILL_DASHBOARDS_PER_RUN = 1;
 /** Only numeric/enum args ever reach argv — no user free-text is passed through. */
 const SAFE_ARG = /^[A-Za-z0-9._:\\/-]+$/;
 
@@ -84,6 +97,33 @@ export function hashFile(path: string): Promise<string | undefined> {
       .on('data', (chunk) => hash.update(chunk))
       .on('end', () => resolvePromise(hash.digest('hex')))
       .on('error', () => resolvePromise(undefined));
+  });
+}
+
+/**
+ * Data rows in a CSV, excluding the header.
+ *
+ * The hash answers "did the file change"; this answers "by how much", which is
+ * what the log line has to say for the number to be worth reading. Counts
+ * newlines rather than parsing: a quoted field containing a newline would
+ * inflate the count slightly, which is acceptable for a progress line and not
+ * worth a CSV parser on every fetch.
+ */
+export function countCsvRows(path: string): Promise<number> {
+  if (!existsSync(path)) return Promise.resolve(0);
+  return new Promise((resolvePromise) => {
+    let newlines = 0;
+    let sawContent = false;
+    createReadStream(path)
+      .on('data', (chunk: Buffer | string) => {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+        if (text.length > 0) sawContent = true;
+        for (const char of text) if (char === '\n') newlines += 1;
+      })
+      // Header line does not count, and a file without a trailing newline still
+      // has one more row than it has newlines.
+      .on('end', () => resolvePromise(sawContent ? Math.max(0, newlines - 1) : 0))
+      .on('error', () => resolvePromise(0));
   });
 }
 
@@ -258,7 +298,17 @@ export class BillerFetcherService {
    */
   async syncBiller(
     biller: BillerScript,
-    options: { onProgress?: ProgressCallback; signal?: AbortSignal; skipDashboard?: boolean } = {},
+    options: {
+      onProgress?: ProgressCallback;
+      signal?: AbortSignal;
+      skipDashboard?: boolean;
+      /**
+       * Whether this biller may spend a backfill — building a first dashboard
+       * from data already on disk. False once the run's budget is used up; the
+       * biller is reported as deferred rather than silently skipped.
+       */
+      allowBackfill?: boolean;
+    } = {},
   ): Promise<BillerRunResult> {
     const settings = this.settings();
     const base: BillerRunResult = {
@@ -282,6 +332,7 @@ export class BillerFetcherService {
     }
 
     const before = await hashFile(biller.csvPath);
+    const rowsBefore = await countCsvRows(biller.csvPath);
     let run: { code: number; output: string };
     try {
       run = await this.runScript(biller, settings, options.onProgress, options.signal);
@@ -305,6 +356,20 @@ export class BillerFetcherService {
     const changed = Boolean(after) && before !== after;
     const existing = this.updateService.findBoard(biller.key);
 
+    // The two lines that answer "did anything happen?", coloured so they can be
+    // found without reading the fetcher output above them.
+    const newRows = Math.max(0, (await countCsvRows(biller.csvPath)) - rowsBefore);
+    if (changed) {
+      options.onProgress?.(toneLine(
+        'success',
+        newRows > 0
+          ? `[${biller.key}] ${newRows} new invoice${newRows === 1 ? '' : 's'}.`
+          : `[${biller.key}] invoices updated.`,
+      ));
+    } else {
+      options.onProgress?.(toneLine('muted', `[${biller.key}] no new invoices.`));
+    }
+
     // "Unchanged" is only a reason to stop once a dashboard already exists.
     // Gating purely on `changed` meant a biller whose CSV was already populated
     // — every biller adopted from an existing setup — reported success forever
@@ -313,6 +378,18 @@ export class BillerFetcherService {
     const needsFirstDashboard = Boolean(after) && !existing;
     if ((!changed && !needsFirstDashboard) || options.skipDashboard) {
       return { ...base, ok: true, changed, dashboardExists: Boolean(existing) };
+    }
+
+    // A backfill builds from rows already on disk, so it is never urgent — and
+    // it is the one branch that can fire for every enabled biller at once, the
+    // moment they all lack a dashboard. Bounding it per run is what stops a
+    // routine fetch turning into one LLM build per biller. A biller with new
+    // invoices is not bounded: that build is answering data that just arrived.
+    if (needsFirstDashboard && !changed && options.allowBackfill === false) {
+      options.onProgress?.(
+        `[${biller.key}] has data but no dashboard yet — left for a later run.`,
+      );
+      return { ...base, ok: true, changed, dashboardExists: false, backfillDeferred: true };
     }
 
     try {
@@ -332,6 +409,18 @@ export class BillerFetcherService {
             },
             options.onProgress,
           );
+      // Name the biller that caused the redeploy. The deploy log itself is
+      // workspace-wide ("Recorded deployment on 4 board(s)"), so without this
+      // there was nothing tying a redeployment to the invoices that triggered it.
+      if (result.success && result.deployUrl) {
+        options.onProgress?.(toneLine(
+          'success',
+          newRows > 0
+            ? `[${biller.key}] redeployed after ${newRows} new invoice${newRows === 1 ? '' : 's'}: ${result.deployUrl}`
+            : `[${biller.key}] dashboard built and deployed: ${result.deployUrl}`,
+        ));
+      }
+
       return {
         ...base,
         ok: result.success,
@@ -374,6 +463,12 @@ export class BillerFetcherService {
        * overdue schedule and fetched everything again, forever.
        */
       onStart?: () => void;
+      /**
+       * First-dashboard builds this run may perform. Defaults to
+       * MAX_BACKFILL_DASHBOARDS_PER_RUN; pass Infinity for an attended run the
+       * user explicitly asked for and is watching.
+       */
+      maxBackfillDashboards?: number;
     } = {},
   ): Promise<BillerSyncResults> {
     const settings = this.settings();
@@ -400,11 +495,37 @@ export class BillerFetcherService {
       // happened, quietly suppressing the loop on a misconfigured setup.
       if (billers.length > 0) options.onStart?.();
 
+      // How many first-dashboard builds this run may spend. Removing every
+      // dashboard leaves all enabled billers needing one at once, which turned
+      // a routine fetch into an LLM build per biller — minutes of apparently
+      // hung TUI with no indication that was the plan.
+      let backfillBudget = options.maxBackfillDashboards ?? MAX_BACKFILL_DASHBOARDS_PER_RUN;
+      const missingDashboards = billers.filter((biller) => !this.updateService.findBoard(biller.key));
+      if (missingDashboards.length > backfillBudget) {
+        options.onProgress?.(
+          `${missingDashboards.length} biller(s) have no dashboard yet — building ${backfillBudget} this run, ` +
+          'the rest follow on later runs.',
+        );
+      }
+
       const results: BillerSyncResults = [];
       for (const biller of billers) {
         if (options.signal?.aborted) break;
         options.onProgress?.(`[${biller.key}] fetching invoices…`);
-        results.push(await this.syncBiller(biller, options));
+        const result = await this.syncBiller(biller, { ...options, allowBackfill: backfillBudget > 0 });
+        // Only a build that actually happened costs budget. A biller with new
+        // invoices is never blocked, but it still spends from the allowance, so
+        // a run that has already done real build work does not also backfill.
+        if (result.dashboardUpdated) backfillBudget -= 1;
+        results.push(result);
+      }
+
+      const deferred = results.filter((result) => result.backfillDeferred).map((result) => result.key);
+      if (deferred.length > 0) {
+        options.onProgress?.(
+          `Still without a dashboard: ${deferred.join(', ')}. ` +
+          'Fetch again to build the next one, or run `openboard agent billers sync --biller <key>`.',
+        );
       }
       return results;
     } finally {

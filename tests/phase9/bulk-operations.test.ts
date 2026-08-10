@@ -140,6 +140,39 @@ function makeService(opts: {
   return { service, history, projectManager, template };
 }
 
+/**
+ * Selector matching, through the real matcher rather than a stand-in.
+ *
+ * sanitizeBoardName turns every separator into a hyphen, so "Uber Rides" is
+ * stored as `uber-rides`. Biller keys keep the underscore their fetcher
+ * declares (`uber_rides`), and the invoice pipeline looks the board up by that
+ * key. A raw string compare never matched, so the pipeline concluded the
+ * dashboard did not exist and rebuilt and redeployed it on every scheduled
+ * fetch — with no new invoices — for as long as the biller stayed enabled.
+ * Only keys containing a separator were affected, which is why `amazon` looked
+ * healthy while `uber_rides` and `swiggy_instamart` deployed on every run.
+ */
+describe('finding a dashboard by selector', () => {
+  const runsDir = makeTempDir('runs-selector');
+  const uber = makeBoard({ id: 'b-uber', name: 'uber-rides', title: 'Uber Rides' });
+  const find = (selector: string) =>
+    makeService({ registry: fakeRegistry([uber]), runsDir }).service.findBoard(selector);
+
+  it('matches a biller key whose separator differs from the stored name', () => {
+    expect(find('uber_rides')?.id).toBe('b-uber');
+  });
+
+  it('still matches the stored name, the title and the id', () => {
+    expect(find('uber-rides')?.id).toBe('b-uber');
+    expect(find('Uber Rides')?.id).toBe('b-uber');
+    expect(find('b-uber')?.id).toBe('b-uber');
+  });
+
+  it('does not match a different dashboard', () => {
+    expect(find('amazon')).toBeUndefined();
+  });
+});
+
 describe('Bulk dashboard operations', () => {
   let runsDir: string;
   let workspace: string;

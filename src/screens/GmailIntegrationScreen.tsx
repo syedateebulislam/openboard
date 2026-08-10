@@ -10,7 +10,7 @@
  * paragraph — on a screen that also has to fit a log pane. The facts are now
  * one meta line, and the prose is shown for the row it actually describes.
  */
-import React, { useState } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
@@ -26,6 +26,7 @@ import {
   discoverBillers,
   stalePronedDataKeys,
   installBundledScripts,
+  removeBillerScript,
   validateScriptsDir,
 } from '../services/billers/BillerDiscoveryService.js';
 import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
@@ -36,6 +37,7 @@ import {
 } from '../services/billers/billerScheduler.js';
 import {
   activeBillerRun,
+  subscribeBillerRun,
   beginBillerRun,
   endBillerRun,
   stopBillerRun,
@@ -57,7 +59,7 @@ interface Props {
 // (rather than after, as the OAuth screen effectively does) was an explicit
 // request — you should know which account you are authorizing before typing a
 // secret for it.
-type Step = 'menu' | 'scripts-dir' | 'email' | 'app-password' | 'interval';
+type Step = 'menu' | 'scripts-dir' | 'email' | 'app-password' | 'interval' | 'confirm-remove';
 
 /** Menu rows that flip a biller on or off carry their key behind this prefix. */
 const TOGGLE_PREFIX = 'toggle:';
@@ -124,6 +126,8 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   const [, setRefresh] = useState(0);
   /** Value of the row the cursor is on, so space can act on it. */
   const [highlighted, setHighlighted] = useState('');
+  /** Biller key awaiting a delete confirmation, if any. */
+  const [pendingRemoval, setPendingRemoval] = useState<string | undefined>(undefined);
   const [showHelp, setShowHelp] = useState(false);
 
   // Bound to the shared activity log, not local state: scheduled fetches run
@@ -136,6 +140,9 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     if (key.escape && !busy) {
       if (step === 'menu') onNavigate(parentOf('integrations-gmail'));
       else setStep('menu');
+      // Backing out of the confirmation must not leave a biller armed for the
+      // next 'y' typed anywhere on this screen.
+      setPendingRemoval(undefined);
     }
 
     // '?' expands the guidance the detail line shows one row at a time.
@@ -156,6 +163,27 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
         toggleBiller(key);
         return;
       }
+    }
+
+    // 'r' removes the highlighted biller for good. Deliberately not 'd' or
+    // Delete: those sit next to the navigation keys, and this is the one action
+    // on the screen that cannot be undone by pressing it again.
+    if ((input === 'r' || input === 'R') && step === 'menu' && !busy) {
+      const key = billerKeyForToggle(highlighted);
+      if (key) {
+        setPendingRemoval(key);
+        setStatus('');
+        setStep('confirm-remove');
+        return;
+      }
+    }
+
+    // The confirmation itself: only 'y' proceeds. Escape is already handled
+    // above and returns to the menu, which is the safe default.
+    if (step === 'confirm-remove' && pendingRemoval) {
+      if (input === 'y' || input === 'Y') removeBiller(pendingRemoval);
+      else if (input === 'n' || input === 'N') { setPendingRemoval(undefined); setStep('menu'); }
+      return;
     }
 
     // PgUp/PgDn scroll the log without disturbing the menu's arrow keys.
@@ -244,6 +272,33 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     changed();
   };
 
+  /**
+   * Delete the highlighted biller's fetcher for good.
+   *
+   * Toggling already covers "not right now". This is the other end of it, so it
+   * goes through a confirm step rather than acting on the keypress: the toggle
+   * is one key away and undoing a deletion is not.
+   */
+  const removeBiller = (key: string) => {
+    const result = removeBillerScript(settings.scriptsDir, key);
+    if (!result.removed) {
+      setStatus(result.error ?? `Could not remove ${key}.`);
+      setStep('menu');
+      return;
+    }
+
+    // A removed fetcher must not stay switched on, or the next run would look
+    // for a script that is gone.
+    const enabled = settings.enabledKeys.filter((enabledKey) => enabledKey !== key);
+    config.set('billers.enabledKeys', enabled);
+
+    log.append(`Removed the ${key} fetcher. Its invoices are still on disk.`);
+    setStatus(`Removed ${key}. Its CSV and any dashboard it built are untouched.`);
+    setPendingRemoval(undefined);
+    setStep('menu');
+    changed();
+  };
+
   const syncNow = async () => {
     setBusy(true);
     setStatus('');
@@ -255,6 +310,11 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
       const results = await new BillerFetcherService().syncEnabled({
         onProgress: log.append,
         signal: run.controller.signal,
+        // Attended run: the user asked for it and is watching the log, so build
+        // every missing dashboard rather than dripping one out per fetch. The
+        // per-run cap exists for the unattended schedule, which must not spend
+        // an LLM build per biller without anyone having asked.
+        maxBackfillDashboards: Infinity,
         // A manual fetch is the same work a scheduled tick does, so it anchors
         // the schedule — and it anchors at the start, so stopping half way
         // still counts the billers that did run instead of replaying them all.
@@ -322,8 +382,13 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   // Labels carry their current value inline rather than "(current: …)" — the
   // parenthetical repeated on every configurable row and doubled its length.
   // Includes a scheduled run this screen did not start, so the row can offer to
-  // stop it. Read at render time; the log pane re-renders as a run streams lines.
-  const running = activeBillerRun();
+  // stop it.
+  //
+  // Subscribed rather than read bare: run state lives outside React, so without
+  // this the row only refreshed when something else happened to re-render, and
+  // could offer to start a fetch that was already running. activeBillerRun
+  // returns the stored object, so the snapshot identity is stable.
+  const running = useSyncExternalStore(subscribeBillerRun, activeBillerRun, activeBillerRun);
 
   const menuItems = [
     // Offered first on a fresh setup: one keypress from nothing to a working
@@ -401,7 +466,14 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   // real problem rather than guidance, so it stays visible.
   const stale = hasDir ? stalePronedDataKeys(settings.scriptsDir) : [];
 
-  const detail = step === 'menu' ? ROW_DETAIL[highlighted] : STEP_DETAIL[step];
+  // Biller rows are generated per fetcher, so they cannot be keyed in
+  // ROW_DETAIL — and without a line here the two keys that act on them
+  // (space, r) were invisible.
+  const detail = step === 'menu'
+    ? (billerKeyForToggle(highlighted)
+        ? 'Space switches this biller on or off. r removes its fetcher for good; invoices already collected stay.'
+        : ROW_DETAIL[highlighted])
+    : STEP_DETAIL[step];
 
   return (
     <ScreenFrame
@@ -410,7 +482,7 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
       detail={detail}
       status={status}
       statusTone={busy ? 'busy' : undefined}
-      hints={step === 'menu' ? ['move', 'toggle', 'select', 'scroll', 'help', 'back'] : ['save', 'back']}
+      hints={step === 'menu' ? ['move', 'toggle', 'remove', 'select', 'scroll', 'help', 'back'] : ['save', 'back']}
     >
       {stale.length > 0 && (
         <Text color="yellow">No fetcher for {stale.join(', ')} — those dashboards will not refresh.</Text>
@@ -472,6 +544,18 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
             onSubmit={saveInterval}
             placeholder="360"
           />
+        </Box>
+      )}
+      {step === 'confirm-remove' && pendingRemoval && (
+        <Box flexDirection="column">
+          <Text color={UI_COLORS.logo}>
+            Remove the {pendingRemoval} fetcher?
+          </Text>
+          <Text color={UI_COLORS.subtitle}>
+            Deletes fetch_{pendingRemoval}.py. Its invoices and any dashboard built
+            from them stay — only the fetching stops.
+          </Text>
+          <Text color={UI_COLORS.subtitle}>y to remove · n or esc to cancel</Text>
         </Box>
       )}
       {step === 'menu' && (
