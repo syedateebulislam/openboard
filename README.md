@@ -122,7 +122,7 @@ The generated app header shows the OpenBoardCLI website/GitHub/npm icon links on
 
 ## Invoice Fetchers (per-biller)
 
-Turn invoice emails into per-biller spending dashboards, automatically. OpenBoardCLI **ships ready-made fetchers** for Amazon, Amazon Pay, Rapido, Swiggy (Food and Instamart), Uber, Urban Company, and Zomato — and drives any `fetch_<biller>.py` you write yourself:
+Turn invoice emails into per-biller spending dashboards, automatically. OpenBoardCLI **ships two ready-made fetchers** — Amazon and Uber — and drives any `fetch_<biller>.py` you write yourself. Everything else is yours to add: describe one sample email and Biller Studio writes the fetcher for it. Billers can be switched off temporarily, or removed for good with `r`, which deletes the fetcher and leaves the invoices it already collected on disk:
 
 - **Start with one keypress**: Integrations → Gmail → *Install bundled fetchers*. They land in the canonical folder, already configured. A fetcher you have edited is never overwritten by a later install.
 

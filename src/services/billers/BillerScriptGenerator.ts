@@ -4,10 +4,14 @@
  *   1. proposeFields()  — read one sample email, propose what to extract
  *   2. generateScript()  — write the fetcher for those fields
  *
- * The reference skeleton handed to the model is read from the bundled
- * fetch_zomato.py rather than hardcoded here. That file is the canonical
- * minimal fetcher and ships in the npm package, so the template the LLM copies
- * can never drift from the fetchers actually in the repo.
+ * The reference skeleton handed to the model is read from a real file that
+ * ships in the npm package rather than being hardcoded here, so the template
+ * the LLM copies can never drift from working code.
+ *
+ * Those files are named reference_*.py, not fetch_*.py, precisely so they are
+ * NOT installed as billers: OpenBoardCLI ships two fetchers (Amazon and Uber)
+ * and every other biller is the user's to add. A reference is a template, not
+ * a service anyone signed up for.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,18 +25,18 @@ import { logger } from '../../utils/logger.js';
 import { parseRegions, regionNames, spliceRegions, stripRegionMarkers } from './skeletonRegions.js';
 import { BILLER_KEY_PATTERN, validateScriptSource } from './BillerScriptWriter.js';
 
-/** The fetcher used as the structural reference. Chosen for being the plainest. */
-const REFERENCE_FETCHER = 'fetch_zomato.py';
+/** The structural reference for an HTML receipt. Chosen for being the plainest. */
+const REFERENCE_FETCHER = 'reference_html.py';
 
 /**
  * The reference for billers whose receipt lives in a PDF attachment.
  *
- * Rapido's shape is genuinely different — a guarded pdfplumber import, a
+ * That shape is genuinely different — a guarded pdfplumber import, a
  * per-attachment loop, and business-key dedupe because one email can carry
  * several receipts — so pointing the model at the HTML skeleton would make it
  * invent all of that from scratch.
  */
-const PDF_REFERENCE_FETCHER = 'fetch_rapido.py';
+const PDF_REFERENCE_FETCHER = 'reference_pdf.py';
 
 export const MAX_REPAIR_ATTEMPTS = 2;
 

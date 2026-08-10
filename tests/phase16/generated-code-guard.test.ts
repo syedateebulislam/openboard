@@ -91,11 +91,18 @@ afterEach(() => {
 // ── no false positives ───────────────────────────────────────────────────────
 
 describe('the guard accepts real fetchers', () => {
-  it('passes every fetcher we ship', () => {
+  it('passes every fetcher and reference skeleton we ship', () => {
     // If this ever fails, the guard is wrong — not the fetchers.
     const dir = bundledScriptsDir();
-    const fetchers = readdirSync(dir).filter((f) => f.startsWith('fetch_') && f.endsWith('.py'));
-    expect(fetchers.length).toBeGreaterThanOrEqual(8);
+    // References matter more than the fetchers here: they are the template the
+    // model copies, so a violation in one propagates into every biller a user
+    // adds from then on.
+    const fetchers = readdirSync(dir)
+      .filter((f) => f.endsWith('.py'))
+      .filter((f) => f.startsWith('fetch_') || f.startsWith('reference_'));
+    expect(fetchers).toEqual(
+      expect.arrayContaining(['fetch_amazon.py', 'fetch_uber.py', 'reference_html.py', 'reference_pdf.py']),
+    );
 
     for (const file of fetchers) {
       const scan = scanGeneratedSource(readFileSync(join(dir, file), 'utf-8'));

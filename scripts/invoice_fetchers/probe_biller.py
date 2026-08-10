@@ -143,7 +143,7 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
 
 # ── Probe-specific logic ─────────────────────────────────────────────────────
 def extract_pdf_text(data: bytes) -> str:
-    """Text of a PDF receipt, laid out the way fetch_rapido.py reads them."""
+    """Text of a PDF receipt, laid out the way reference_pdf.py reads them."""
     if pdfplumber is None:
         return ""
     try:

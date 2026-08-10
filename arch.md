@@ -508,7 +508,7 @@ flowchart TD
   user the exact text before any of it is transmitted → propose fields → generate
   → compile → grade what `parse()` extracts → dry-run against the mailbox → save.
   The reference skeleton handed to the model is read from the bundled fetchers at
-  run time (`fetch_zomato.py`, or `fetch_rapido.py` when the probe found the
+  run time (`reference_html.py`, or `reference_pdf.py` when the probe found the
   receipt in a PDF), so the template cannot drift from what ships. Decision logic
   lives in `screens/billerStudioFlow.ts` as pure functions, because the rule that
   matters — nothing is sent without an explicit `yes` — is worth asserting

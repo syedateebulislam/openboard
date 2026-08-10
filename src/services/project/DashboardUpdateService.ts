@@ -99,10 +99,26 @@ function isGeneratedPathRejection(error: unknown): boolean {
   );
 }
 
+/**
+ * Match a board by id, name or title, treating spaces, hyphens and underscores
+ * as the same separator.
+ *
+ * Board names come from sanitizeBoardName, which turns every separator into a
+ * hyphen: "Uber Rides" is stored as `uber-rides`. Biller keys keep the
+ * underscore the fetcher declares — `uber_rides` — so a raw string compare
+ * never matched them, and the invoice pipeline concluded the dashboard did not
+ * exist. Every scheduled fetch then rebuilt and redeployed it from scratch,
+ * with no new invoices, for as long as the biller stayed enabled. Only keys
+ * containing a separator were affected, which is why `amazon` looked fine while
+ * `uber_rides` and `swiggy_instamart` deployed on every run.
+ *
+ * Widening this cannot introduce ambiguity: sanitizeBoardName only ever emits
+ * hyphens, so two boards differing solely by separator cannot both exist.
+ */
 function matchesBoard(board: BoardConfig, selector: string): boolean {
-  const normalized = selector.trim().toLowerCase();
-  return [board.id, board.name, board.title]
-    .some((value) => value.toLowerCase() === normalized);
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/[\s_-]+/g, '-');
+  const normalized = normalize(selector);
+  return [board.id, board.name, board.title].some((value) => normalize(value) === normalized);
 }
 
 function isVercelAuthError(error: string | undefined): boolean {
@@ -1592,7 +1608,10 @@ Requirements:
       reporter.phase('verify');
       const verification = await DeployVerificationService.verify(deployResult.url, reporter.progress);
       verified = verification.success;
-      if (!verified) {
+      // A protected deployment is not a failed one — the checker simply cannot
+      // see past the auth wall, and warning about it taught users to ignore a
+      // line that is meant to matter.
+      if (!verified && !verification.protected) {
         reporter.log(`Warning: deployed, but ${verification.error}`);
       }
     }

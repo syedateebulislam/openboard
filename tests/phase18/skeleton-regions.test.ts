@@ -33,8 +33,8 @@ import { scanGeneratedSource } from '../../src/services/billers/BillerScriptWrit
 
 const skeletonFor = (name: string) => readFileSync(join(bundledScriptsDir(), name), 'utf-8');
 
-const HTML = skeletonFor('fetch_zomato.py');
-const PDF = skeletonFor('fetch_rapido.py');
+const HTML = skeletonFor('reference_html.py');
+const PDF = skeletonFor('reference_pdf.py');
 
 /** A reply in the format the prompt asks for. */
 const replyFor = (skeleton: string, override: Record<string, string> = {}) =>

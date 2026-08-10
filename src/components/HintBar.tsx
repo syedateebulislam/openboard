@@ -21,6 +21,7 @@ export const HINTS = {
   continue: '⏎ continue',
   save: '⏎ save',
   toggle: '␣ toggle',
+  remove: 'r remove',
   scroll: '⇞⇟ scroll',
   help: '? help',
   commands: '/help commands',

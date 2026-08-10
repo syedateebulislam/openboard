@@ -299,9 +299,9 @@ Use Settings when tokens cannot be decrypted or external auth fails.
 ## Integrations → Gmail
 
 Turn invoice emails into per-biller spending dashboards. OpenBoardCLI ships
-ready-made fetchers for **Amazon, Amazon Pay, Rapido, Swiggy Food, Swiggy
-Instamart, Uber, Urban Company and Zomato**, and will drive any
-`fetch_<biller>.py` you write yourself. Each one reads Gmail over IMAP and
+ready-made fetchers for **Amazon and Uber**, and will drive any
+`fetch_<biller>.py` you write yourself — describe one sample email and Biller
+Studio writes it for you. Each one reads Gmail over IMAP and
 appends rows to `data/invoices/<biller>.csv`; OpenBoardCLI enables them, runs them
 on a schedule, and turns each biller's invoices into its own dashboard.
 
@@ -343,8 +343,15 @@ Integrations → Gmail, in this order:
    stored encrypted and handed to each fetcher through its process environment
    at run time; nothing is written to disk.
 4. **The biller list** appears — one row per discovered biller with a `[x]`/`[ ]`
-   toggle. Select a row to switch that biller on or off. Come back and change it
-   any time.
+   toggle. Select a row (or press space) to switch that biller on or off. Come
+   back and change it any time.
+
+   Press **`r`** on a biller to remove it for good. It asks first, then deletes
+   only that fetcher script — the invoices it already collected stay in
+   `data/invoices/<biller>.csv`, and any dashboard built from them keeps
+   working. Switch a biller off when you want to pause it; remove it when you
+   are done with it. The leftover CSV then shows up under stale data, so you can
+   clear that separately if you want to.
 5. **Fetch interval** — one shared schedule for every enabled biller (default 360
    min / 6h), shown and editable right in the list. **Fetch now** runs the enabled
    ones immediately. **Rescan folder** picks up newly added scripts.

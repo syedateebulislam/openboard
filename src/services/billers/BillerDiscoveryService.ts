@@ -15,7 +15,7 @@
  * the scripts stay unmodified.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NON_BILLER_SCRIPTS, type BillerScript } from '../../types/billers.js';
@@ -448,4 +448,45 @@ export function stalePronedDataKeys(scriptsDir: string | undefined): string[] {
 export function isInsideScriptsDir(scriptPath: string, scriptsDir: string): boolean {
   const resolved = resolve(scriptPath);
   return dirname(resolved) === resolve(scriptsDir) && basename(resolved).endsWith('.py');
+}
+
+export interface RemoveBillerResult {
+  removed: boolean;
+  /** The script file that was deleted, for reporting what happened. */
+  scriptPath?: string;
+  error?: string;
+}
+
+/**
+ * Delete a biller's fetcher script, and nothing else.
+ *
+ * Disabling a biller is a toggle and reversible; this is the other half — the
+ * one that ends it. Only the script goes: its CSV stays on disk and surfaces
+ * through stalePronedDataKeys, and any dashboard built from it keeps working.
+ * That is deliberate. The invoices are the user's records, often years of them,
+ * and a keypress meant to stop future fetching must not also destroy history.
+ * Removing the data and the tab are separate, already-existing actions.
+ *
+ * Reuses isInsideScriptsDir, so a key that somehow resolves outside the folder
+ * is refused rather than deleting an arbitrary file.
+ */
+export function removeBillerScript(
+  scriptsDir: string | undefined,
+  key: string,
+): RemoveBillerResult {
+  if (!scriptsDir) return { removed: false, error: 'No scripts folder is configured.' };
+
+  const biller = discoverBillers(scriptsDir).find((candidate) => candidate.key === key);
+  if (!biller) return { removed: false, error: `No fetcher found for "${key}".` };
+
+  if (!isInsideScriptsDir(biller.scriptPath, scriptsDir)) {
+    return { removed: false, error: 'Refusing to delete a script outside the fetchers folder.' };
+  }
+
+  try {
+    rmSync(biller.scriptPath, { force: true });
+  } catch (error: any) {
+    return { removed: false, error: error.message };
+  }
+  return { removed: true, scriptPath: biller.scriptPath };
 }

@@ -2,7 +2,7 @@
  * skeletonRegions — the biller-specific slots inside a reference fetcher.
  *
  * Biller Studio used to hand the model a whole fetcher and ask for a whole
- * fetcher back. Measured on fetch_zomato.py, ~78% of that output is the model
+ * fetcher back. Measured on reference_html.py, ~78% of that output is the model
  * retyping the shared helpers, the runner and the CLI — text already sitting on
  * disk. On a local model at ~16 tok/s that is the difference between 195s and
  * 43s of generation, and it is why a request could be severed mid-file.

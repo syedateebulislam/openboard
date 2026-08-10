@@ -19,11 +19,14 @@ import {
   probeScriptPath,
   installBundledScripts,
   isInsideScriptsDir,
+  removeBillerScript,
   repoRootFor,
+  stalePronedDataKeys,
   validateScriptsDir,
 } from '../../src/services/billers/BillerDiscoveryService.js';
 import {
   BillerFetcherService,
+  MAX_BACKFILL_DASHBOARDS_PER_RUN,
   describeFetchError,
   findFatalOutput,
   hashFile,
@@ -35,6 +38,7 @@ import {
   shouldAnchorRun,
   startBillerScheduler,
 } from '../../src/services/billers/billerScheduler.js';
+import { toneOf } from '../../src/utils/logTone.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
 import { SetupService } from '../../src/services/config/SetupService.js';
 import { TypedConfigRepository } from '../../src/services/config/TypedConfigRepository.js';
@@ -346,6 +350,154 @@ describe('Biller invoice fetchers', () => {
       expect(updateService.createFromDataSource.mock.calls[0][0]).toMatchObject({
         title: 'Zomato',
         type: 'food',
+      });
+    });
+
+    /**
+     * The activity log is mostly raw fetcher output. One coloured line per
+     * biller answers "did anything happen?" without reading the rest.
+     */
+    describe('the line that says whether anything happened', () => {
+      const linesFor = async (mutate: (csvPath: string) => void) => {
+        mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+        const csv = join(root, 'data', 'invoices', 'zomato.csv');
+        writeFileSync(csv, 'order_id,total_paid\n1,100\n', 'utf-8');
+
+        const lines: string[] = [];
+        const service = new BillerFetcherService({
+          settings: () => settings({ enabledKeys: ['zomato'] }),
+          updateService: fakeUpdateService() as unknown as DashboardUpdateService,
+          runScript: async () => { mutate(csv); return { code: 0, output: '' }; },
+        });
+        await service.syncEnabled({ onProgress: (line) => lines.push(line) });
+        return lines;
+      };
+
+      it('marks new invoices in the success tone, with the count', async () => {
+        const lines = await linesFor((csv) => {
+          writeFileSync(csv, 'order_id,total_paid\n1,100\n2,200\n3,300\n', 'utf-8');
+        });
+
+        const highlight = lines.find((line) => line.includes('new invoice'));
+        expect(highlight).toBeDefined();
+        expect(toneOf(highlight!)).toBe('success');
+        expect(highlight).toContain('2 new invoices');
+      });
+
+      it('marks an unchanged CSV in the muted tone', async () => {
+        const lines = await linesFor(() => { /* fetcher appends nothing */ });
+
+        const highlight = lines.find((line) => line.includes('no new invoices'));
+        expect(highlight).toBeDefined();
+        expect(toneOf(highlight!)).toBe('muted');
+      });
+
+      it('names the biller whose invoices caused a redeployment', async () => {
+        const updateService = fakeUpdateService();
+        updateService.createFromDataSource = vi.fn(async () => ({
+          success: true,
+          deployUrl: 'https://example.vercel.app',
+        })) as any;
+
+        mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+        const csv = join(root, 'data', 'invoices', 'zomato.csv');
+        writeFileSync(csv, 'order_id,total_paid\n1,100\n', 'utf-8');
+
+        const lines: string[] = [];
+        const service = new BillerFetcherService({
+          settings: () => settings({ enabledKeys: ['zomato'] }),
+          updateService: updateService as unknown as DashboardUpdateService,
+          runScript: async () => {
+            writeFileSync(csv, 'order_id,total_paid\n1,100\n2,200\n', 'utf-8');
+            return { code: 0, output: '' };
+          },
+        });
+        await service.syncEnabled({ onProgress: (line) => lines.push(line) });
+
+        // The deploy log itself is workspace-wide, so this is the only line
+        // tying a redeployment to the biller that triggered it.
+        const highlight = lines.find((line) => line.includes('redeployed'));
+        expect(highlight).toBeDefined();
+        expect(toneOf(highlight!)).toBe('success');
+        expect(highlight).toContain('zomato');
+        expect(highlight).toContain('https://example.vercel.app');
+      });
+    });
+
+    /**
+     * Removing every dashboard leaves each enabled biller needing a first one,
+     * and each is a full LLM build. Six enabled billers turned the next routine
+     * fetch into six of them back to back — twenty minutes of TUI that looked
+     * hung. The fetch itself was fine; the fan-out was the bug.
+     */
+    describe('when every biller has data but no dashboard', () => {
+      const KEYS = ['zomato', 'uber_rides', 'amazon', 'airtel', 'rapido', 'urban_company'];
+
+      /** Six enabled billers, CSVs already on disk, nothing changed, no boards. */
+      const arrange = () => {
+        writeFetcher(scriptsDir, 'fetch_amazon.py', 'amazon', 'Amazon');
+        writeFetcher(scriptsDir, 'fetch_airtel.py', 'airtel', 'Airtel');
+        writeFetcher(scriptsDir, 'fetch_rapido.py', 'rapido', 'Rapido');
+        writeFetcher(scriptsDir, 'fetch_urban_company.py', 'urban_company', 'Urban Company');
+
+        // Data already present, so a run finds nothing new: `changed` stays
+        // false and only the missing-dashboard branch can fire.
+        mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+        for (const key of KEYS) {
+          writeFileSync(join(root, 'data', 'invoices', `${key}.csv`), 'order_id,total_paid\n1,100\n', 'utf-8');
+        }
+
+        const updateService = fakeUpdateService();
+        const service = new BillerFetcherService({
+          settings: () => settings({ enabledKeys: KEYS }),
+          updateService: updateService as unknown as DashboardUpdateService,
+          // The fetcher runs but appends nothing — the CSV hash is unchanged.
+          runScript: async () => ({ code: 0, output: '' }),
+        });
+        return { service, updateService };
+      };
+
+      it('builds at most the per-run budget and defers the rest', async () => {
+        const { service, updateService } = arrange();
+
+        const results = await service.syncEnabled();
+
+        expect(results).toHaveLength(KEYS.length);
+        expect(results.every((result) => result.ok)).toBe(true);
+        // The whole point: one fetch must not become one LLM build per biller.
+        expect(updateService.createFromDataSource).toHaveBeenCalledTimes(
+          MAX_BACKFILL_DASHBOARDS_PER_RUN,
+        );
+
+        const deferred = results.filter((result) => result.backfillDeferred);
+        expect(deferred).toHaveLength(KEYS.length - MAX_BACKFILL_DASHBOARDS_PER_RUN);
+        // Deferred is not the same as done: every one still reports it has no
+        // dashboard, so a caller cannot read the run as a clean no-op.
+        expect(deferred.every((result) => result.dashboardExists === false)).toBe(true);
+      });
+
+      it('names what is still outstanding rather than reporting a clean run', async () => {
+        const { service } = arrange();
+        const lines: string[] = [];
+
+        await service.syncEnabled({ onProgress: (line) => lines.push(line) });
+
+        const log = lines.join('\n');
+        expect(log).toMatch(/have no dashboard yet/i);
+        expect(log).toMatch(/Still without a dashboard:/i);
+        // Actionable, not just descriptive.
+        expect(log).toMatch(/--biller/);
+      });
+
+      it('builds them all when the caller is attended and asks for it', async () => {
+        // "Fetch now" is watched by the user who pressed it, so it completes the
+        // set instead of dripping one out per fetch.
+        const { service, updateService } = arrange();
+
+        const results = await service.syncEnabled({ maxBackfillDashboards: Infinity });
+
+        expect(updateService.createFromDataSource).toHaveBeenCalledTimes(KEYS.length);
+        expect(results.some((result) => result.backfillDeferred)).toBe(false);
       });
     });
 
@@ -1019,6 +1171,63 @@ describe('Biller invoice fetchers', () => {
           expect(pattern.test(source), `${biller.key} matched ${pattern}`).toBe(false);
         }
       }
+    });
+
+    /**
+     * Disabling is a toggle and reversible. Removing is the other end of it,
+     * and it takes the script only: the invoices are the user's records, often
+     * years of them, so a keypress that stops future fetching must not also
+     * destroy history.
+     */
+    describe('removing a biller', () => {
+      it('deletes the fetcher and leaves the invoices alone', () => {
+        const csv = join(root, 'data', 'invoices', 'zomato.csv');
+        mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+        writeFileSync(csv, 'order_id,total_paid\n1,100\n', 'utf-8');
+        const script = join(scriptsDir, 'fetch_zomato.py');
+        expect(existsSync(script)).toBe(true);
+
+        const result = removeBillerScript(scriptsDir, 'zomato');
+
+        expect(result.removed).toBe(true);
+        expect(existsSync(script)).toBe(false);
+        expect(discoverBillers(scriptsDir).map((biller) => biller.key)).not.toContain('zomato');
+        // The whole point of script-only removal.
+        expect(existsSync(csv)).toBe(true);
+      });
+
+      it('surfaces the orphaned data rather than hiding it', () => {
+        mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+        writeFileSync(join(root, 'data', 'invoices', 'zomato.csv'), 'order_id\n1\n', 'utf-8');
+
+        removeBillerScript(scriptsDir, 'zomato');
+
+        // Already how the codebase treats a fetcher that disappears — removal
+        // routes into that path instead of inventing a second notion of gone.
+        expect(stalePronedDataKeys(scriptsDir)).toContain('zomato');
+      });
+
+      it('refuses a key it cannot find, and says so', () => {
+        const result = removeBillerScript(scriptsDir, 'not_a_biller');
+        expect(result.removed).toBe(false);
+        expect(result.error).toMatch(/no fetcher found/i);
+      });
+
+      it('refuses when no scripts folder is configured', () => {
+        const result = removeBillerScript(undefined, 'zomato');
+        expect(result.removed).toBe(false);
+        expect(result.error).toMatch(/folder/i);
+      });
+    });
+
+    it('ships Uber and Amazon only — every other biller is the user\'s to add', () => {
+      // The bundle used to carry eight fetchers, which made the product opinionated
+      // about which services you use and left most users switching off rows they
+      // had never asked for. Two is the starting point; Biller Studio writes the rest.
+      const target = join(root, 'installed-core');
+      installBundledScripts(target);
+
+      expect(discoverBillers(target).map((biller) => biller.key).sort()).toEqual(['amazon', 'uber_rides']);
     });
 
     it('installs into an empty folder and configures nothing else', () => {

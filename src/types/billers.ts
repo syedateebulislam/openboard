@@ -81,6 +81,14 @@ export interface BillerRunResult {
    * the same thing a human sees as "nothing happened".
    */
   dashboardExists?: boolean;
+  /**
+   * This biller has data but still no dashboard, and building it was left for
+   * a later run because this one had already spent its backfill budget.
+   *
+   * Distinct from a plain no-op: the caller can say what is still outstanding
+   * instead of reporting a clean run that quietly left tabs missing.
+   */
+  backfillDeferred?: boolean;
   error?: string;
 }
 
