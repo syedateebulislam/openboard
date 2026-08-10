@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Standalone Amazon Pay (flights / ticket bookings) invoice fetcher.
+# <<OPENBOARD:DOCSTRING>>
+"""Standalone Rapido receipt fetcher.
 
-Self-contained: connects to Gmail over IMAP, finds Amazon Pay e-ticket emails,
-parses booking details, and appends them to a per-biller CSV. No dependency on
-any other script.
+Connects to Gmail over IMAP, finds Rapido receipt emails, extracts attached
+PDF ride receipts, and appends one row per unique Ride ID to a per-biller CSV.
 
 Usage:
-    python scripts/invoice_fetchers/fetch_amazon_pay.py [--since-days N] [--limit N] [--dry-run]
+    python scripts/invoice_fetchers/reference_pdf.py [--since-days N] [--limit N] [--dry-run]
 
-Requires: beautifulsoup4
+Requires: beautifulsoup4, pdfplumber
 Credentials: secrets/gmail_app_credentials.json  -> { "email": ..., "app_password": ... }
 """
+# <</OPENBOARD:DOCSTRING>>
 
 import argparse
 import csv
 import datetime as dt
 import email
-import email.message
 import imaplib
+import io
 import json
 import logging
 import os
@@ -30,47 +31,50 @@ from typing import Dict, List, Tuple
 
 from bs4 import BeautifulSoup
 
-# ── Biller config ────────────────────────────────────────────────────────────
+try:
+    import pdfplumber
+except ImportError:  # pragma: no cover - handled at runtime for clearer CLI logs
+    pdfplumber = None
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_PATH = REPO_ROOT / "secrets" / "gmail_app_credentials.json"
 
-KEY = "amazon_pay"
-DISPLAY_NAME = "Amazon Pay (Flights)"
-SENDER_EMAIL = "no-reply@amazonpay.in"
-SUBJECT_PREFIX = ""  # filtering handled by is_receipt()
-CSV_PATH = REPO_ROOT / "data" / "invoices" / "amazon_pay.csv"
-RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "amazon_pay"
+# <<OPENBOARD:CONFIG>>
+KEY = "rapido"
+DISPLAY_NAME = "Rapido"
+SENDER_EMAIL = "partner@rapido.bike"
+SUBJECT_PREFIX = ""
+CSV_PATH = REPO_ROOT / "data" / "invoices" / "rapido.csv"
+RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "rapido"
 STATE_PATH = RAW_DIR / "state.json"
-DEFAULT_SINCE_DAYS = 30
-SEARCH_LIMIT = 200
+DEFAULT_SINCE_DAYS = 365
+SEARCH_LIMIT = 1000
+# <</OPENBOARD:CONFIG>>
 
+# <<OPENBOARD:COLUMNS>>
 COLUMNS = [
     "source_sender",
     "email_uid",
     "email_subject",
     "email_date",
-    "pnr",
-    "makemytrip_id",
-    "amazon_order_id",
-    "airline_flight",
-    "travel_class",
-    "from_city",
-    "to_city",
-    "depart",
-    "arrive",
-    "passenger",
-    "base_fare",
-    "taxes_fees",
-    "convenience_fee",
-    "seat_charge",
-    "meal_charge",
-    "discount",
+    "ride_id",
+    "customer_name",
+    "driver",
+    "vehicle_number",
+    "vehicle_mode",
+    "ride_datetime",
+    "pickup",
+    "dropoff",
+    "selected_price",
     "total_paid",
+    "payment_method",
     "currency",
+    "receipt_file",
 ]
+# <</OPENBOARD:COLUMNS>>
 
 
-# ── Shared helpers (inlined so this script stands alone) ──────────────────────
 def read_json(path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -170,6 +174,13 @@ def ensure_csv(path) -> None:
         csv.DictWriter(f, fieldnames=COLUMNS).writeheader()
 
 
+def existing_ride_ids(path) -> set[str]:
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        return {row.get("ride_id", "").strip() for row in csv.DictReader(f) if row.get("ride_id")}
+
+
 def append_csv(path, row: Dict[str, str]) -> None:
     ensure_csv(path)
     with open(path, "a", newline="", encoding="utf-8") as f:
@@ -182,28 +193,6 @@ def save_file(path, data: bytes, dry_run: bool) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
-
-
-def fetch_html_and_attachments(msg, raw_dir, uid: str, dry_run: bool) -> Tuple[str, List[str]]:
-    html_body = ""
-    saved_files = []
-    for part in msg.walk():
-        content_type = part.get_content_type()
-        content_disposition = part.get("Content-Disposition", "")
-        if content_type == "text/html" and "attachment" not in content_disposition.lower():
-            payload = part.get_payload(decode=True)
-            if payload:
-                charset = part.get_content_charset() or "utf-8"
-                html_body = payload.decode(charset, errors="replace")
-        elif part.get_filename():
-            filename = sanitize_filename(decode_str(part.get_filename()) or "attachment")
-            payload = part.get_payload(decode=True)
-            if not payload:
-                continue
-            filepath = os.path.join(raw_dir, f"{uid}_{filename}")
-            save_file(filepath, payload, dry_run)
-            saved_files.append(filepath)
-    return html_body, saved_files
 
 
 def _search_uids(imap, criteria: str) -> List[str]:
@@ -238,92 +227,122 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
     return sorted(uids, key=lambda value: int(value))
 
 
-# ── Amazon Pay-specific logic ─────────────────────────────────────────────────
+# <<OPENBOARD:IS_RECEIPT>>
 def is_receipt(subject: str) -> bool:
-    s = subject.lower()
-    return "e-ticket" in s or "eticket" in s or "ticket confirmed" in s or "flight" in s
+    lowered = subject.lower()
+    return "rapido" in lowered or "trip with rapido" in lowered
+# <</OPENBOARD:IS_RECEIPT>>
 
 
-def parse(text: str, subject: str) -> Dict[str, str]:
-    """Parse Amazon Pay flight e-ticket emails (Amazon Pay India <no-reply@amazonpay.in>).
+# <<OPENBOARD:EXTRACT_PDF_TEXT>>
+def extract_pdf_text(data: bytes) -> str:
+    if pdfplumber is None:
+        raise RuntimeError("pdfplumber is required to parse Rapido PDF receipts")
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        return "\n".join(page.extract_text(layout=True) or "" for page in pdf.pages)
+# <</OPENBOARD:EXTRACT_PDF_TEXT>>
 
-    Body layout of a flight e-ticket (booked via MakeMyTrip), values anonymised:
-        flight booking is successful (PNR:AAAAAA)
-        MakeMyTrip ID: NF0000AAA00A0AAA0000
-        Bengaluru / New Delhi / IndiGo 6E-0000 / Economy
-        BLR 22:00 Thu, 21 May 2026
-        00:50 DEL Fri, 22 May 2026
-        Payment Summary:
-            Base fare ₹6860.00 / Taxes & fees ₹2239.00 / Convenience fee ₹440.00
-            Seat charge ₹0.00 / Meal charge ₹0.00 / Discount applied -₹564.00
-            Order Total ₹8975.00
-        Amazon Order ID: 000-0000000-0000000
-    """
-    pnr = find_first([r"PNR\s*[:\s]*\n?\s*([A-Z0-9]{5,7})"], text)
-    makemytrip_id = find_first([r"MakeMyTrip\s*ID[:\s]*\n?\s*([A-Z0-9]{8,})"], text)
-    amazon_order_id = find_first([r"Amazon\s*Order\s*ID[:\s]*\n?\s*(\d{3}-\d{7}-\d{7})"], text)
 
-    airline_flight = find_first([
-        r"((?:IndiGo|Air\s*India|Vistara|SpiceJet|Akasa(?:\s*Air)?|GoAir|Go\s*First|AirAsia)\s+[0-9A-Z]{2}-?[0-9]+)",
-    ], text)
-    travel_class = find_first([r"\b(Economy|Premium\s*Economy|Business|First)\b"], text)
+# <<OPENBOARD:PARSE_RECEIPT>>
+def parse_receipt(text: str) -> Dict[str, str]:
+    normalized = re.sub(r"\r\n?", "\n", text)
+    raw_lines = [line.strip() for line in normalized.splitlines()]
 
-    # From / To: cleanest from the subject "<from> to <to> Flight E-Ticket".
-    from_city = to_city = ""
-    route = re.search(r"^(.+?)\s+to\s+(.+?)\s+Flight", subject, re.IGNORECASE)
-    if route:
-        from_city = route.group(1).strip()
-        to_city = route.group(2).strip()
+    customer_name = find_first([r"Customer\s+Name\s+(.+)"], normalized)
+    ride_id = find_first([r"Ride\s+ID\s+(RD\d+)"], normalized)
+    driver = find_first([r"Driver\s+name\s+(.+)"], normalized)
+    vehicle_number = find_first([r"Vehicle\s+Number\s+([A-Z0-9 -]+)"], normalized)
+    vehicle_mode = find_first([r"Mode\s+of\s+Vehicle\s+(.+)"], normalized)
+    ride_datetime = find_first([r"Time\s+of\s+Ride\s+(.+)"], normalized)
+    selected_price = normalize_amount(find_first([
+        r"Selected\s+Price\s*\n\s*(?:\u20b9|Rs\.?)\s*([0-9.,]+)",
+        r"Selected\s+Price\s*(?:\u20b9|Rs\.?)\s*([0-9.,]+)",
+    ], normalized))
 
-    # Depart: "BLR\n22:00\nThu, 21 May 2026"
-    dep = re.search(
-        r"([A-Z]{3})\s*\n\s*(\d{1,2}:\d{2})\s*\n\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,\s*\d{1,2}\s*[A-Za-z]+\s*\d{4})",
-        text)
-    depart = f"{dep.group(1)} {dep.group(2)} {dep.group(3)}" if dep else ""
-    # Arrive: "00:50\nDEL\nFri, 22 May 2026"
-    arr = re.search(
-        r"(\d{1,2}:\d{2})\s*\n\s*([A-Z]{3})\s*\n\s*((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,\s*\d{1,2}\s*[A-Za-z]+\s*\d{4})",
-        text)
-    arrive = f"{arr.group(2)} {arr.group(1)} {arr.group(3)}" if arr else ""
-
-    passenger = find_first([
-        r"\n([A-Z][a-z]+(?: [A-Z][a-z]+){1,3})\s*\n\s*(?:Selected|Confirmed)",
-    ], text)
-
-    base_fare = normalize_amount(find_first([r"Base\s*fare\s*\n\s*₹\s*([0-9.,]+)"], text))
-    taxes_fees = normalize_amount(find_first([r"Taxes\s*&?\s*fees\s*\n\s*₹\s*([0-9.,]+)"], text))
-    convenience_fee = normalize_amount(find_first([r"Convenience\s*fee\s*\n\s*₹\s*([0-9.,]+)"], text))
-    seat_charge = normalize_amount(find_first([r"Seat\s*charge\s*\n\s*₹\s*([0-9.,]+)"], text))
-    meal_charge = normalize_amount(find_first([r"Meal\s*charge\s*\n\s*₹\s*([0-9.,]+)"], text))
-    discount = normalize_amount(find_first([r"Discount\s*applied\s*\n\s*-?\s*₹\s*([0-9.,]+)"], text))
-    total_paid = normalize_amount(find_first([
-        r"Order\s*Total\s*\n\s*₹\s*([0-9.,]+)",
-        r"Grand\s*Total\s*\n\s*₹\s*([0-9.,]+)",
-    ], text))
+    pickup, dropoff = extract_locations(raw_lines)
 
     return {
-        "pnr": pnr,
-        "makemytrip_id": makemytrip_id,
-        "amazon_order_id": amazon_order_id,
-        "airline_flight": airline_flight,
-        "travel_class": travel_class,
-        "from_city": from_city,
-        "to_city": to_city,
-        "depart": depart,
-        "arrive": arrive,
-        "passenger": passenger,
-        "base_fare": base_fare,
-        "taxes_fees": taxes_fees,
-        "convenience_fee": convenience_fee,
-        "seat_charge": seat_charge,
-        "meal_charge": meal_charge,
-        "discount": discount,
-        "total_paid": total_paid,
+        "ride_id": ride_id,
+        "customer_name": customer_name,
+        "driver": driver,
+        "vehicle_number": vehicle_number,
+        "vehicle_mode": vehicle_mode,
+        "ride_datetime": ride_datetime,
+        "pickup": pickup,
+        "dropoff": dropoff,
+        "selected_price": selected_price,
+        "total_paid": selected_price,
+        "payment_method": "",
         "currency": "INR",
     }
+# <</OPENBOARD:PARSE_RECEIPT>>
 
 
-# ── Runner ────────────────────────────────────────────────────────────────────
+# <<OPENBOARD:EXTRACT_LOCATIONS>>
+def extract_locations(lines: List[str]) -> Tuple[str, str]:
+    try:
+        price_index = next(i for i, line in enumerate(lines) if re.fullmatch(r"(?:\u20b9|Rs\.?)?\s*[0-9.,]+", line))
+    except StopIteration:
+        return "", ""
+
+    disclaimer_markers = (
+        "This document is issued",
+        "*Selected Price refers",
+        "Rapido does not collect",
+    )
+    groups: List[List[str]] = []
+    current: List[str] = []
+    for line in lines[price_index + 1:]:
+        if not line:
+            if current:
+                groups.append(current)
+                current = []
+            continue
+        if any(line.startswith(marker) for marker in disclaimer_markers):
+            break
+        current.append(line)
+    if current:
+        groups.append(current)
+
+    address_groups = [" ".join(group).strip() for group in groups if " ".join(group).strip()]
+    if len(address_groups) < 2:
+        return (address_groups[0] if address_groups else "", "")
+
+    return address_groups[0], address_groups[1]
+# <</OPENBOARD:EXTRACT_LOCATIONS>>
+
+
+# <<OPENBOARD:FETCH_PARTS>>
+def fetch_parts(msg, raw_dir, uid: str, dry_run: bool) -> Tuple[str, List[Tuple[str, bytes, str]]]:
+    html_body = ""
+    pdfs = []
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        content_disposition = part.get("Content-Disposition", "")
+        filename = part.get_filename()
+
+        if content_type == "text/html" and "attachment" not in content_disposition.lower():
+            payload = part.get_payload(decode=True)
+            if payload:
+                charset = part.get_content_charset() or "utf-8"
+                html_body = payload.decode(charset, errors="replace")
+            continue
+
+        if not filename:
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        safe_name = sanitize_filename(decode_str(filename) or "attachment")
+        filepath = os.path.join(raw_dir, f"{uid}_{safe_name}")
+        save_file(filepath, payload, dry_run)
+        if content_type == "application/pdf" or safe_name.lower().endswith(".pdf"):
+            pdfs.append((safe_name, payload, filepath))
+
+    return html_body, pdfs
+# <</OPENBOARD:FETCH_PARTS>>
+
+
 def run(args) -> Tuple[int, int]:
     since_days = args.since_days if args.since_days is not None else DEFAULT_SINCE_DAYS
     search_limit = args.limit if args.limit is not None else SEARCH_LIMIT
@@ -333,6 +352,7 @@ def run(args) -> Tuple[int, int]:
 
     credentials = load_credentials()
     processed_uids = set(load_state(STATE_PATH))
+    known_ride_ids = existing_ride_ids(CSV_PATH)
 
     try:
         imap = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -362,6 +382,7 @@ def run(args) -> Tuple[int, int]:
             if status != "OK":
                 logging.warning("[%s] Failed to fetch UID %s", KEY, uid)
                 continue
+
             msg = email.message_from_bytes(data[0][1])
             subject = decode_str(msg.get("Subject", ""))
             if SUBJECT_PREFIX and not subject.lower().startswith(SUBJECT_PREFIX.lower()):
@@ -370,31 +391,46 @@ def run(args) -> Tuple[int, int]:
                 logging.debug("[%s] UID %s skipped (non-receipt: %s)", KEY, uid, subject[:60])
                 continue
 
-            raw_html, attachments = fetch_html_and_attachments(msg, RAW_DIR, uid, args.dry_run)
+            raw_html, pdfs = fetch_parts(msg, RAW_DIR, uid, args.dry_run)
             if raw_html:
                 save_file(os.path.join(RAW_DIR, f"{uid}.html"), raw_html.encode("utf-8"), args.dry_run)
-            else:
-                logging.warning("[%s] UID %s missing HTML body", KEY, uid)
 
-            text = BeautifulSoup(raw_html or "", "html.parser").get_text("\n", strip=True)
-            fields = parse(text, subject)
-            row = {
-                **{col: "" for col in COLUMNS},
-                **fields,
-                "source_sender": KEY,
-                "email_uid": uid,
-                "email_subject": subject,
-                "email_date": parse_email_date(msg.get("Date")),
-            }
+            appended_for_uid = 0
+            for filename, payload, filepath in pdfs:
+                try:
+                    text = extract_pdf_text(payload)
+                except Exception as exc:
+                    logging.warning("[%s] Failed to parse PDF %s on UID %s: %s", KEY, filename, uid, exc)
+                    continue
 
-            if args.dry_run:
-                logging.info("[%s] DRY-RUN would append row for UID %s", KEY, uid)
-            else:
-                append_csv(CSV_PATH, row)
+                fields = parse_receipt(text)
+                ride_id = fields.get("ride_id", "")
+                if ride_id and ride_id in known_ride_ids:
+                    continue
+
+                row = {
+                    **{col: "" for col in COLUMNS},
+                    **fields,
+                    "source_sender": KEY,
+                    "email_uid": uid,
+                    "email_subject": subject,
+                    "email_date": parse_email_date(msg.get("Date")),
+                    "receipt_file": os.path.relpath(filepath, REPO_ROOT),
+                }
+
+                if args.dry_run:
+                    logging.info("[%s] DRY-RUN would append row for UID %s receipt %s", KEY, uid, filename)
+                else:
+                    append_csv(CSV_PATH, row)
+                    if ride_id:
+                        known_ride_ids.add(ride_id)
+                new_count += 1
+                appended_for_uid += 1
+
+            if not args.dry_run:
                 processed_uids.add(uid)
                 save_state(STATE_PATH, list(processed_uids))
-            new_count += 1
-            logging.info("[%s] Processed UID %s (attachments: %d)", KEY, uid, len(attachments))
+            logging.info("[%s] Processed UID %s (%d new receipts, %d PDFs)", KEY, uid, appended_for_uid, len(pdfs))
     finally:
         try:
             imap.logout()
@@ -405,7 +441,7 @@ def run(args) -> Tuple[int, int]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=f"Fetch {DISPLAY_NAME} invoices from Gmail")
+    parser = argparse.ArgumentParser(description=f"Fetch {DISPLAY_NAME} receipts from Gmail")
     parser.add_argument("--since-days", type=int, help="Override since-days")
     parser.add_argument("--limit", type=int, help="Max messages to scan")
     parser.add_argument("--dry-run", action="store_true", help="Scan without writing outputs")

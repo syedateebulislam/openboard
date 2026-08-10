@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""Standalone Swiggy Food invoice fetcher.
+# <<OPENBOARD:DOCSTRING>>
+"""Standalone Zomato invoice fetcher.
 
-Self-contained: connects to Gmail over IMAP, finds Swiggy Food order emails,
+Self-contained: connects to Gmail over IMAP, finds Zomato order emails,
 parses order details, and appends them to a per-biller CSV. No dependency on any
-other script. Tune the regexes in parse() to match Swiggy's real mail body.
+other script. Tune the regexes in parse() to match Zomato's real mail body.
 
 Usage:
-    python scripts/invoice_fetchers/fetch_swiggy_food.py [--since-days N] [--limit N] [--dry-run]
+    python scripts/invoice_fetchers/reference_html.py [--since-days N] [--limit N] [--dry-run]
 
 Requires: beautifulsoup4
 Credentials: secrets/gmail_app_credentials.json  -> { "email": ..., "app_password": ... }
 """
+# <</OPENBOARD:DOCSTRING>>
 
 import argparse
 import csv
@@ -34,16 +36,19 @@ from bs4 import BeautifulSoup
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CREDENTIALS_PATH = REPO_ROOT / "secrets" / "gmail_app_credentials.json"
 
-KEY = "swiggy_food"
-DISPLAY_NAME = "Swiggy Food"
-SENDER_EMAIL = "noreply@swiggy.in"
-SUBJECT_PREFIX = "Your Swiggy order"
-CSV_PATH = REPO_ROOT / "data" / "invoices" / "swiggy_food.csv"
-RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "swiggy_food"
+# <<OPENBOARD:CONFIG>>
+KEY = "zomato"
+DISPLAY_NAME = "Zomato"
+SENDER_EMAIL = "noreply@zomato.com"
+SUBJECT_PREFIX = "Your Zomato order from"
+CSV_PATH = REPO_ROOT / "data" / "invoices" / "zomato.csv"
+RAW_DIR = REPO_ROOT / "data" / "invoices" / "raw" / "zomato"
 STATE_PATH = RAW_DIR / "state.json"
 DEFAULT_SINCE_DAYS = 30
 SEARCH_LIMIT = 100
+# <</OPENBOARD:CONFIG>>
 
+# <<OPENBOARD:COLUMNS>>
 COLUMNS = [
     "source_sender",
     "email_uid",
@@ -51,19 +56,12 @@ COLUMNS = [
     "email_date",
     "order_id",
     "restaurant",
+    "status",
     "items",
-    "ordered_at",
-    "delivered_at",
-    "item_total",
-    "packaging_fee",
-    "platform_fee",
-    "delivery_fee",
-    "taxes",
-    "discount",
     "total_paid",
-    "payment_method",
     "currency",
 ]
+# <</OPENBOARD:COLUMNS>>
 
 
 # ── Shared helpers (inlined so this script stands alone) ──────────────────────
@@ -234,136 +232,55 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
     return sorted(uids, key=lambda value: int(value))
 
 
-# ── Swiggy Food-specific logic ────────────────────────────────────────────────
+# ── Biller-specific logic ────────────────────────────────────────────────
+# <<OPENBOARD:IS_RECEIPT>>
 def is_receipt(subject: str) -> bool:
     return True  # subject-prefix filter is enough
+# <</OPENBOARD:IS_RECEIPT>>
 
 
+# <<OPENBOARD:PARSE>>
 def parse(text: str, subject: str) -> Dict[str, str]:
-    """Parse Swiggy Food order emails (Swiggy <noreply@swiggy.in>).
+    """Parse Zomato order emails (Zomato Order <noreply@zomato.com>).
 
     Body layout (from a order):
-        ORDER JOURNEY
-        Example Restaurant Name         (restaurant)
-        <restaurant address>
-        Jun 7, 10:58 PM                 (ordered_at)
-        <customer> / <delivery address>
-        Jun 7, 11:12 PM                 (delivered_at)
-        Order ID: 000000000000000
-        BILL DETAILS
-        <item line> x1   ₹498
-        Restaurant Packaging   ₹34.00
-        Platform fee with GST  ₹17.58
-        Discount Applied      - ₹259.00
-        Delivery Fee (FREE...) ₹44 / FREE
-        Taxes                  ₹13.65
-        Paid Via Bank          ₹304.00
+        Thank you for ordering from Example Restaurant
+        ORDER ID: 0000000000
+        Delivered
+        Example Restaurant
+        <address>
+        3 X Example Item
+        1 X Example Item
+        Total paid - ₹2,554.33
     """
-    order_id = find_first([
-        r"Order\s*ID[:\s]*\n?\s*(\d{6,})",
-        r"Order\s*No[:\s]*\n?\s*(\d{6,})",
-    ], text)
+    order_id = find_first([r"ORDER\s*ID[:\s]*\n?\s*(\d{6,})"], text)
 
     restaurant = find_first([
-        r"ORDER\s*JOURNEY\s*\n\s*([^\n]+)",
-        r"Restaurant\s*\n\s*([^\n]+)",
-        r"Ordered\s*from:\s*\n\s*([^\n]+)",
-        r"from\s+([A-Za-z0-9&'@.,\- ]{3,80})\s*(?:was|order)",
+        r"ordering\s*from\s+([^\n]+)",
+        r"Thank\s*you[^\n]*from\s+([^\n]+)",
     ], text)
 
-    # Two "Mon D, h:MM AM/PM" timestamps: first = ordered, second = delivered.
-    stamps = re.findall(r"([A-Z][a-z]{2}\s+\d{1,2},\s*\d{1,2}:\d{2}\s*(?:AM|PM))", text, re.IGNORECASE)
-    ordered_at = stamps[0] if stamps else ""
-    delivered_at = stamps[1] if len(stamps) > 1 else ""
-    if not ordered_at:
-        ordered_at = find_first([r"Order\s*placed\s*at:\s*\n\s*([^\n]+)"], text)
-    if not delivered_at:
-        delivered_at = find_first([r"Order\s*delivered\s*at:\s*\n\s*([^\n]+)"], text)
+    status = find_first([r"\b(Delivered|Cancelled|Refunded|On the way)\b"], text)
 
-    # First item line + its amount inside the BILL DETAILS block.
-    items = ""
-    item_total = ""
-    bill = re.search(
-        r"BILL\s*DETAILS\s*\n\s*([^\n]+?)\s*\n\s*₹\s*([0-9.,]+)", text, re.IGNORECASE)
-    if bill:
-        items = bill.group(1).strip()
-        item_total = normalize_amount(bill.group(2))
-    if not items:
-        legacy_items = []
-        item_section = re.search(
-            r"Item\s*Name\s*\n\s*Quantity\s*\n\s*Price\s*\n(?P<body>.*?)(?:Item\s*Total:|Order\s*Total:)",
-            text,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if item_section:
-            lines = [line.strip() for line in item_section.group("body").splitlines() if line.strip()]
-            for idx in range(0, len(lines) - 2, 3):
-                name, qty, price = lines[idx], lines[idx + 1], lines[idx + 2]
-                if re.fullmatch(r"\d+", qty) and "₹" in price:
-                    legacy_items.append(f"{name} x{qty}")
-        items = " | ".join(legacy_items)
-    if not item_total:
-        item_total = normalize_amount(find_first([
-            r"Item\s*Total:\s*\n\s*₹\s*([0-9.,]+)",
-        ], text))
+    # Item lines like "3 X Example Item".
+    item_lines = re.findall(r"(\d+\s*[xX]\s*[A-Za-z][^\n]*)", text)
+    items = " | ".join(s.strip() for s in item_lines)
 
-    packaging_fee = normalize_amount(find_first([
-        r"(?:Restaurant\s*)?Packaging(?:\s*(?:&|and)\s*Handling)?[^\n]*\n\s*₹\s*([0-9.,]+)",
-        r"Order\s*Packing\s*Charges:\s*\n\s*₹\s*([0-9.,]+)",
+    total_paid = normalize_amount(find_first([
+        r"Total\s*paid\s*-?\s*₹\s*([0-9.,]+)",
+        r"Grand\s*Total\s*-?\s*₹\s*([0-9.,]+)",
     ], text))
-
-    platform_fee = normalize_amount(find_first([
-        r"Platform\s*fee[^\n]*\n\s*₹\s*([0-9.,]+)",
-    ], text))
-
-    delivery_fee = normalize_amount(find_first([
-        r"Delivery\s*Fee[^\n]*\n\s*₹\s*([0-9.,]+)",
-        r"Delivery\s*partner\s*fee:\s*\n\s*₹\s*([0-9.,]+)",
-    ], text))
-
-    taxes = normalize_amount(find_first([
-        r"Taxes?(?:\s*(?:&|and)\s*Charges)?\s*\n\s*₹\s*([0-9.,]+)",
-        r"Taxes:\s*\n\s*₹\s*([0-9.,]+)",
-        r"GST\s*\n\s*₹\s*([0-9.,]+)",
-    ], text))
-
-    discount = normalize_amount(find_first([
-        r"Discount\s*Applied\s*\n\s*-?\s*₹\s*([0-9.,]+)",
-        r"Discount\s*Applied[^\n]*:\s*\n\s*-?\s*₹\s*([0-9.,]+)",
-        r"Discounts?\s*\n\s*-?\s*₹\s*([0-9.,]+)",
-    ], text))
-
-    # "Paid Via Bank\n₹304.00" -> method + total in one shot.
-    payment_method = ""
-    total_paid = ""
-    paid = re.search(r"Paid\s*Via\s+([A-Za-z][A-Za-z /]{1,30}?)\s*\n\s*₹\s*([0-9.,]+)", text, re.IGNORECASE)
-    if paid:
-        payment_method = paid.group(1).strip()
-        total_paid = normalize_amount(paid.group(2))
-    if not total_paid:
-        total_paid = normalize_amount(find_first([
-            r"Grand\s*Total\s*\n\s*₹\s*([0-9.,]+)",
-            r"Total\s*Paid\s*\n\s*₹\s*([0-9.,]+)",
-            r"Order\s*Total:\s*\n\s*₹\s*([0-9.,]+)",
-        ], text))
 
     return {
         "order_id": order_id,
         "restaurant": restaurant,
+        "status": status,
         "items": items,
-        "ordered_at": ordered_at,
-        "delivered_at": delivered_at,
-        "item_total": item_total,
-        "packaging_fee": packaging_fee,
-        "platform_fee": platform_fee,
-        "delivery_fee": delivery_fee,
-        "taxes": taxes,
-        "discount": discount,
         "total_paid": total_paid,
-        "payment_method": payment_method,
         "currency": "INR",
     }
 
+# <</OPENBOARD:PARSE>>
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 def run(args) -> Tuple[int, int]:

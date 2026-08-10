@@ -148,7 +148,7 @@ describe('forwarded receipts', () => {
   });
 
   it('tries the sender first, so a direct inbox is unaffected', () => {
-    const source = readFileSync(join(dir, 'fetch_zomato.py'), 'utf-8');
+    const source = readFileSync(join(dir, 'reference_html.py'), 'utf-8');
     const fromAt = source.indexOf('FROM "{sender}"');
     const textAt = source.indexOf('TEXT "{sender}"');
     expect(fromAt).toBeGreaterThan(-1);

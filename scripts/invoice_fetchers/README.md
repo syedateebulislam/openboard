@@ -80,8 +80,9 @@ the configured folder are executed.
 
 ## Dependencies
 
-`beautifulsoup4` for all of them, plus `pdfplumber` for `fetch_rapido.py`, which
-reads PDF receipts.
+`beautifulsoup4` for the bundled fetchers. A fetcher you add yourself may need
+more — a biller that sends PDF receipts rather than HTML will want `pdfplumber`,
+for example.
 
 ```bash
 pip install beautifulsoup4 pdfplumber
