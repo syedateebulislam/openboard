@@ -12,6 +12,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { UI_COLORS } from '../theme.js';
 import { LOG_PANE_HEIGHT, type LogViewport } from '../utils/logViewport.js';
+import { toneOf } from '../utils/logTone.js';
 
 interface Props {
   view: LogViewport;
@@ -34,11 +35,20 @@ export function LogPane({ view, height = LOG_PANE_HEIGHT, title = 'Log' }: Props
         overflow="hidden"
       >
         <Box flexDirection="column" flexGrow={1}>
-          {view.rows.map((line, row) => (
-            <Text key={row} color={UI_COLORS.subtitle} wrap="truncate">
-              {line || ' '}
-            </Text>
-          ))}
+          {view.rows.map((line, row) => {
+            // Only the summary lines carry a tone; everything else stays dim so
+            // the highlighted ones still stand out.
+            const tone = toneOf(line);
+            return (
+              <Text
+                key={row}
+                color={tone === 'success' ? 'green' : tone === 'muted' ? 'yellow' : UI_COLORS.subtitle}
+                wrap="truncate"
+              >
+                {line || ' '}
+              </Text>
+            );
+          })}
         </Box>
         {/* '░' track rather than '│' — a line here reads as a second border. */}
         <Box flexDirection="column" width={1} flexShrink={0} marginLeft={1}>
