@@ -270,6 +270,13 @@ export class BillerFetcherService {
 
     // Credentials travel in the child's environment, not on argv (which is
     // world-readable in process listings) and not on disk.
+    //
+    // isolateEnv keeps the rest of this process's environment out of the
+    // child: a fetcher is generated code, and OPENBOARD_ENCRYPTION_SECRET,
+    // ANTHROPIC_API_KEY, GITHUB_TOKEN and VERCEL_TOKEN are all sitting in
+    // process.env. The source guard already denies environment reads, but the
+    // guard is a regex over generated Python and the cost of it being wrong is
+    // every credential the user owns. This makes those reads find nothing.
     const env = this.credentialEnv(settings);
 
     let lastError: Error | undefined;
@@ -281,6 +288,7 @@ export class BillerFetcherService {
           onProgress,
           signal,
           env,
+          isolateEnv: true,
         });
         return { code: result.code, output: `${result.stdout}\n${result.stderr}` };
       } catch (error: any) {

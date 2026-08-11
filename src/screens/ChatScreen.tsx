@@ -347,22 +347,62 @@ export function ChatScreen({
     return msg.id;
   }, []);
 
-  const appendLog = useCallback((id: string, line: string) => {
-    lastOperationLogRef.current += `${line}\n`;
+  // Subprocess output is throttled on the same 60ms budget as streaming text.
+  //
+  // It previously was not, and a build is far chattier than a model: every
+  // stdout line from npm, vite or git rebuilt the whole message array and
+  // re-flattened up to MAX_VIEW_LINES of wrapped text. The lines arrive in
+  // bursts, so batching them costs no visible latency and removes most of the
+  // render work during the longest operations in the product.
+  const logThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingLogRef = useRef<Map<string, string>>(new Map());
+
+  const flushLogUpdates = useCallback(() => {
+    const pending = pendingLogRef.current;
+    if (pending.size === 0) return;
+    const batch = new Map(pending);
+    pending.clear();
     setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === id ? { ...msg, content: msg.content + line + '\n' } : msg,
-      ),
+      prev.map((msg) => {
+        const appended = batch.get(msg.id);
+        return appended ? { ...msg, content: msg.content + appended } : msg;
+      }),
     );
   }, []);
 
+  const appendLog = useCallback((id: string, line: string) => {
+    lastOperationLogRef.current += `${line}\n`;
+    const pending = pendingLogRef.current;
+    pending.set(id, (pending.get(id) ?? '') + line + '\n');
+    if (!logThrottleRef.current) {
+      logThrottleRef.current = setTimeout(() => {
+        logThrottleRef.current = null;
+        flushLogUpdates();
+      }, 60);
+    }
+  }, [flushLogUpdates]);
+
   const finishLog = useCallback((id: string) => {
+    // Flush first: the last few lines of a failing build are the ones the user
+    // needs, and they would otherwise still be sitting in the buffer.
+    if (logThrottleRef.current) {
+      clearTimeout(logThrottleRef.current);
+      logThrottleRef.current = null;
+    }
+    flushLogUpdates();
     setMessages((prev) =>
       prev.map((msg) =>
         msg.id === id ? { ...msg, isStreaming: false } : msg,
       ),
     );
     logMsgRef.current = null;
+  }, [flushLogUpdates]);
+
+  // Both throttles hold a live timer; leaving one armed past unmount fires a
+  // state update into a screen the user has already left.
+  useEffect(() => () => {
+    if (streamThrottleRef.current) clearTimeout(streamThrottleRef.current);
+    if (logThrottleRef.current) clearTimeout(logThrottleRef.current);
   }, []);
 
   const createProgressCallback = useCallback((logId: string) => {

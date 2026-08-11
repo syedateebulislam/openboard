@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+// Aliased: the outside-click effect below types its listener against the DOM's
+// global KeyboardEvent, and an unaliased import would shadow it.
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 export interface DashboardTabItem {
   id: string;
@@ -83,6 +85,39 @@ export function DashboardTabs({ tabs, activeId, onSelect }: DashboardTabsProps) 
     setOpenGroup(null);
   };
 
+  /**
+   * Arrow-key movement across the tablist, per the ARIA tabs pattern.
+   *
+   * The roving tabIndex below is only half of that pattern, and half of it is
+   * worse than none: every unselected tab carries tabIndex={-1}, so Tab skips
+   * them, and without this handler there was no other way in. A keyboard user
+   * could not change dashboards at all — WCAG 2.2 SC 2.1.1.
+   *
+   * Selection follows focus, which is the expected behaviour for tabs whose
+   * panels are already loaded.
+   */
+  const onTablistKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+
+    const current = tabs.findIndex((tab) => tab.id === active?.id);
+    if (current === -1) return;
+
+    let next = current;
+    if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+
+    const target = tabs[next];
+    if (!target) return;
+    select(target.id);
+    // Move real focus too — otherwise the next arrow press is still handled by
+    // the old element and the focus ring lags a tab behind the selection.
+    document.getElementById(`tab-${target.id}`)?.focus();
+  };
+
   // Disclosure-nav variant used in grouped mode (inside dropdowns and the
   // mobile menu), where a tablist ancestor is not allowed.
   const renderNavButton = (tab: DashboardTabItem) => {
@@ -141,6 +176,7 @@ export function DashboardTabs({ tabs, activeId, onSelect }: DashboardTabsProps) 
           id="dashboard-tablist"
           role="tablist"
           aria-label="OpenBoardCLI dashboards"
+          onKeyDown={onTablistKeyDown}
         >
           {tabs.map((tab) => {
             const selected = active?.id === tab.id;

@@ -170,6 +170,39 @@ describe('the guard blocks code that reaches outside a fetcher', () => {
     expect(scan.violations.join(' ')).toMatch(/environment/i);
   });
 
+  it('blocks the other two spellings of an environment read', () => {
+    // os.environ was denied from the start; these two reached the same
+    // environment around that pattern. os.getenv is simply a different API,
+    // and os.environb survived an `\benviron\b` anchor because `b` is a word
+    // character. Both are the interesting case: they look like ordinary Python
+    // rather than obfuscation, so a model could emit either without being
+    // steered to.
+    for (const payload of [
+      '    key = os.getenv("ANTHROPIC_API_KEY")',
+      '    key = os.environb[b"ANTHROPIC_API_KEY"]',
+      '    key = os.getenv ("VERCEL_TOKEN")',
+    ]) {
+      const scan = blocked(payload);
+      expect(scan.safe, payload).toBe(false);
+      expect(scan.violations.join(' '), payload).toMatch(/environment/i);
+    }
+  });
+
+  it('blocks reaching a denied builtin indirectly through getattr', () => {
+    // `eval(` and `exec(` are denied literally, so the way round them is to
+    // never spell one: getattr(__builtins__, "ev" + "al") rebuilds it at run
+    // time. Denying __builtins__ outright is what closes that.
+    for (const payload of [
+      '    getattr(__builtins__, "ev" + "al")("1+1")',
+      '    __builtins__.__dict__["exec"]("x = 1")',
+      '    setattr(__builtins__, "print", None)',
+    ]) {
+      const scan = blocked(payload);
+      expect(scan.safe, payload).toBe(false);
+      expect(scan.violations.join(' '), payload).toMatch(/builtins/i);
+    }
+  });
+
   it('blocks an unknown third-party import', () => {
     const scan = blocked('    import paramiko');
     expect(scan.safe).toBe(false);

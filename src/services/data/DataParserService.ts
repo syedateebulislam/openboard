@@ -19,6 +19,45 @@ export interface DataParserOptions {
 
 const DEFAULT_MAX_ROWS = 1_000_000;
 
+/**
+ * A plain decimal number and nothing else: optional sign, no leading zeros on
+ * the integer part, no exponent, no leading +.
+ *
+ * Trailing zeros after the point are deliberately allowed — "1234.50" is a
+ * money amount, and a rule that rejected it (as a String(Number(v)) round-trip
+ * would) turns every invoice total into text and breaks the charts.
+ */
+const PLAIN_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?\.\d+$/;
+
+/**
+ * Convert a CSV cell to a number only when nothing is lost by doing so.
+ *
+ * The old rule was `!isNaN(Number(value))`, true for a great many strings that
+ * are identifiers rather than quantities — and this product's flagship data is
+ * invoices. "007" became 7, a ZIP of "01234" became 1234, "+123456" lost its
+ * plus, "1e5" became 100000, a twenty-digit invoice number lost its low digits
+ * to float precision, and "Infinity" passed the check and then serialised to
+ * null in api/_data.
+ *
+ * What survives the two checks below is a quantity. Anything else — anything
+ * whose written form carries meaning — stays exactly as the file had it.
+ *
+ * Returns undefined when the value should stay a string.
+ */
+function castNumeric(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!PLAIN_NUMBER.test(trimmed)) return undefined;
+
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return undefined;
+
+  // An integer past 2^53 cannot be held exactly, and the ones that get this
+  // long are account and invoice numbers rather than amounts.
+  if (!trimmed.includes('.') && !Number.isSafeInteger(num)) return undefined;
+
+  return num;
+}
+
 export class DataParserService {
   static async parse(rawFilePath: string, options: DataParserOptions = {}): Promise<ParsedData> {
     const filePath = normalizeUserPath(rawFilePath);
@@ -119,9 +158,8 @@ export class DataParserService {
       skip_empty_lines: true,
       cast: (value, context) => {
         if (context.header) return value;
-        // Auto-convert numeric strings
-        const num = Number(value);
-        if (value.trim() !== '' && !isNaN(num)) return num;
+        const numeric = castNumeric(value);
+        if (numeric !== undefined) return numeric;
         // Boolean
         if (value === 'true') return true;
         if (value === 'false') return false;

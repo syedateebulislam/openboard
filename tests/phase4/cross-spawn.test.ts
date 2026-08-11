@@ -25,6 +25,63 @@ describe('crossSpawn command resolution', () => {
   });
 });
 
+describe('crossSpawn environment isolation', () => {
+  // The child here stands in for a generated invoice fetcher: it prints back
+  // whatever it can see, and the test asserts what it cannot.
+  const printEnv = (name: string) => [
+    '-e',
+    `process.stdout.write(String(process.env[${JSON.stringify(name)}] ?? ''))`,
+  ];
+
+  it('keeps the parent process secrets out of an isolated child', async () => {
+    process.env.OPENBOARD_TEST_FAKE_SECRET = 'must-not-leak';
+    try {
+      const result = await crossSpawn(process.execPath, printEnv('OPENBOARD_TEST_FAKE_SECRET'), {
+        cwd: process.cwd(),
+        timeoutMs: 5_000,
+        isolateEnv: true,
+      });
+      expect(result.stdout).toBe('');
+    } finally {
+      delete process.env.OPENBOARD_TEST_FAKE_SECRET;
+    }
+  });
+
+  it('still hands an isolated child the credentials it was given explicitly', async () => {
+    const result = await crossSpawn(process.execPath, printEnv('OPENBOARD_GMAIL_APP_PASSWORD'), {
+      cwd: process.cwd(),
+      timeoutMs: 5_000,
+      isolateEnv: true,
+      env: { OPENBOARD_GMAIL_APP_PASSWORD: 'app-password' },
+    });
+    expect(result.stdout).toBe('app-password');
+  });
+
+  it('keeps PATH so the interpreter can still be found', async () => {
+    // Isolation that breaks process startup would just get reverted, so the
+    // passthrough list is part of the contract, not an implementation detail.
+    const result = await crossSpawn(process.execPath, printEnv('PATH'), {
+      cwd: process.cwd(),
+      timeoutMs: 5_000,
+      isolateEnv: true,
+    });
+    expect(result.stdout.length).toBeGreaterThan(0);
+  });
+
+  it('inherits the full environment when isolation is not requested', async () => {
+    process.env.OPENBOARD_TEST_FAKE_SECRET = 'inherited';
+    try {
+      const result = await crossSpawn(process.execPath, printEnv('OPENBOARD_TEST_FAKE_SECRET'), {
+        cwd: process.cwd(),
+        timeoutMs: 5_000,
+      });
+      expect(result.stdout).toBe('inherited');
+    } finally {
+      delete process.env.OPENBOARD_TEST_FAKE_SECRET;
+    }
+  });
+});
+
 describe('crossSpawn process lifecycle', () => {
   it('pipes stdin without exposing it in argv', async () => {
     const result = await crossSpawn(process.execPath, [

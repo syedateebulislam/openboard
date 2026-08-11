@@ -70,11 +70,23 @@ const DENIED_CONSTRUCTS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\b(pickle|marshal|shelve|dill)\b/, reason: 'deserialisation' },
   { pattern: /\b(shutil|ctypes|multiprocessing|threading)\b/, reason: 'system access' },
   { pattern: /\bbase64\b/, reason: 'base64 (obfuscation vector; no fetcher needs it)' },
-  { pattern: /\bsetattr\s*\(\s*__builtins__/, reason: 'builtins tampering' },
+  // Reaching __builtins__ at all is the tell. setattr() was denied here before,
+  // but getattr(__builtins__, "ev" + "al")(...) reconstructs a denied builtin
+  // without ever spelling `eval(` for the patterns above to match.
+  { pattern: /__builtins__/, reason: 'builtins access' },
   // Only the two variables OpenBoardCLI sets may be read. load_credentials() in
   // the skeleton needs them; anything else in the environment (other API keys,
   // tokens from the parent process) is none of a fetcher's business.
-  { pattern: /\bos\s*\.\s*environ\b/, reason: 'reading environment variables other than its own credentials' },
+  //
+  // All three spellings are denied together. os.environ alone left two ways
+  // through: os.getenv() is a separate API onto the same environment, and
+  // `environb` survives an `\benviron\b` anchor because `b` is a word
+  // character. Neither appears in any shipped fetcher — the ten credential
+  // reads all use os.environ.get — so denying them costs nothing.
+  {
+    pattern: /\bos\s*\.\s*(environb?\b|getenv\s*\()/,
+    reason: 'reading environment variables other than its own credentials',
+  },
 ];
 
 /** The two reads load_credentials() is expected to make. */

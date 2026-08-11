@@ -117,15 +117,39 @@ const ENCRYPTED_PREFIX = 'enc:';
  * the home directory. Set OPENBOARD_ENCRYPTION_SECRET from an OS keychain for
  * a real trust boundary. Documented under "Data Privacy & Security" in README.
  */
+/**
+ * Cache of the derived key, keyed by the secret it came from.
+ *
+ * scrypt is deliberately expensive — that is the whole point of it — and it is
+ * synchronous here, so each call blocks the Ink event loop for ~50-100ms and
+ * the TUI visibly stutters. It was running on every encrypt and every decrypt:
+ * once per LLM call for llm.apiKey, twice more in the chat readiness check,
+ * again on the board-creation screen. The inputs never change within a run, so
+ * the work was pure repetition.
+ *
+ * Keyed by secret rather than a bare variable so that a test (or a caller that
+ * legitimately switches OPENBOARD_ENCRYPTION_SECRET) still derives a fresh key
+ * instead of being served the previous install's.
+ */
+const keyCache = new Map<string, Buffer>();
+
+function deriveKeyCached(secret: string): Buffer {
+  const cached = keyCache.get(secret);
+  if (cached) return cached;
+  const derived = scryptSync(secret, ENCRYPTION_KEY_SALT, KEY_LENGTH) as Buffer;
+  keyCache.set(secret, derived);
+  return derived;
+}
+
 function deriveEncryptionKey(): Buffer {
   const secret = process.env.OPENBOARD_ENCRYPTION_SECRET;
   if (!secret) {
     // Generate a machine-specific secret on first run
     const machineSecret = generateMachineSecret();
     process.env.OPENBOARD_ENCRYPTION_SECRET = machineSecret;
-    return scryptSync(machineSecret, ENCRYPTION_KEY_SALT, KEY_LENGTH) as Buffer;
+    return deriveKeyCached(machineSecret);
   }
-  return scryptSync(secret, ENCRYPTION_KEY_SALT, KEY_LENGTH) as Buffer;
+  return deriveKeyCached(secret);
 }
 
 /**

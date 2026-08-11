@@ -24,6 +24,7 @@ import { GmailIntegrationScreen } from './screens/GmailIntegrationScreen.js';
 import { IntegrationsScreen } from './screens/IntegrationsScreen.js';
 import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
 import { ScreenFrame } from './components/ScreenFrame.js';
+import { Spinner } from './components/Spinner.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -191,8 +192,11 @@ export function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) 
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Esc is ignored while a save is in flight. Leaving mid-await does not
+  // cancel the work — it completes and writes config for a screen the user is
+  // no longer looking at, so they never learn whether it succeeded.
   useInput((_input, key) => {
-    if (key.escape) onNavigate('settings');
+    if (key.escape && !saving) onNavigate('settings');
   });
 
   const saveCredentials = async () => {
@@ -266,8 +270,10 @@ export function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Held while the token is being validated against the GitHub API — see the
+  // note in DashboardAuthSettings.
   useInput((_input, key) => {
-    if (key.escape) onNavigate('settings');
+    if (key.escape && !saving) onNavigate('settings');
   });
 
   const saveToken = async (value: string) => {
@@ -342,8 +348,10 @@ export function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void })
   const [ollamaHost, setOllamaHost] = useState('http://127.0.0.1:11434');
   const [status, setStatus] = useState('');
 
+  // Held while the provider is being validated — which for a local model or a
+  // browser login is the longest wait in settings.
   useInput((_input, key) => {
-    if (key.escape) onNavigate('settings');
+    if (key.escape && step !== 'saving') onNavigate('settings');
   });
 
   const saveLLM = async (modelOverride?: string) => {
@@ -520,8 +528,9 @@ export function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Held while the token is being validated for project access.
   useInput((_input, key) => {
-    if (key.escape) onNavigate('settings');
+    if (key.escape && !saving) onNavigate('settings');
   });
 
   const saveToken = async (value: string) => {
@@ -614,6 +623,11 @@ export function App() {
   const [shouldAutoGenerate, setShouldAutoGenerate] = useState(false);
   const [allBoardsMode, setAllBoardsMode] = useState(false);
   const [scaffoldError, setScaffoldError] = useState<string | null>(null);
+  // Scaffolding copies the whole template and writes .env. It is not
+  // instantaneous, and until now it rendered nothing at all — the creation
+  // screen simply sat there, indistinguishable from a hang, and only spoke up
+  // if it failed.
+  const [scaffolding, setScaffolding] = useState(false);
   const [billerConfigVersion, setBillerConfigVersion] = useState(0);
   const [billerStatus, setBillerStatus] = useState<BillerSchedulerStatus | null>(null);
 
@@ -646,14 +660,23 @@ export function App() {
 
   const handleBoardCreated = useCallback(async (board: BoardConfig) => {
     setScaffoldError(null);
-    const result = await projectManager.scaffold(board);
-    if (result.success) {
-      setCurrentBoard(result.board);
-      setShouldAutoGenerate(true);
-      setAllBoardsMode(false);
-      navigate('chat');
-    } else {
-      setScaffoldError(result.error || 'Failed to scaffold project');
+    setScaffolding(true);
+    try {
+      const result = await projectManager.scaffold(board);
+      if (result.success) {
+        setCurrentBoard(result.board);
+        setShouldAutoGenerate(true);
+        setAllBoardsMode(false);
+        navigate('chat');
+      } else {
+        setScaffoldError(result.error || 'Failed to scaffold project');
+      }
+    } catch (error) {
+      // scaffold() returns its failures, but a throw here would previously
+      // have left the screen stuck on the busy state forever.
+      setScaffoldError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setScaffolding(false);
     }
   }, []);
 
@@ -681,6 +704,25 @@ export function App() {
       return <SetupWizard onComplete={handleSetupComplete} onNavigate={navigate} />;
     
     case 'create-board':
+      // While scaffolding, replace the form rather than layering a spinner
+      // over it: the form's inputs are inert at that point, and leaving them
+      // on screen invites the user to keep typing into a screen that has
+      // already moved on.
+      if (scaffolding) {
+        return (
+          <ScreenFrame
+            title={['Dashboards', 'Creating']}
+            status="Scaffolding project…"
+            statusTone="busy"
+            /* No hints: no key does anything until this finishes. */
+            hints={[]}
+          >
+            <Box marginTop={1}>
+              <Spinner label="Copying the dashboard template and writing configuration…" />
+            </Box>
+          </ScreenFrame>
+        );
+      }
       return (
         <Box flexDirection="column">
           {scaffoldError && (

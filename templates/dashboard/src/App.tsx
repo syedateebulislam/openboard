@@ -52,7 +52,18 @@ function DashboardContent() {
       </header>
       <main className="app-content">
         <DashboardTabs tabs={tabs} activeId={activeTab} onSelect={setActiveTab} />
-        <div role="tabpanel" id={`panel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+        {/*
+          tabIndex={0} makes the panel itself a tab stop. Without it, a panel
+          whose content has no focusable element (a chart, a table of numbers)
+          cannot be reached by keyboard at all, so its content is unreadable to
+          anyone navigating that way. Required by the ARIA tabs pattern.
+        */}
+        <div
+          role="tabpanel"
+          id={`panel-${activeTab}`}
+          aria-labelledby={`tab-${activeTab}`}
+          tabIndex={0}
+        >
           {dashboardTabs.length === 0 ? <div className="card kpi-card">
             <p className="kpi-label">Welcome</p>
             <p className="kpi-value">Dashboard Ready</p>
