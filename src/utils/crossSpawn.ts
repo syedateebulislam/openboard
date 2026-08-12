@@ -81,7 +81,7 @@ export function resolveSpawnCommand(
 }
 
 /**
- * Characters cmd.exe acts on when it parses its own command line.
+ * Characters that can end one cmd.exe command and begin another.
  *
  * Only relevant on the shim path below. Node quotes argv by the C runtime's
  * rules, but cmd.exe does not read it back by those rules, so an argument
@@ -89,11 +89,26 @@ export function resolveSpawnCommand(
  * the CVE-2024-27980 class. Everywhere else spawn is `shell: false` and argv
  * reaches the OS untouched, where these characters are inert.
  *
- * Deliberately narrow. BuildService has a broader denial of its own, but that
- * list includes backslash and brackets, which every Windows path contains —
- * applying it to all spawns would reject ordinary arguments.
+ * Separators only. An earlier version of this also denied `"` and `%`, which
+ * broke a shipped call: the codex provider passes
+ * `-c model_reasoning_effort="medium"`, where the quotes are structural to
+ * codex's config parser, so every generation failed outright.
+ *
+ * Excluding them is sound rather than merely convenient. A quote's danger is
+ * that it unbalances cmd's quote tracking and thereby exposes a *later*
+ * separator — so `foo" & calc & "bar` is caught here by the `&` it needs, not
+ * by the quote. With no separator present there is no second command to reach.
+ * `%` is different in kind: it expands an environment variable into the child's
+ * argv rather than running anything. That is a disclosure risk, not execution,
+ * and it is accepted knowingly — denying it is what broke this path once
+ * already, and argv on this route carries flags and config values, never
+ * user prose (prompts travel on stdin).
+ *
+ * Deliberately narrow for the same reason BuildService's broader list was not
+ * reused here: that one denies backslash and brackets, which every Windows
+ * path contains.
  */
-const CMD_METACHARACTERS = /[&|<>^"%\r\n]/;
+const CMD_METACHARACTERS = /[&|<>^\r\n]/;
 
 export function resolveSpawnInvocation(
   cmd: string,
@@ -112,7 +127,7 @@ export function resolveSpawnInvocation(
       if (CMD_METACHARACTERS.test(arg)) {
         throw new Error(
           `Unsafe argument for "${cmd}" on Windows: ${arg}. ` +
-            'Arguments routed through cmd.exe may not contain & | < > ^ " % or newlines.',
+            'Arguments routed through cmd.exe may not contain & | < > ^ or newlines.',
         );
       }
     }
