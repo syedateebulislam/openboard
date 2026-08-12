@@ -42,8 +42,14 @@ describe('DashboardManifestService', () => {
     const manifest = readFileSync(join(projectDir, 'src', result.path), 'utf-8');
 
     expect(result.missingBoards).toEqual([]);
-    expect(manifest).toContain("import * as MasterModule from '../components/MasterDashboard'");
-    expect(manifest).toContain("import * as DashboardModule0 from \"../components/SalesDashboard\"");
+    // Each dashboard is loaded lazily so only the open tab's chart code is
+    // fetched; a static import put every dashboard in the initial bundle.
+    expect(manifest).toContain("import { lazy } from 'react'");
+    expect(manifest).toContain("lazy(() => import('../components/MasterDashboard')");
+    expect(manifest).toContain("lazy(() => import(\"../components/SalesDashboard\")");
+    // Named and default exports both have to resolve to a default for lazy().
+    expect(manifest).toContain('m.SalesDashboard');
+    expect(manifest).toContain('m.default');
     expect(manifest).toContain("{ id: \"sales\", label: \"Sales\", group: \"Finance\" }");
     expect(manifest).toContain("case \"costs\": return <DashboardComponent1 />");
     expect(manifest).not.toContain('App.tsx');

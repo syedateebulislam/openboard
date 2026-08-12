@@ -21,6 +21,7 @@ import type {
 } from '../../types/llm.js';
 import { openaiReasoningEffort } from '../../config/llmCatalog.js';
 import { startHeartbeat } from './heartbeat.js';
+import { HOSTED_LLM_TIMEOUT_MS } from './OpenAICompatibleProvider.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class OpenAIProvider implements LLMProvider {
@@ -40,7 +41,8 @@ export class OpenAIProvider implements LLMProvider {
   private getClient(): Promise<OpenAI> {
     if (!this.clientPromise) {
       this.clientPromise = import('openai').then(
-        ({ default: OpenAI }) => new OpenAI({ apiKey: this.apiKey }),
+        ({ default: OpenAI }) =>
+          new OpenAI({ apiKey: this.apiKey, timeout: HOSTED_LLM_TIMEOUT_MS }),
       );
     }
     return this.clientPromise;

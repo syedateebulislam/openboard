@@ -15,9 +15,92 @@ export interface ParsedData {
 export interface DataParserOptions {
   /** Safety bound for materialized output. CSV input itself is streamed. */
   maxRows?: number;
+  /**
+   * Byte ceiling for .json input, which cannot be streamed. Ignored for CSV
+   * and Excel, both of which are read incrementally.
+   */
+  maxJsonBytes?: number;
 }
 
 const DEFAULT_MAX_ROWS = 1_000_000;
+
+/**
+ * A plain decimal number and nothing else: optional sign, no leading zeros on
+ * the integer part, no exponent, no leading +.
+ *
+ * Trailing zeros after the point are deliberately allowed — "1234.50" is a
+ * money amount, and a rule that rejected it (as a String(Number(v)) round-trip
+ * would) turns every invoice total into text and breaks the charts.
+ */
+const PLAIN_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?\.\d+$/;
+
+/**
+ * Convert a CSV cell to a number only when nothing is lost by doing so.
+ *
+ * The old rule was `!isNaN(Number(value))`, true for a great many strings that
+ * are identifiers rather than quantities — and this product's flagship data is
+ * invoices. "007" became 7, a ZIP of "01234" became 1234, "+123456" lost its
+ * plus, "1e5" became 100000, a twenty-digit invoice number lost its low digits
+ * to float precision, and "Infinity" passed the check and then serialised to
+ * null in api/_data.
+ *
+ * What survives the two checks below is a quantity. Anything else — anything
+ * whose written form carries meaning — stays exactly as the file had it.
+ *
+ * Returns undefined when the value should stay a string.
+ */
+/**
+ * Byte ceiling for a .json source. 256 MB of JSON text becomes several times
+ * that as parsed objects, which is already past what a TUI process should be
+ * asking of a laptop.
+ */
+const DEFAULT_MAX_JSON_BYTES = 256 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/** Rows inspected when inferring JSON headers. */
+const HEADER_SAMPLE_ROWS = 200;
+
+/**
+ * Collect the column names across a sample of rows, in first-seen order.
+ *
+ * JSON has no header line, so the columns were taken from `rows[0]` alone. A
+ * heterogeneous array — a field absent from the first record but present later,
+ * which is ordinary in exported data — silently lost those columns for every
+ * consumer keyed off `headers`, including the analyzer and the LLM summary.
+ *
+ * Sampled rather than exhaustive: scanning a million rows to find a column is
+ * not worth it, and anything missing from the first two hundred records is not
+ * a column the dashboard should be built around.
+ */
+function unionHeaders(rows: Record<string, unknown>[]): string[] {
+  const headers = new Set<string>();
+  for (const row of rows.slice(0, HEADER_SAMPLE_ROWS)) {
+    if (row && typeof row === 'object') {
+      for (const key of Object.keys(row)) headers.add(key);
+    }
+  }
+  return [...headers];
+}
+
+function castNumeric(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!PLAIN_NUMBER.test(trimmed)) return undefined;
+
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return undefined;
+
+  // An integer past 2^53 cannot be held exactly, and the ones that get this
+  // long are account and invoice numbers rather than amounts.
+  if (!trimmed.includes('.') && !Number.isSafeInteger(num)) return undefined;
+
+  return num;
+}
 
 export class DataParserService {
   static async parse(rawFilePath: string, options: DataParserOptions = {}): Promise<ParsedData> {
@@ -48,6 +131,19 @@ export class DataParserService {
     } else if (ext === '.xlsx') {
       parsed = await DataParserService.parseExcel(filePath, maxRows);
     } else {
+      // Checked before the read, not after the parse. maxRows cannot help
+      // here: the CSV path enforces it mid-stream, but JSON has to be whole
+      // before it means anything, so a large file is already resident — twice
+      // over, as text and as objects — by the time a row count exists to
+      // reject. A byte bound is the only limit that can act in time.
+      const maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
+      if (sourceBytes > maxJsonBytes) {
+        throw new Error(
+          `JSON file is too large (${formatBytes(sourceBytes)}, limit ${formatBytes(maxJsonBytes)}). ` +
+            'The whole document must be held in memory to parse it. ' +
+            'Convert it to CSV, which is streamed and has no such limit.',
+        );
+      }
       parsed = DataParserService.parseJSON(await readFile(filePath, 'utf-8'), maxRows);
     }
     return { ...parsed, sourceBytes, parseDurationMs: performance.now() - startedAt };
@@ -119,9 +215,8 @@ export class DataParserService {
       skip_empty_lines: true,
       cast: (value, context) => {
         if (context.header) return value;
-        // Auto-convert numeric strings
-        const num = Number(value);
-        if (value.trim() !== '' && !isNaN(num)) return num;
+        const numeric = castNumeric(value);
+        if (numeric !== undefined) return numeric;
         // Boolean
         if (value === 'true') return true;
         if (value === 'false') return false;
@@ -172,7 +267,6 @@ export class DataParserService {
       throw new Error(`Row limit exceeded (${maxRows.toLocaleString()}). Increase maxRows explicitly to continue.`);
     }
 
-    const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
-    return { rows, headers, format: 'json' };
+    return { rows, headers: unionHeaders(rows), format: 'json' };
   }
 }

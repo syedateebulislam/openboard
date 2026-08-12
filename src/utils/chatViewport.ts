@@ -12,6 +12,7 @@
  * Everything in this module is pure: the scroll maths are testable without a
  * terminal.
  */
+import stringWidth from 'string-width';
 import type { ChatMessage } from '../types/board.js';
 
 /** Role label column ('You: ', 'LLM: ', …) — fixed width so text aligns. */
@@ -45,6 +46,45 @@ export interface ChatLine {
 export type WrapCache = Map<string, { content: string; width: number; lines: string[] }>;
 
 /**
+ * Columns a string occupies in a terminal.
+ *
+ * Not the same as `.length`, which is what this used to measure. A CJK
+ * character and most emoji occupy two columns while counting as one (or, for
+ * emoji, often two) code units, so a line of Japanese wrapped at `width`
+ * characters drew at roughly twice the width and overflowed the frame. For
+ * ASCII the two agree exactly, so nothing about existing behaviour moves.
+ */
+function displayWidth(text: string): number {
+  return stringWidth(text);
+}
+
+/**
+ * Split `text` at `width` display columns.
+ *
+ * Needed for the hard-break path: slicing by code units would cut a
+ * double-width character's line in half by column count, and can cut a
+ * surrogate pair or an emoji ZWJ sequence in half outright. Iterating by code
+ * point and accumulating width breaks only where a terminal would.
+ */
+function sliceToWidth(text: string, width: number): [string, string] {
+  let taken = '';
+  let used = 0;
+  for (const char of text) {
+    const charWidth = stringWidth(char);
+    if (used + charWidth > width) break;
+    taken += char;
+    used += charWidth;
+  }
+  // A single character wider than the whole line: emit it anyway, or the loop
+  // that calls this never advances.
+  if (taken === '') {
+    const [first] = text;
+    return [first ?? '', text.slice(first?.length ?? 0)];
+  }
+  return [taken, text.slice(taken.length)];
+}
+
+/**
  * Word-wrap to `width` columns, preserving explicit newlines and hard-breaking
  * tokens (URLs, minified JSON) that cannot fit on a line of their own.
  */
@@ -54,7 +94,7 @@ export function wrapText(text: string, width: number): string[] {
 
   const out: string[] = [];
   for (const paragraph of paragraphs) {
-    if (paragraph.length <= width) {
+    if (displayWidth(paragraph) <= width) {
       out.push(paragraph);
       continue;
     }
@@ -62,9 +102,10 @@ export function wrapText(text: string, width: number): string[] {
     let current = '';
     const push = (word: string) => {
       let rest = word;
-      while (rest.length > width) {
-        out.push(rest.slice(0, width));
-        rest = rest.slice(width);
+      while (displayWidth(rest) > width) {
+        const [head, tail] = sliceToWidth(rest, width);
+        out.push(head);
+        rest = tail;
       }
       current = rest;
     };
@@ -72,7 +113,7 @@ export function wrapText(text: string, width: number): string[] {
     for (const word of paragraph.split(' ')) {
       if (current === '') {
         push(word);
-      } else if (current.length + 1 + word.length <= width) {
+      } else if (displayWidth(current) + 1 + displayWidth(word) <= width) {
         current += ` ${word}`;
       } else {
         out.push(current);

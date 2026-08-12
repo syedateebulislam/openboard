@@ -41,9 +41,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
-  // Show nothing while checking auth status
+  // Checking auth status. This used to return null, which renders a blank
+  // page: sighted users see an empty screen with no explanation, and a screen
+  // reader is told nothing at all because there is no content to announce.
+  // A polite live region says what is happening without flashing a spinner
+  // into a check that usually resolves in milliseconds.
   if (loading) {
-    return null;
+    return (
+      <div className="auth-loading" role="status" aria-live="polite">
+        <span className="sr-only">Checking your sign-in…</span>
+      </div>
+    );
   }
 
   return (

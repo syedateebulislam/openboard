@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -9,8 +9,11 @@ import { DataParserService } from '../services/data/DataParserService.js';
 import { DataAnalyzer, type DataAnalysis } from '../services/data/DataAnalyzer.js';
 import { ConfigService } from '../services/config/ConfigService.js';
 import { normalizeUserPath } from '../utils/pathNormalizer.js';
+import { parentOf } from '../config/navigation.js';
 import { UI_COLORS } from '../theme.js';
 import { HintBar } from '../components/HintBar.js';
+import { Spinner } from '../components/Spinner.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,7 +79,11 @@ const QUALITY_ITEMS: Array<{ label: string; value: BoardConfig['uiQuality'] }> =
 // Component
 // ---------------------------------------------------------------------------
 
+/** Columns the boxed header needs: 40 for the box, plus padding={2} each side. */
+const HEADER_MIN_COLUMNS = 44;
+
 export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
+  const { columns } = useTerminalSize();
   // Step state
   const [step, setStep] = useState<CreationStep>('select-preset');
 
@@ -88,6 +95,19 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
 
   // Analysis results
   const [analysis, setAnalysis] = useState<DataAnalysis | null>(null);
+
+  // Seconds spent in the 'analyzing' step, so the wait is visibly progressing.
+  const [analyzeElapsed, setAnalyzeElapsed] = useState(0);
+
+  useEffect(() => {
+    if (step !== 'analyzing') return;
+    setAnalyzeElapsed(0);
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setAnalyzeElapsed(Math.round((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [step]);
 
   // Error, plus the step ESC should return to so typed input is not lost.
   const [errorMessage, setErrorMessage] = useState('');
@@ -165,11 +185,18 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   // Keyboard: ESC goes back, Enter confirms on show-summary
   useInput((_input, key) => {
     if (key.escape) {
-      if (step === 'select-quality') setStep('select-preset');
+      // 'select-preset' is the first step, so its back target is out of this
+      // screen entirely — without a case here Esc was simply dead on the
+      // opening screen, with no way back to the menu but finishing the flow.
+      if (step === 'select-preset') onNavigate(parentOf('create-board'));
+      else if (step === 'select-quality') setStep('select-preset');
       else if (step === 'enter-file') setStep('select-quality');
       else if (step === 'enter-name') setStep('enter-file');
       else if (step === 'show-summary') setStep('enter-name');
       else if (step === 'error') setStep(errorReturnStep);
+      // 'analyzing' has no case on purpose: the parse it is waiting on cannot
+      // be cancelled, so leaving would strand it. It is the one step where a
+      // dead Esc is the honest answer — the hint bar says so.
     }
     if (key.return && step === 'show-summary' && selectedPreset) {
       if (!hasConfiguredLLM()) {
@@ -179,11 +206,18 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         return;
       }
 
-      // Create board config and pass to parent
+      // Use the name sanitizeBoardName produced, not a second, weaker
+      // transform of the raw input. handleNameSubmit called createBoardConfig
+      // for its validation and threw the result away, and the replacement here
+      // only collapsed whitespace — so '.', '/', '\' and brackets survived into
+      // board.name, which becomes a directory under projects/ and the GitHub
+      // repo name. "Sales (2024)" and "Q1/Q2 Revenue" both produced a broken
+      // directory.
+      const named = createBoardConfig(boardName);
       const boardConfig: import('../types/board.js').BoardConfig = {
         id: `board-${Date.now()}`,
-        name: boardName.toLowerCase().replace(/\s+/g, '-'),
-        title: boardName,
+        name: named.name,
+        title: named.title,
         type: selectedPreset.id as BoardConfig['type'],
         outputDir: '',
         dataFiles: [filePath],
@@ -205,17 +239,26 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   // Render helpers
   // -------------------------------------------------------------------------
 
+  // 40 columns of box plus padding={2} on both sides. Narrower than that and
+  // every row of the frame wraps, so the box is dropped for a plain heading
+  // rather than drawn broken.
   const renderHeader = () => (
     <Box marginBottom={1} flexDirection="column">
-      <Text bold color={UI_COLORS.border}>
-        ╔══════════════════════════════════════╗
-      </Text>
-      <Text bold color={UI_COLORS.logo}>
-        ║        Create New Dashboard          ║
-      </Text>
-      <Text bold color={UI_COLORS.border}>
-        ╚══════════════════════════════════════╝
-      </Text>
+      {columns < HEADER_MIN_COLUMNS ? (
+        <Text bold color={UI_COLORS.logo}>Create New Dashboard</Text>
+      ) : (
+        <>
+          <Text bold color={UI_COLORS.border}>
+            ╔══════════════════════════════════════╗
+          </Text>
+          <Text bold color={UI_COLORS.logo}>
+            ║        Create New Dashboard          ║
+          </Text>
+          <Text bold color={UI_COLORS.border}>
+            ╚══════════════════════════════════════╝
+          </Text>
+        </>
+      )}
     </Box>
   );
 
@@ -379,12 +422,23 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
       <Box flexDirection="column" padding={2}>
         {renderHeader()}
         {renderStepIndicator()}
+        {/*
+          A spinner and an elapsed count, not static text. Parsing a large CSV
+          takes long enough that a frozen line reads as a hang, and this is the
+          one step with no Esc — so the screen has to keep saying it is alive,
+          and say why it will not respond.
+        */}
         <Box marginTop={1}>
-          <Text color="yellow">⏳ Analyzing data file…</Text>
+          <Spinner label={`Analyzing data file… ${analyzeElapsed}s`} color="yellow" />
         </Box>
         <Box marginTop={1}>
           <Text color={UI_COLORS.subtitle}>
             Parsing {filePath}
+          </Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={UI_COLORS.subtitle} dimColor>
+            This cannot be interrupted — it finishes on its own.
           </Text>
         </Box>
       </Box>

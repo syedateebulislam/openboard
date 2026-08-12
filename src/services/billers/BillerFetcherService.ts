@@ -118,7 +118,12 @@ export function countCsvRows(path: string): Promise<number> {
       .on('data', (chunk: Buffer | string) => {
         const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
         if (text.length > 0) sawContent = true;
-        for (const char of text) if (char === '\n') newlines += 1;
+        // indexOf rather than a per-character loop: `for (const char of text)`
+        // builds a string iterator and allocates a one-character string for
+        // every byte of every invoice CSV, where indexOf is a native scan.
+        for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+          newlines += 1;
+        }
       })
       // Header line does not count, and a file without a trailing newline still
       // has one more row than it has newlines.
@@ -270,6 +275,13 @@ export class BillerFetcherService {
 
     // Credentials travel in the child's environment, not on argv (which is
     // world-readable in process listings) and not on disk.
+    //
+    // isolateEnv keeps the rest of this process's environment out of the
+    // child: a fetcher is generated code, and OPENBOARD_ENCRYPTION_SECRET,
+    // ANTHROPIC_API_KEY, GITHUB_TOKEN and VERCEL_TOKEN are all sitting in
+    // process.env. The source guard already denies environment reads, but the
+    // guard is a regex over generated Python and the cost of it being wrong is
+    // every credential the user owns. This makes those reads find nothing.
     const env = this.credentialEnv(settings);
 
     let lastError: Error | undefined;
@@ -281,6 +293,7 @@ export class BillerFetcherService {
           onProgress,
           signal,
           env,
+          isolateEnv: true,
         });
         return { code: result.code, output: `${result.stdout}\n${result.stderr}` };
       } catch (error: any) {
@@ -331,8 +344,12 @@ export class BillerFetcherService {
       options.onProgress?.(`Upgraded ${migrated.length} fetcher(s) to environment credentials: ${migrated.join(', ')}`);
     }
 
-    const before = await hashFile(biller.csvPath);
-    const rowsBefore = await countCsvRows(biller.csvPath);
+    // Both read the same file at the same instant; awaiting them in turn read
+    // it twice end to end for no reason.
+    const [before, rowsBefore] = await Promise.all([
+      hashFile(biller.csvPath),
+      countCsvRows(biller.csvPath),
+    ]);
     let run: { code: number; output: string };
     try {
       run = await this.runScript(biller, settings, options.onProgress, options.signal);
@@ -352,13 +369,16 @@ export class BillerFetcherService {
       return { ...base, error: describeFetchError(fatal) };
     }
 
-    const after = await hashFile(biller.csvPath);
+    const [after, rowsAfter] = await Promise.all([
+      hashFile(biller.csvPath),
+      countCsvRows(biller.csvPath),
+    ]);
     const changed = Boolean(after) && before !== after;
     const existing = this.updateService.findBoard(biller.key);
 
     // The two lines that answer "did anything happen?", coloured so they can be
     // found without reading the fetcher output above them.
-    const newRows = Math.max(0, (await countCsvRows(biller.csvPath)) - rowsBefore);
+    const newRows = Math.max(0, rowsAfter - rowsBefore);
     if (changed) {
       options.onProgress?.(toneLine(
         'success',

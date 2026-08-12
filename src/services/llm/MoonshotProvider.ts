@@ -16,6 +16,7 @@ import type {
   LLMValidationResult,
 } from '../../types/llm.js';
 import { startHeartbeat } from './heartbeat.js';
+import { HOSTED_LLM_TIMEOUT_MS } from './OpenAICompatibleProvider.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class MoonshotProvider implements LLMProvider {
@@ -35,7 +36,11 @@ export class MoonshotProvider implements LLMProvider {
       // Moonshot uses OpenAI-compatible API
       this.clientPromise = import('openai').then(
         ({ default: OpenAI }) =>
-          new OpenAI({ apiKey: this.apiKey, baseURL: 'https://api.moonshot.ai/v1' }),
+          new OpenAI({
+            apiKey: this.apiKey,
+            baseURL: 'https://api.moonshot.ai/v1',
+            timeout: HOSTED_LLM_TIMEOUT_MS,
+          }),
       );
     }
     return this.clientPromise;

@@ -19,6 +19,7 @@ import type {
 } from '../../types/llm.js';
 import { anthropicThinkingBudget } from '../../config/llmCatalog.js';
 import { startHeartbeat } from './heartbeat.js';
+import { HOSTED_LLM_TIMEOUT_MS } from './OpenAICompatibleProvider.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 export class AnthropicProvider implements LLMProvider {
@@ -38,7 +39,8 @@ export class AnthropicProvider implements LLMProvider {
   private getClient(): Promise<Anthropic> {
     if (!this.clientPromise) {
       this.clientPromise = import('@anthropic-ai/sdk').then(
-        ({ default: Anthropic }) => new Anthropic({ apiKey: this.apiKey }),
+        ({ default: Anthropic }) =>
+          new Anthropic({ apiKey: this.apiKey, timeout: HOSTED_LLM_TIMEOUT_MS }),
       );
     }
     return this.clientPromise;

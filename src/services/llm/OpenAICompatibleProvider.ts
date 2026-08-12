@@ -26,6 +26,18 @@ import { sanitizeErrorMessage } from '../../utils/logger.js';
 export const LOCAL_LLM_TIMEOUT_MS = 45 * 60_000;
 
 /**
+ * Request timeout for a hosted provider.
+ *
+ * Ten minutes is the ceiling described above, and the same number both SDKs
+ * happen to default to. Stated explicitly at each client so it is this
+ * project's decision rather than an inherited one: a default that is only
+ * correct by coincidence changes silently when the dependency does, and the
+ * symptom would be a pipeline that hangs for a different length of time with
+ * no diff to explain it.
+ */
+export const HOSTED_LLM_TIMEOUT_MS = 10 * 60_000;
+
+/**
  * The usable text of a reply, falling back to the reasoning channel.
  *
  * Reasoning models served through OpenAI-compatible endpoints put their thought

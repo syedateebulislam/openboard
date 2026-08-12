@@ -85,4 +85,34 @@ describe('Logger', () => {
     const log = createLogger('TestModule');
     expect(log).toBeInstanceOf(Logger);
   });
+
+  // A logging call must never be the thing that fails. These contexts are the
+  // ones most likely to be handed to logger.error() from inside a catch block,
+  // and JSON.stringify throws on every one of them.
+  describe('context serialization never throws', () => {
+    const log = createLogger('Test');
+
+    it('survives a circular reference', () => {
+      const circular: Record<string, unknown> = { name: 'run' };
+      circular.self = circular;
+      expect(() => log.error('failed', circular)).not.toThrow();
+    });
+
+    it('survives a getter that throws', () => {
+      const hostile = {
+        get detail() {
+          throw new Error('nope');
+        },
+      };
+      expect(() => log.error('failed', hostile)).not.toThrow();
+    });
+
+    it('survives a BigInt, which JSON.stringify refuses outright', () => {
+      expect(() => log.info('sized', { bytes: 10n })).not.toThrow();
+    });
+
+    it('still logs ordinary context without complaint', () => {
+      expect(() => log.info('ok', { board: 'sales', rows: 42 })).not.toThrow();
+    });
+  });
 });

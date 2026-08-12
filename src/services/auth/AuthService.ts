@@ -33,9 +33,14 @@ export class AuthService {
    * Prepare a complete credential bundle for Vercel environment variables.
    *
    * Returns:
-   *   - username: plaintext (used as OPENBOARD_USERNAME env var)
-   *   - passwordHash: bcrypt hash (used as OPENBOARD_PASSWORD_HASH env var)
-   *   - jwtSecret: random hex (used as OPENBOARD_JWT_SECRET env var)
+   *   - username: plaintext (deployed as DASHBOARD_USERNAME)
+   *   - passwordHash: bcrypt hash (deployed as DASHBOARD_PASSWORD_HASH_B64,
+   *     base64-encoded so dotenv and shell expansion leave its $ alone)
+   *   - jwtSecret: random hex (deployed as JWT_SECRET)
+   *
+   * Those are the names VercelService writes and the generated app reads; see
+   * types/deployment.ts and templates/dashboard/api/auth.ts. This comment
+   * previously named OPENBOARD_-prefixed variables, which are set nowhere.
    */
   static async prepareCredentials(
     username: string,

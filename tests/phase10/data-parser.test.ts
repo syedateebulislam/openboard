@@ -42,6 +42,47 @@ describe('DataParserService CSV/JSON regression', () => {
       ]);
     });
 
+    it('keeps identifier-shaped columns as text rather than mangling them', async () => {
+      // These are the fields an invoice dataset is made of. Casting them with
+      // a bare Number() check silently rewrote the user's data: the zeros fell
+      // off order numbers and ZIP codes, and long account numbers lost their
+      // low digits to float precision.
+      const path = writeFixture(
+        'ids.csv',
+        [
+          'order_id,zip,account,phone,scientific,weird',
+          '007,01234,12345678901234567890,+123456,1e5,Infinity',
+        ].join('\n') + '\n',
+      );
+
+      const [row] = (await DataParserService.parse(path)).rows;
+
+      expect(row.order_id).toBe('007');
+      expect(row.zip).toBe('01234');
+      expect(row.account).toBe('12345678901234567890');
+      expect(row.phone).toBe('+123456');
+      expect(row.scientific).toBe('1e5');
+      // Infinity used to pass !isNaN and then serialise to null in api/_data.
+      expect(row.weird).toBe('Infinity');
+    });
+
+    it('still casts genuine quantities, including money with trailing zeros', async () => {
+      // The other half of the contract: a rule strict enough to reject
+      // "1234.50" would turn every invoice total into text and break charts.
+      const path = writeFixture(
+        'amounts.csv',
+        'total,refund,rate,zero,negative\n1234.50,-3.5,0.75,0,-42\n',
+      );
+
+      const [row] = (await DataParserService.parse(path)).rows;
+
+      expect(row.total).toBe(1234.5);
+      expect(row.refund).toBe(-3.5);
+      expect(row.rate).toBe(0.75);
+      expect(row.zero).toBe(0);
+      expect(row.negative).toBe(-42);
+    });
+
     it('keeps non-numeric strings as strings and skips empty lines', async () => {
       const path = writeFixture('data.csv', 'id,label\n\n1,alpha beta\n2,42abc\n');
 
@@ -109,6 +150,31 @@ describe('DataParserService CSV/JSON regression', () => {
       const parsed = await DataParserService.parse(path);
 
       expect(parsed.rows).toEqual([{ id: 7, name: 'solo' }]);
+    });
+
+    it('collects headers across rows, not just the first', async () => {
+      // Exported JSON is routinely heterogeneous. Taking the columns from
+      // rows[0] alone silently dropped every field that first record happened
+      // not to carry.
+      const path = writeFixture(
+        'mixed.json',
+        JSON.stringify([
+          { id: 1, amount: 10 },
+          { id: 2, amount: 20, refunded: true, note: 'late' },
+        ]),
+      );
+
+      const { headers } = await DataParserService.parse(path);
+
+      expect(headers).toEqual(['id', 'amount', 'refunded', 'note']);
+    });
+
+    it('rejects an oversized JSON file before reading it into memory', async () => {
+      const path = writeFixture('big.json', JSON.stringify([{ id: 1 }]));
+
+      // The bound has to act on the file size, because by the time a row count
+      // exists the document is already resident twice over.
+      await expect(DataParserService.parse(path, { maxJsonBytes: 4 })).rejects.toThrow(/too large/i);
     });
 
     it('throws a JSON parse error for malformed input', async () => {

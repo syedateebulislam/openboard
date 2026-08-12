@@ -107,6 +107,11 @@ export async function runPython(args: string[], options: RunPythonOptions): Prom
         // that exemption is only sound because argv never reaches a shell — so
         // this must not silently follow a change to crossSpawn's default.
         useShell: false,
+        // Every Python run routed through here is either generated code or a
+        // helper handed generated code, and several carry the Gmail App
+        // Password in `env`. None of them has any business seeing the rest of
+        // this process's environment, so none of them is given it.
+        isolateEnv: true,
       });
       return {
         code: result.code,

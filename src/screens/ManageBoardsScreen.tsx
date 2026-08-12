@@ -11,6 +11,7 @@ import { PipelineProgress } from '../components/PipelineProgress.js';
 import type { PipelinePhase } from '../services/project/pipelinePhases.js';
 import { ScreenFrame } from '../components/ScreenFrame.js';
 import { summariseFailures } from '../utils/summariseFailures.js';
+import { parentOf } from '../config/navigation.js';
 
 // Re-exported so the generated-UI cleanup helper keeps a stable import path.
 export { removeDashboardFromGeneratedApp } from '../services/project/DashboardUpdateService.js';
@@ -63,7 +64,17 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
 
   // PgUp/PgDn scroll the log. ink-select-input binds only the arrow keys, so
   // menu navigation is untouched.
-  useInput((_input, key) => log.onKey(key));
+  useInput((_input, key) => {
+    // Esc had no handler here at all: this was the one screen where the only
+    // way back was to find the '← Go Back' row, while every other screen in
+    // the app takes Esc. Held during a removal or deploy, which cannot be
+    // abandoned halfway.
+    if (key.escape && !isProcessing) {
+      onNavigate(parentOf('manage-boards'));
+      return;
+    }
+    log.onKey(key);
+  });
 
   const items: MenuItem[] = [
     { label: '✚ Add new dashboard', value: 'add' },
@@ -122,7 +133,7 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
       return;
     }
     if (item.value === 'back') {
-      onNavigate('welcome');
+      onNavigate(parentOf('manage-boards'));
       return;
     }
     if (item.value === 'refresh') {

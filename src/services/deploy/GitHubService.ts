@@ -378,14 +378,57 @@ export class GitHubService {
   }
 
   /**
-   * Auto-install GitHub CLI if not already available.
-   * Uses winget on Windows, brew on macOS, apt/dnf on Linux.
+   * The exact commands autoInstallGhCli would run on this platform.
+   *
+   * Exists so a caller can show the user what they are agreeing to before
+   * anything runs. On Linux that list includes `sudo` and a permanent change
+   * to the machine's APT sources, which nobody should discover after the fact.
    */
-  static async autoInstallGhCli(onProgress?: ProgressCallback): Promise<boolean> {
+  static describeGhInstallPlan(): { requiresRoot: boolean; commands: string[] } {
+    if (IS_WINDOWS) {
+      return {
+        requiresRoot: false,
+        commands: ['winget install --id GitHub.cli -e'],
+      };
+    }
+    if (IS_MAC) {
+      return { requiresRoot: false, commands: ['brew install gh'] };
+    }
+    return {
+      requiresRoot: true,
+      commands: [
+        'sudo mkdir -p /etc/apt/keyrings',
+        'sudo curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg',
+        'sudo tee /etc/apt/sources.list.d/github-cli.list  (adds the GitHub CLI APT repository)',
+        'sudo apt update && sudo apt install -y gh',
+        'or, on non-apt systems: sudo dnf install -y gh',
+      ],
+    };
+  }
+
+  /**
+   * Install the GitHub CLI. Uses winget on Windows, brew on macOS, apt/dnf on
+   * Linux.
+   *
+   * `consent` is required and has no default. On Linux this adds a third-party
+   * APT repository and signing key to the user's system as root — a permanent
+   * machine change, made by a tool they ran to build a dashboard. Pair it with
+   * describeGhInstallPlan() so the user sees the commands first, and treat
+   * "install gh yourself" as an equally valid answer.
+   */
+  static async autoInstallGhCli(
+    options: { consent: boolean; onProgress?: ProgressCallback },
+  ): Promise<boolean> {
+    const { consent, onProgress } = options;
     const available = await GitHubService.isGhCliAvailable();
     if (available) return true;
 
-    onProgress?.('📥 GitHub CLI (gh) not found. Installing automatically...');
+    if (!consent) {
+      onProgress?.('GitHub CLI (gh) is not installed. Install it and re-run, or approve the install when prompted.');
+      return false;
+    }
+
+    onProgress?.('📥 GitHub CLI (gh) not found. Installing with your approval...');
 
     try {
       let cmd: string;
@@ -401,10 +444,32 @@ export class GitHubService {
         // Linux — try apt first, fall back to dnf
         const { code: aptCode } = await crossSpawn('which', ['apt'], { cwd: process.cwd(), timeoutMs: 5_000 }).catch(() => ({ code: 1 }));
         if (aptCode === 0) {
-          // Add GitHub CLI repo and install
+          // No `bash -c` here. These were the only shell-mediated commands in
+          // the codebase, and the pipes they existed for are avoidable: curl
+          // can write the keyring itself, and the architecture that used to
+          // come from $(dpkg --print-architecture) can be read first and
+          // interpolated. Everything below reaches the OS as argv.
           await crossSpawn('sudo', ['mkdir', '-p', '/etc/apt/keyrings'], { cwd: process.cwd(), timeoutMs: 10_000, onProgress });
-          await crossSpawn('bash', ['-c', 'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null'], { cwd: process.cwd(), timeoutMs: 30_000, onProgress });
-          await crossSpawn('bash', ['-c', 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null'], { cwd: process.cwd(), timeoutMs: 10_000, onProgress });
+          await crossSpawn('sudo', [
+            'curl', '-fsSL',
+            'https://cli.github.com/packages/githubcli-archive-keyring.gpg',
+            '-o', '/etc/apt/keyrings/githubcli-archive-keyring.gpg',
+          ], { cwd: process.cwd(), timeoutMs: 30_000, onProgress });
+
+          const { stdout: arch } = await crossSpawn('dpkg', ['--print-architecture'], {
+            cwd: process.cwd(),
+            timeoutMs: 10_000,
+          }).catch(() => ({ stdout: '' }));
+          const sourceLine =
+            `deb [arch=${arch.trim() || 'amd64'} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg]` +
+            ' https://cli.github.com/packages stable main\n';
+          // tee reads the line from stdin rather than a shell echo.
+          await crossSpawn('sudo', ['tee', '/etc/apt/sources.list.d/github-cli.list'], {
+            cwd: process.cwd(),
+            timeoutMs: 10_000,
+            stdin: sourceLine,
+          });
+
           await crossSpawn('sudo', ['apt', 'update'], { cwd: process.cwd(), timeoutMs: 60_000, onProgress });
           cmd = 'sudo';
           args = ['apt', 'install', '-y', 'gh'];

@@ -22,6 +22,7 @@ import type {
   LLMValidationResult,
 } from '../../types/llm.js';
 import { startHeartbeat } from './heartbeat.js';
+import { HOSTED_LLM_TIMEOUT_MS } from './OpenAICompatibleProvider.js';
 import { sanitizeErrorMessage } from '../../utils/logger.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
@@ -43,7 +44,11 @@ export class GeminiProvider implements LLMProvider {
       // Gemini exposes an OpenAI-compatible endpoint.
       this.clientPromise = import('openai').then(
         ({ default: OpenAI }) =>
-          new OpenAI({ apiKey: this.apiKey, baseURL: GEMINI_BASE_URL }),
+          new OpenAI({
+            apiKey: this.apiKey,
+            baseURL: GEMINI_BASE_URL,
+            timeout: HOSTED_LLM_TIMEOUT_MS,
+          }),
       );
     }
     return this.clientPromise;
