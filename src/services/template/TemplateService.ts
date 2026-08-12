@@ -293,21 +293,30 @@ export class TemplateService {
     dataRoot: string,
     aggregate: Record<string, unknown>,
   ): Promise<void> {
-    await writeFile(
-      resolve(dataRoot, 'dashboard-data.json'),
-      JSON.stringify(aggregate, null, 2) + '\n',
-      'utf-8',
-    );
-    await writeFile(
-      resolve(dataRoot, 'protected-data.ts'),
-      [
-        `export const PROTECTED_DASHBOARD_DATA = ${JSON.stringify(aggregate, null, 2)} as const;`,
-        '',
-        'export type ProtectedDashboardName = keyof typeof PROTECTED_DASHBOARD_DATA;',
-        '',
-      ].join('\n'),
-      'utf-8',
-    );
+    // Serialised once and reused. This runs per dashboard and the aggregate
+    // holds every dashboard's rows, so writing one board re-encoded all of
+    // them — previously twice here, pretty-printed both times, on top of the
+    // per-dashboard file. Refreshing N dashboards made that N times over.
+    //
+    // The .json copy stays indented because a person may open it. The copy
+    // embedded in protected-data.ts does not: nothing reads that file by eye,
+    // it is compiled, and the indentation was roughly a third of its bytes.
+    const indented = JSON.stringify(aggregate, null, 2);
+
+    // Independent paths — no reason to await them in series.
+    await Promise.all([
+      writeFile(resolve(dataRoot, 'dashboard-data.json'), indented + '\n', 'utf-8'),
+      writeFile(
+        resolve(dataRoot, 'protected-data.ts'),
+        [
+          `export const PROTECTED_DASHBOARD_DATA = ${JSON.stringify(aggregate)} as const;`,
+          '',
+          'export type ProtectedDashboardName = keyof typeof PROTECTED_DASHBOARD_DATA;',
+          '',
+        ].join('\n'),
+        'utf-8',
+      ),
+    ]);
   }
 
   private async copyDirectory(srcDir: string, destDir: string, vars: ScaffoldVars): Promise<void> {

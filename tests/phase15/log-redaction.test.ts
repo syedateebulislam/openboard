@@ -36,6 +36,59 @@ describe('sanitizeErrorMessage', () => {
     expect(out).not.toContain('sk-ant-aaaaaaaaaaaaaaaaaaaaaaaa');
     expect(out).not.toContain('ghp_bbbbbbbbbbbbbbbbbbbbbb');
   });
+
+  it('redacts a Gemini key, which a shipped provider issues', () => {
+    const out = sanitizeErrorMessage('GeminiProvider failed with AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r');
+    expect(out).not.toContain('AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r');
+    expect(out).toContain('REDACTED');
+  });
+
+  it('redacts a bcrypt hash on the deploy path', () => {
+    const hash = '$2b$12$W92ySjltBQ9DVXohMSLK0uqzKDN8dHd3T8qhx0oB.s8HHQWQWA6Ia';
+    const out = sanitizeErrorMessage(`writing DASHBOARD_PASSWORD_HASH=${hash}`);
+    expect(out).not.toContain(hash);
+  });
+
+  it('redacts an encrypted config blob', () => {
+    const blob = 'enc:0123456789abcdef01234567:0123456789abcdef0123456789abcdef:deadbeefcafe';
+    expect(sanitizeErrorMessage(`llm.apiKey=${blob}`)).not.toContain('deadbeefcafe');
+  });
+
+  it('redacts a JWT', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJ1c2VybmFtZSI6ImFkbWluIn0.abc123def456';
+    expect(sanitizeErrorMessage(`Set-Cookie: auth_token=${jwt}`)).not.toContain(jwt);
+  });
+
+  it('redacts secrets that have no distinctive prefix, by their key name', () => {
+    // A Vercel token and the 64-hex jwtSecret look like ordinary strings; the
+    // only reliable signal is what they are called.
+    const cases: Array<[string, string]> = [
+      ['vercel.token=AbCdEfGhIjKlMnOpQrStUvWx', 'AbCdEfGhIjKlMnOpQrStUvWx'],
+      ['--token QwErTyUiOpAsDfGhJkLzXcVb', 'QwErTyUiOpAsDfGhJkLzXcVb'],
+      ['password: hunter2hunter2', 'hunter2hunter2'],
+    ];
+    for (const [input, secret] of cases) {
+      expect(sanitizeErrorMessage(input), input).not.toContain(secret);
+    }
+  });
+
+  it('redacts a camelCase secret key inside a JSON context', () => {
+    // Contexts are logged as JSON.stringify output, so the key is `jwtSecret`,
+    // not `secret` — a plain word-boundary anchor would miss it entirely.
+    const secret = 'a'.repeat(64);
+    const out = sanitizeErrorMessage(`{"jwtSecret":"${secret}","username":"admin"}`);
+    expect(out).not.toContain(secret);
+    // The key name survives so the line is still worth reading.
+    expect(out).toContain('jwtSecret');
+    expect(out).toContain('admin');
+  });
+
+  it('leaves a content hash alone', () => {
+    // Biller change-detection logs SHA-256 digests. Redacting those by shape
+    // would cost real debuggability and protect nothing.
+    const digest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    expect(sanitizeErrorMessage(`csv unchanged (${digest})`)).toContain(digest);
+  });
 });
 
 describe('biller activity log', () => {

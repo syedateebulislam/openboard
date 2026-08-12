@@ -27,10 +27,46 @@ function getLogFile(): string {
   return join(configDir, 'openboard.log');
 }
 
+/**
+ * Render a log context without ever throwing.
+ *
+ * JSON.stringify throws on a circular reference or a getter that throws, and
+ * the objects most likely to be logged are exactly the ones at risk: an Error
+ * with a `cause` chain, a socket, an SDK error carrying its own request. That
+ * turned a logging call inside a catch block into the thing that crashed the
+ * process — the failure mode logging exists to prevent.
+ */
+function describeContext(context: unknown): string {
+  // A circular-safe replacer rather than a bare stringify: the point of the
+  // context is the diagnostic detail, so dropping only the cycle beats
+  // dropping the whole object down to "[object Object]".
+  const seen = new WeakSet<object>();
+  try {
+    return (
+      JSON.stringify(context, (_key, value: unknown) => {
+        if (typeof value === 'bigint') return `${value}n`;
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) return '[circular]';
+          seen.add(value);
+        }
+        return value;
+      }) ?? String(context)
+    );
+  } catch {
+    // A throwing getter defeats the replacer too — it throws while the value
+    // is being read, before the replacer ever sees it.
+    try {
+      return String(context);
+    } catch {
+      return '[unserializable]';
+    }
+  }
+}
+
 function formatEntry(level: LogLevel, message: string, context?: unknown): string {
   const ts = new Date().toISOString();
   const sym = LEVEL_SYMBOLS[level];
-  const ctx = context !== undefined ? ` ${JSON.stringify(context)}` : '';
+  const ctx = context !== undefined ? ` ${describeContext(context)}` : '';
   // Redact here rather than at call sites. Sanitizing was previously opt-in,
   // which only works as long as every author remembers — and a log line is
   // written once but read from disk indefinitely.
@@ -140,13 +176,43 @@ export function sanitizeErrorMessage(message: string): string {
     .replace(/sk-ant-[A-Za-z0-9_-]{20,}/g, 'sk-ant-***REDACTED***')
     // OpenAI API keys (sk-...)
     .replace(/sk-[A-Za-z0-9_-]{20,}/g, 'sk-***REDACTED***')
-    // GitHub tokens (ghp_, github_pat_)
+    // GitHub tokens (ghp_, github_pat_) — and the other prefixes GitHub issues
     .replace(/ghp_[A-Za-z0-9_]{20,}/g, 'ghp_***REDACTED***')
     .replace(/github_pat_[A-Za-z0-9_]{20,}/g, 'github_pat_***REDACTED***')
+    .replace(/gh[oprsu]_[A-Za-z0-9_]{20,}/g, 'gh*_***REDACTED***')
+    // Google / Gemini API keys. GeminiProvider is a shipped provider, so these
+    // reach the same code paths every other key does.
+    .replace(/AIza[A-Za-z0-9_-]{20,}/g, 'AIza***REDACTED***')
+    // bcrypt hashes — credentials.passwordHash travels through the deploy path.
+    .replace(/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/g, '***REDACTED-BCRYPT***')
+    // Encrypted config blobs: enc:<iv>:<authTag>:<ciphertext>.
+    .replace(/\benc:[0-9a-f]{16,}:[0-9a-f]{16,}:[0-9a-f]+/gi, 'enc:***REDACTED***')
+    // JWTs
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '***REDACTED-JWT***')
     // Vercel tokens
     .replace(/Bearer [A-Za-z0-9_-]{20,}/gi, 'Bearer ***REDACTED***')
-    // Generic API key patterns
-    .replace(/api[_-]?key[=:]\s*["']?[A-Za-z0-9_-]{16,}["']?/gi, 'api_key=***REDACTED***')
+    // Generic secret-bearing key/value pairs. Anchored on the key name rather
+    // than the value's shape, which is what catches the ones with no
+    // distinctive prefix: a bare Vercel token, a --token flag, the 64-hex
+    // jwtSecret, a password echoed into a command line.
+    //
+    // The leading [\w.]* is load-bearing: contexts are logged as JSON, so the
+    // real key is `jwtSecret` or `vercel.token`, and a plain \bsecret\b anchor
+    // would not match either of them.
+    // The key name is kept — a redacted line still has to be worth reading.
+    // The lookahead leaves values the rules above already handled alone, so a
+    // `ghp_***REDACTED***` marker is not flattened into a less specific one.
+    .replace(
+      /\b([\w.]*(?:api[_-]?key|token|secret|password|passwd|pwd))\b(["']?\s*[=:]\s*["']?)(?![^\s"',;}]*\*{3}REDACTED)[^\s"',;}]{8,}/gi,
+      '$1$2***REDACTED***',
+    )
+    // The same secrets in CLI flag form, where the separator is a space rather
+    // than = or :. Requiring the leading -- is what keeps this off ordinary
+    // prose: "secret handshake protocol" must not lose a word.
+    .replace(
+      /(--[\w-]*(?:api[-_]?key|token|secret|password|passwd|pwd)[= ])(?![^\s"',;]*\*{3}REDACTED)[^\s"',;]{8,}/gi,
+      '$1***REDACTED***',
+    )
     // Authorization headers
     .replace(/Authorization:\s*[^\n]+/gi, 'Authorization: ***REDACTED***');
 }

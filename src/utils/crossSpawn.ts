@@ -10,6 +10,7 @@
  */
 
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { sanitizeErrorMessage } from './logger.js';
 
 export const IS_WINDOWS = process.platform === 'win32';
 export const IS_MAC = process.platform === 'darwin';
@@ -29,6 +30,17 @@ export interface CrossSpawnOptions {
   timeoutMs?: number;
   /** Additional env vars merged with process.env. Use undefined to delete inherited vars. */
   env?: Record<string, string | undefined>;
+  /**
+   * When true, the child does NOT inherit process.env. It gets only the
+   * variables in ENV_PASSTHROUGH (the ones an interpreter needs to start and
+   * to reach the OS trust store) plus whatever `env` supplies.
+   *
+   * For children running generated code: the guard in BillerScriptWriter stops
+   * a fetcher reading the environment, but a guard is a filter and filters can
+   * be wrong. Not putting the secrets there in the first place is the part that
+   * cannot be regex-bypassed.
+   */
+  isolateEnv?: boolean;
   /** Called for each line of stdout/stderr output */
   onProgress?: (line: string) => void;
   /** If true, the process runs detached. Default: false */
@@ -68,6 +80,36 @@ export function resolveSpawnCommand(
   return cmd;
 }
 
+/**
+ * Characters that can end one cmd.exe command and begin another.
+ *
+ * Only relevant on the shim path below. Node quotes argv by the C runtime's
+ * rules, but cmd.exe does not read it back by those rules, so an argument
+ * carrying one of these can escape the command it was meant to be part of —
+ * the CVE-2024-27980 class. Everywhere else spawn is `shell: false` and argv
+ * reaches the OS untouched, where these characters are inert.
+ *
+ * Separators only. An earlier version of this also denied `"` and `%`, which
+ * broke a shipped call: the codex provider passes
+ * `-c model_reasoning_effort="medium"`, where the quotes are structural to
+ * codex's config parser, so every generation failed outright.
+ *
+ * Excluding them is sound rather than merely convenient. A quote's danger is
+ * that it unbalances cmd's quote tracking and thereby exposes a *later*
+ * separator — so `foo" & calc & "bar` is caught here by the `&` it needs, not
+ * by the quote. With no separator present there is no second command to reach.
+ * `%` is different in kind: it expands an environment variable into the child's
+ * argv rather than running anything. That is a disclosure risk, not execution,
+ * and it is accepted knowingly — denying it is what broke this path once
+ * already, and argv on this route carries flags and config values, never
+ * user prose (prompts travel on stdin).
+ *
+ * Deliberately narrow for the same reason BuildService's broader list was not
+ * reused here: that one denies backslash and brackets, which every Windows
+ * path contains.
+ */
+const CMD_METACHARACTERS = /[&|<>^\r\n]/;
+
 export function resolveSpawnInvocation(
   cmd: string,
   args: string[],
@@ -81,6 +123,14 @@ export function resolveSpawnInvocation(
 
   const lower = cmd.toLowerCase();
   if (WINDOWS_CMD_SHIMS.has(lower)) {
+    for (const arg of args) {
+      if (CMD_METACHARACTERS.test(arg)) {
+        throw new Error(
+          `Unsafe argument for "${cmd}" on Windows: ${arg}. ` +
+            'Arguments routed through cmd.exe may not contain & | < > ^ or newlines.',
+        );
+      }
+    }
     return {
       command: comSpec,
       args: ['/d', '/s', '/c', `${cmd}.cmd`, ...args],
@@ -91,10 +141,44 @@ export function resolveSpawnInvocation(
   return { command: cmd, args, useShell: false };
 }
 
-function mergeEnv(env?: Record<string, string | undefined>): NodeJS.ProcessEnv | undefined {
-  if (!env) return undefined;
-  const merged: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(env)) {
+/**
+ * The only inherited variables an isolated child receives.
+ *
+ * Deliberately generous about *starting* a process and deliberately empty of
+ * anything carrying identity. PATH/PATHEXT/COMSPEC find the interpreter;
+ * SYSTEMROOT is required for TLS on Windows (imaplib fails without it); the
+ * PYTHON and VIRTUAL_ENV entries keep a venv or pyenv install working.
+ *
+ * Matched case-insensitively — Windows env names are case-insensitive while
+ * process.env preserves whatever case the parent used.
+ */
+export const ENV_PASSTHROUGH = [
+  'PATH', 'PATHEXT', 'COMSPEC', 'HOME', 'LANG', 'LC_ALL', 'TZ',
+  'TMPDIR', 'TEMP', 'TMP',
+  'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE', 'USERPROFILE',
+  'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMDATA',
+  'PYTHONHOME', 'PYTHONPATH', 'PYTHONIOENCODING', 'PYTHONUTF8',
+  'VIRTUAL_ENV', 'PYENV_ROOT', 'CONDA_PREFIX',
+];
+
+const PASSTHROUGH_LOOKUP = new Set(ENV_PASSTHROUGH.map((name) => name.toUpperCase()));
+
+/** process.env reduced to ENV_PASSTHROUGH. */
+function isolatedBaseEnv(): NodeJS.ProcessEnv {
+  const base: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && PASSTHROUGH_LOOKUP.has(key.toUpperCase())) base[key] = value;
+  }
+  return base;
+}
+
+function mergeEnv(
+  env?: Record<string, string | undefined>,
+  isolateEnv = false,
+): NodeJS.ProcessEnv | undefined {
+  if (!env && !isolateEnv) return undefined;
+  const merged: NodeJS.ProcessEnv = isolateEnv ? isolatedBaseEnv() : { ...process.env };
+  for (const [key, value] of Object.entries(env ?? {})) {
     if (value === undefined) {
       delete merged[key];
     } else {
@@ -123,6 +207,7 @@ export function crossSpawn(
     stdin,
     signal,
     maxOutputBytes = 8 * 1024 * 1024,
+    isolateEnv = false,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -134,7 +219,7 @@ export function crossSpawn(
     const spawnOpts: SpawnOptions = {
       cwd,
       shell: invocation.useShell,
-      env: mergeEnv(env),
+      env: mergeEnv(env, isolateEnv),
       detached,
     };
 
@@ -150,11 +235,16 @@ export function crossSpawn(
       return next.length <= maxOutputBytes ? next : next.slice(-maxOutputBytes);
     };
 
+    // Subprocess output is redacted here, at the one point every caller passes
+    // through, rather than at each onProgress callback. These lines end up on
+    // screen and in the activity log, and a tool that echoes back a token it
+    // was given (npm, gh and vercel all do, on some error paths) would
+    // otherwise put it there verbatim.
     const emitLines = (chunk: string, pending: string, setPending: (value: string) => void) => {
       if (!onProgress) return;
       const parts = (pending + chunk).split(/\r?\n/);
       setPending(parts.pop() ?? '');
-      for (const line of parts) if (line) onProgress(line);
+      for (const line of parts) if (line) onProgress(sanitizeErrorMessage(line));
     };
 
     const cleanup = () => {
@@ -226,6 +316,7 @@ export function crossSpawnLive(
     useShell = defaultShell(),
     env,
     detached = false,
+    isolateEnv = false,
   } = options;
 
   const invocation = resolveSpawnInvocation(cmd, args, useShell);
@@ -233,7 +324,7 @@ export function crossSpawnLive(
     cwd,
     shell: invocation.useShell,
     detached,
-    env: mergeEnv(env) ?? process.env,
+    env: mergeEnv(env, isolateEnv) ?? process.env,
   });
 }
 

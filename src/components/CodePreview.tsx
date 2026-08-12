@@ -3,7 +3,7 @@
  * Shows a bordered box with the file name and content lines.
  */
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { UI_COLORS } from '../theme.js';
 
 interface CodePreviewProps {
@@ -18,6 +18,7 @@ interface CodePreviewProps {
 }
 
 export function CodePreview({ content, filename, language, maxLines = 20 }: CodePreviewProps) {
+  const { stdout } = useStdout();
   const lines = content.split('\n');
   const truncated = lines.length > maxLines;
   const visibleLines = truncated ? lines.slice(0, maxLines) : lines;
@@ -26,14 +27,24 @@ export function CodePreview({ content, filename, language, maxLines = 20 }: Code
     ? `${filename}${language ? ` (${language})` : ''}`
     : language ?? 'code';
 
-  const borderWidth = Math.max(header.length + 4, 40);
+  // Bounded by the terminal, not only by the header. The width was
+  // max(header + 4, 40) with no upper limit, so a long generated filename drew
+  // a box wider than the window and every row of it wrapped — the frame broke
+  // into a diagonal staircase. The -4 leaves room for the parent's padding.
+  const terminalWidth = stdout?.columns ?? 80;
+  const available = Math.max(20, terminalWidth - 4);
+  const borderWidth = Math.min(Math.max(header.length + 4, 40), available);
   const borderLine = '─'.repeat(borderWidth);
+  // The header is padded to borderWidth below, so it has to fit inside it too.
+  const shownHeader = header.length > borderWidth - 2
+    ? `${header.slice(0, Math.max(1, borderWidth - 5))}...`
+    : header;
 
   return (
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
       {/* Header */}
       <Text color={UI_COLORS.border}>┌{borderLine}┐</Text>
-      <Text color={UI_COLORS.border}>│ <Text color="white" bold>{header}</Text>{' '.repeat(borderWidth - header.length - 1)}│</Text>
+      <Text color={UI_COLORS.border}>│ <Text color="white" bold>{shownHeader}</Text>{' '.repeat(Math.max(0, borderWidth - shownHeader.length - 1))}│</Text>
       <Text color={UI_COLORS.border}>├{borderLine}┤</Text>
 
       {/* Code lines */}

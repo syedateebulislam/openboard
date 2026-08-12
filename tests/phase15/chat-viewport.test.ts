@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import stringWidth from 'string-width';
 import {
   LABEL_WIDTH,
   clampOffset,
@@ -44,6 +45,34 @@ describe('wrapText', () => {
   it('should_preserve_every_word_when_wrapping', () => {
     const text = 'the quick brown fox jumps over the lazy dog';
     expect(wrapText(text, 12).join(' ').split(/\s+/).filter(Boolean)).toEqual(text.split(' '));
+  });
+
+  it('should_measure_wide_characters_by_display_columns', () => {
+    // A CJK character is one code unit but two terminal columns. Measuring
+    // with .length wrapped this at 8 characters — 16 columns — so a line of
+    // Japanese drew at double the intended width and broke the frame.
+    const text = '日本語のテキストです';
+    for (const line of wrapText(text, 8)) {
+      expect(stringWidth(line)).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('should_not_split_a_surrogate_pair_when_hard_breaking', () => {
+    // Slicing by code unit can cut an emoji in half and emit a lone surrogate,
+    // which renders as a replacement character.
+    const lines = wrapText('👍👍👍👍👍👍', 4);
+    for (const line of lines) {
+      expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+      expect(stringWidth(line)).toBeLessThanOrEqual(4);
+    }
+    expect(lines.join('')).toBe('👍👍👍👍👍👍');
+  });
+
+  it('should_still_advance_when_one_character_is_wider_than_the_line', () => {
+    // Guards the hard-break loop: a width-2 character in a width-1 column has
+    // to be emitted anyway, or wrapping never terminates.
+    const lines = wrapText('日本', 1);
+    expect(lines.join('')).toBe('日本');
   });
 
   it('should_hard_break_tokens_longer_than_width', () => {

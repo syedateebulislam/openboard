@@ -6,11 +6,16 @@
  * viewport to hand to LogPane. Both screens needed identical state, so it lives
  * here rather than being copied into each.
  */
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { useStdout } from 'ink';
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Key } from 'ink';
+import { useTerminalSize } from './useTerminalSize.js';
 import { MAX_VIEW_LINES, clampOffset, pageStep } from '../utils/chatViewport.js';
-import { LOG_PANE_HEIGHT, logViewport, type LogViewport } from '../utils/logViewport.js';
+import {
+  LOG_PANE_HEIGHT,
+  logViewport,
+  type LogViewport,
+  type LogWrapCache,
+} from '../utils/logViewport.js';
 
 /**
  * Terminal columns the pane cannot use: the screen's own padding (4), the
@@ -57,8 +62,10 @@ export function useProgressLog(options: ProgressLogOptions | number = {}): Progr
 
   const [localEntries, setLocalEntries] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
-  const { stdout } = useStdout();
-  const width = Math.max(20, (stdout?.columns ?? 80) - PANE_CHROME_COLS);
+  // Subscribed, so a resize re-wraps the pane rather than leaving it at the
+  // width it was mounted with.
+  const { columns } = useTerminalSize();
+  const width = Math.max(20, columns - PANE_CHROME_COLS);
 
   // A shared store may be written while this screen is unmounted, so the pane
   // subscribes rather than owning the lines.
@@ -70,8 +77,12 @@ export function useProgressLog(options: ProgressLogOptions | number = {}): Progr
   );
   const entries = store ? storedEntries : localEntries;
 
+  // Held across renders so an append re-wraps only the new entry instead of
+  // the whole scrollback. Mirrors the chat log's wrap cache.
+  const wrapCacheRef = useRef<LogWrapCache>(new Map());
+
   const view = useMemo(
-    () => logViewport(entries, width, height, offset),
+    () => logViewport(entries, width, height, offset, wrapCacheRef.current),
     [entries, width, height, offset],
   );
 

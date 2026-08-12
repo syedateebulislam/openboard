@@ -690,13 +690,6 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
     }
   }, [visibleSteps, step, onNavigate]);
 
-  // ESC = back one step (exit to menu from the first step)
-  useInput((_input, key) => {
-    if (key.escape) {
-      goBack();
-    }
-  });
-
   // Form data
   const [llmProvider, setLLMProvider] = useState<LLMProviderName>('openai');
   const [llmApiKey, setLLMApiKey] = useState('');
@@ -733,6 +726,25 @@ export function SetupWizard({ onComplete, onNavigate, configService }: SetupWiza
   const [step2Validation, setStep2Validation] = useState<ValidationState>({ status: 'idle' });
   const [step3Validation, setStep3Validation] = useState<ValidationState>({ status: 'idle' });
   const [step4Validation, setStep4Validation] = useState<ValidationState>({ status: 'idle' });
+
+  // ESC = back one step (exit to menu from the first step).
+  //
+  // Held while a step is validating. Every validating step is an await against
+  // something slow — a provider handshake, the GitHub API, a browser login —
+  // and none of them is cancelled by navigating away. Backing out mid-flight
+  // used to leave the request running, then land its result on a step the user
+  // had already left. Declared after the validation state it reads.
+  const isValidating =
+    step1Validation.status === 'validating' ||
+    step2Validation.status === 'validating' ||
+    step3Validation.status === 'validating' ||
+    step4Validation.status === 'validating';
+
+  useInput((_input, key) => {
+    if (key.escape && !isValidating) {
+      goBack();
+    }
+  });
 
   // -------------------------------------------------------------------------
   // Step 1: Validate LLM

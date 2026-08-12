@@ -22,6 +22,26 @@ describe('Accessibility safeguards', () => {
     expect(app).toContain('aria-labelledby={`tab-${activeTab}`}');
   });
 
+  it('should make the tablist reachable by keyboard, not just focusable-looking', () => {
+    const tabs = readFileSync(join(process.cwd(), 'templates/dashboard/src/components/DashboardTabs.tsx'), 'utf-8');
+    const app = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.tsx'), 'utf-8');
+
+    // A roving tabIndex removes every unselected tab from the tab order, so
+    // arrow keys are not a nicety here — without them the remaining tabs are
+    // unreachable and dashboards cannot be switched by keyboard at all.
+    expect(tabs).toContain('tabIndex={selected ? 0 : -1}');
+    expect(tabs).toContain('onKeyDown={onTablistKeyDown}');
+    for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) {
+      expect(tabs, `missing ${key} handling`).toContain(key);
+    }
+    // Focus must actually move, or the ring lags a tab behind the selection.
+    expect(tabs).toContain('.focus()');
+
+    // A panel of charts has no focusable child, so the panel itself is the
+    // only way a keyboard user can reach its content.
+    expect(app).toContain('tabIndex={0}');
+  });
+
   it('should support grouped category navigation in the shared tab shell', () => {
     const tabs = readFileSync(join(process.cwd(), 'templates/dashboard/src/components/DashboardTabs.tsx'), 'utf-8');
     const css = readFileSync(join(process.cwd(), 'templates/dashboard/src/App.css'), 'utf-8');
