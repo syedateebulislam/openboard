@@ -65,13 +65,20 @@ export class DashboardManifestService {
   constructor(private readonly templates = new TemplateService()) {}
 
   async sync(projectDir: string, boards: BoardConfig[]): Promise<DashboardManifestResult> {
-    const targets: Array<{ board: BoardConfig; target?: ComponentTarget }> = [];
-    for (const board of boards) {
-      targets.push({ board, target: await this.findComponent(projectDir, board) });
-    }
+    // One board's component lookup does not depend on another's, and each one
+    // reads several candidate files off disk. Resolving them together keeps
+    // manifest sync flat in board count instead of linear in it. Promise.all
+    // preserves order, which the manifest's tab order relies on.
+    const targets: Array<{ board: BoardConfig; target?: ComponentTarget }> = await Promise.all(
+      boards.map(async (board) => ({
+        board,
+        target: await this.findComponent(projectDir, board),
+      })),
+    );
 
     const missingBoards = targets.filter((entry) => !entry.target).map((entry) => entry.board.title);
     const imports: string[] = [
+      "import { lazy } from 'react';",
       "import type { ComponentType } from 'react';",
       "import type { DashboardTabItem } from '../components/DashboardTabs';",
     ];
@@ -84,19 +91,26 @@ export class DashboardManifestService {
       const content = await readFile(masterPath, 'utf-8').catch(() => '');
       const exported = exportedComponent(content, 'components/MasterDashboard.tsx');
       if (exported) {
-        imports.push("import * as MasterModule from '../components/MasterDashboard';");
-        declarations.push(`const MasterComponent = (MasterModule.${exported.isDefault ? 'default' : exported.exportName}) as ComponentType;`);
+        declarations.push(
+          `const MasterComponent = lazy(() => import('../components/MasterDashboard')`
+            + `.then((m) => ({ default: (m.${exported.isDefault ? 'default' : exported.exportName}) as ComponentType })));`,
+        );
         tabs.push(`  { id: 'master', label: 'Overview' },`);
         cases.push(`    case 'master': return <MasterComponent />;`);
       }
     }
 
     targets.forEach(({ board, target }, index) => {
-      const alias = `DashboardModule${index}`;
       const component = `DashboardComponent${index}`;
       if (target) {
-        imports.push(`import * as ${alias} from ${JSON.stringify(modulePath(target.path))};`);
-        declarations.push(`const ${component} = (${alias}.${target.isDefault ? 'default' : target.exportName}) as ComponentType;`);
+        // lazy() rather than a static namespace import: the app renders one
+        // tab at a time, but a static import put every dashboard's chart code
+        // into the initial bundle, so opening the first tab downloaded all of
+        // them. Vite splits each of these into its own chunk.
+        declarations.push(
+          `const ${component} = lazy(() => import(${JSON.stringify(modulePath(target.path))})`
+            + `.then((m) => ({ default: (m.${target.isDefault ? 'default' : target.exportName}) as ComponentType })));`,
+        );
         cases.push(`    case ${JSON.stringify(board.name)}: return <${component} />;`);
       } else {
         cases.push(`    case ${JSON.stringify(board.name)}: return <div className="card">Dashboard component is unavailable. Regenerate this dashboard.</div>;`);
@@ -132,11 +146,21 @@ export class DashboardManifestService {
       .map((path) => path.replace(/\\/g, '/'))
       .filter((path) => /^components\/.+\.tsx$/i.test(path) && !SHELL_COMPONENT.test(path));
 
+    // Candidates are read together for the same reason boards are: they are
+    // independent files and the loop was paying a full round trip each.
+    const read = await Promise.all(
+      candidates.map(async (path) => {
+        const fullPath = join(projectDir, 'src', ...path.split('/'));
+        // readFile already reports a missing file; existsSync was a second
+        // stat of the same path to learn what the catch below covers anyway.
+        const content = await readFile(fullPath, 'utf-8').catch(() => '');
+        return { path, content };
+      }),
+    );
+
     const scored: Array<ComponentTarget & { score: number }> = [];
-    for (const path of candidates) {
-      const fullPath = join(projectDir, 'src', ...path.split('/'));
-      if (!existsSync(fullPath)) continue;
-      const content = await readFile(fullPath, 'utf-8').catch(() => '');
+    for (const { path, content } of read) {
+      if (!content) continue;
       const exported = exportedComponent(content, path);
       if (!exported) continue;
       const lower = basename(path).toLowerCase();

@@ -25,6 +25,10 @@ import { IntegrationsScreen } from './screens/IntegrationsScreen.js';
 import { BillerStudioScreen } from './screens/BillerStudioScreen.js';
 import { ScreenFrame } from './components/ScreenFrame.js';
 import { Spinner } from './components/Spinner.js';
+// Back targets come from the nav graph, not from literals repeated per screen.
+// The graph exists precisely so "where does esc go" is answered in one place;
+// every screen below used to answer it again for itself.
+import { parentOf } from './config/navigation.js';
 import { UI_COLORS } from './theme.js';
 import {
   APP_MODES,
@@ -74,7 +78,7 @@ export function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) =>
   const [highlighted, setHighlighted] = useState('mode');
 
   useInput((_input, key) => {
-    if (key.escape) onNavigate('welcome');
+    if (key.escape) onNavigate(parentOf('settings'));
   });
 
   const mode = getAppMode();
@@ -115,7 +119,7 @@ export function SettingsPlaceholder({ onNavigate }: { onNavigate: (s: Screen) =>
             else if (item.value === 'vercel') onNavigate('settings-vercel');
             else if (item.value === 'dashboard-auth') onNavigate('settings-dashboard-auth');
             else if (item.value === 'setup') onNavigate('setup');
-            else onNavigate('welcome');
+            else onNavigate(parentOf('settings'));
           }}
         />
       </Box>
@@ -130,7 +134,7 @@ export function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => voi
   const [highlighted, setHighlighted] = useState<AppMode>(APP_MODES[0].id);
 
   useInput((_input, key) => {
-    if (key.escape) onNavigate('settings');
+    if (key.escape) onNavigate(parentOf('settings-mode'));
   });
 
   const currentMode = getAppMode();
@@ -176,7 +180,7 @@ export function AppModeSettings({ onNavigate }: { onNavigate: (s: Screen) => voi
             if (item.value !== 'back') setHighlighted(item.value as AppMode);
           }}
           onSelect={(item) => {
-            if (item.value === 'back') onNavigate('settings');
+            if (item.value === 'back') onNavigate(parentOf('settings-mode'));
             else selectMode(item.value as AppMode);
           }}
         />
@@ -196,7 +200,7 @@ export function DashboardAuthSettings({ onNavigate }: { onNavigate: (s: Screen) 
   // cancel the work — it completes and writes config for a screen the user is
   // no longer looking at, so they never learn whether it succeeded.
   useInput((_input, key) => {
-    if (key.escape && !saving) onNavigate('settings');
+    if (key.escape && !saving) onNavigate(parentOf('settings-dashboard-auth'));
   });
 
   const saveCredentials = async () => {
@@ -273,7 +277,7 @@ export function GitHubTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
   // Held while the token is being validated against the GitHub API — see the
   // note in DashboardAuthSettings.
   useInput((_input, key) => {
-    if (key.escape && !saving) onNavigate('settings');
+    if (key.escape && !saving) onNavigate(parentOf('settings-github'));
   });
 
   const saveToken = async (value: string) => {
@@ -351,7 +355,7 @@ export function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void })
   // Held while the provider is being validated — which for a local model or a
   // browser login is the longest wait in settings.
   useInput((_input, key) => {
-    if (key.escape && step !== 'saving') onNavigate('settings');
+    if (key.escape && step !== 'saving') onNavigate(parentOf('settings-llm'));
   });
 
   const saveLLM = async (modelOverride?: string) => {
@@ -439,7 +443,7 @@ export function LLMSettings({ onNavigate }: { onNavigate: (s: Screen) => void })
             items={providerItems}
             onSelect={(item) => {
               if (item.value === 'back') {
-                onNavigate('settings');
+                onNavigate(parentOf('settings-llm'));
                 return;
               }
               setProvider(item.value);
@@ -530,7 +534,7 @@ export function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
 
   // Held while the token is being validated for project access.
   useInput((_input, key) => {
-    if (key.escape && !saving) onNavigate('settings');
+    if (key.escape && !saving) onNavigate(parentOf('settings-vercel'));
   });
 
   const saveToken = async (value: string) => {
@@ -581,7 +585,7 @@ export function VercelTokenSettings({ onNavigate }: { onNavigate: (s: Screen) =>
 
 export function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => void }) {
   useInput((_input, key) => {
-    if (key.escape) onNavigate('welcome');
+    if (key.escape) onNavigate(parentOf('deploy'));
   });
 
   return (
@@ -591,7 +595,7 @@ export function DeployPlaceholder({ onNavigate }: { onNavigate: (s: Screen) => v
       hints={['select', 'back']}
     >
       <Box>
-        <SelectInput items={[{ label: '← Back', value: 'back' }]} onSelect={() => onNavigate('welcome')} />
+        <SelectInput items={[{ label: '← Back', value: 'back' }]} onSelect={() => onNavigate(parentOf('deploy'))} />
       </Box>
     </ScreenFrame>
   );

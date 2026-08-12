@@ -15,6 +15,11 @@ export interface ParsedData {
 export interface DataParserOptions {
   /** Safety bound for materialized output. CSV input itself is streamed. */
   maxRows?: number;
+  /**
+   * Byte ceiling for .json input, which cannot be streamed. Ignored for CSV
+   * and Excel, both of which are read incrementally.
+   */
+  maxJsonBytes?: number;
 }
 
 const DEFAULT_MAX_ROWS = 1_000_000;
@@ -44,6 +49,45 @@ const PLAIN_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$|^-?\.\d+$/;
  *
  * Returns undefined when the value should stay a string.
  */
+/**
+ * Byte ceiling for a .json source. 256 MB of JSON text becomes several times
+ * that as parsed objects, which is already past what a TUI process should be
+ * asking of a laptop.
+ */
+const DEFAULT_MAX_JSON_BYTES = 256 * 1024 * 1024;
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/** Rows inspected when inferring JSON headers. */
+const HEADER_SAMPLE_ROWS = 200;
+
+/**
+ * Collect the column names across a sample of rows, in first-seen order.
+ *
+ * JSON has no header line, so the columns were taken from `rows[0]` alone. A
+ * heterogeneous array — a field absent from the first record but present later,
+ * which is ordinary in exported data — silently lost those columns for every
+ * consumer keyed off `headers`, including the analyzer and the LLM summary.
+ *
+ * Sampled rather than exhaustive: scanning a million rows to find a column is
+ * not worth it, and anything missing from the first two hundred records is not
+ * a column the dashboard should be built around.
+ */
+function unionHeaders(rows: Record<string, unknown>[]): string[] {
+  const headers = new Set<string>();
+  for (const row of rows.slice(0, HEADER_SAMPLE_ROWS)) {
+    if (row && typeof row === 'object') {
+      for (const key of Object.keys(row)) headers.add(key);
+    }
+  }
+  return [...headers];
+}
+
 function castNumeric(value: string): number | undefined {
   const trimmed = value.trim();
   if (!PLAIN_NUMBER.test(trimmed)) return undefined;
@@ -87,6 +131,19 @@ export class DataParserService {
     } else if (ext === '.xlsx') {
       parsed = await DataParserService.parseExcel(filePath, maxRows);
     } else {
+      // Checked before the read, not after the parse. maxRows cannot help
+      // here: the CSV path enforces it mid-stream, but JSON has to be whole
+      // before it means anything, so a large file is already resident — twice
+      // over, as text and as objects — by the time a row count exists to
+      // reject. A byte bound is the only limit that can act in time.
+      const maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES;
+      if (sourceBytes > maxJsonBytes) {
+        throw new Error(
+          `JSON file is too large (${formatBytes(sourceBytes)}, limit ${formatBytes(maxJsonBytes)}). ` +
+            'The whole document must be held in memory to parse it. ' +
+            'Convert it to CSV, which is streamed and has no such limit.',
+        );
+      }
       parsed = DataParserService.parseJSON(await readFile(filePath, 'utf-8'), maxRows);
     }
     return { ...parsed, sourceBytes, parseDurationMs: performance.now() - startedAt };
@@ -210,7 +267,6 @@ export class DataParserService {
       throw new Error(`Row limit exceeded (${maxRows.toLocaleString()}). Increase maxRows explicitly to continue.`);
     }
 
-    const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
-    return { rows, headers, format: 'json' };
+    return { rows, headers: unionHeaders(rows), format: 'json' };
   }
 }

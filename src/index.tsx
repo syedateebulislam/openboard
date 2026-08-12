@@ -194,11 +194,19 @@ if (cli.flags.version) {
   const S = '\x1b[38;2;220;220;220m'; // #DCDCDC
   const B = '\x1b[1m';
   const R = '\x1b[0m';
-  console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
-  console.log(`${B}${F}║${L}           [>_] OpenBoardCLI           ${F}║${R}`);
-  console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
-  console.log(`${B}${F}║${S}${bannerVersionLine()}${F}║${R}`);
-  console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
+  // The box is 41 columns. Narrower than that (or piped, where columns is
+  // undefined and the frame is just noise) print the same facts unboxed.
+  if ((process.stdout.columns ?? 80) < 41) {
+    console.log(`${B}${L}[>_] OpenBoardCLI${R}`);
+    console.log(`${S}Analytics Dashboard Generator${R}`);
+    console.log(`${S}${bannerVersionLine().trim()}${R}`);
+  } else {
+    console.log(`${B}${F}╔═══════════════════════════════════════╗${R}`);
+    console.log(`${B}${F}║${L}           [>_] OpenBoardCLI           ${F}║${R}`);
+    console.log(`${B}${F}║${S}     Analytics Dashboard Generator     ${F}║${R}`);
+    console.log(`${B}${F}║${S}${bannerVersionLine()}${F}║${R}`);
+    console.log(`${B}${F}╚═══════════════════════════════════════╝${R}`);
+  }
   process.exit(0);
 }
 

@@ -80,6 +80,21 @@ export function resolveSpawnCommand(
   return cmd;
 }
 
+/**
+ * Characters cmd.exe acts on when it parses its own command line.
+ *
+ * Only relevant on the shim path below. Node quotes argv by the C runtime's
+ * rules, but cmd.exe does not read it back by those rules, so an argument
+ * carrying one of these can escape the command it was meant to be part of —
+ * the CVE-2024-27980 class. Everywhere else spawn is `shell: false` and argv
+ * reaches the OS untouched, where these characters are inert.
+ *
+ * Deliberately narrow. BuildService has a broader denial of its own, but that
+ * list includes backslash and brackets, which every Windows path contains —
+ * applying it to all spawns would reject ordinary arguments.
+ */
+const CMD_METACHARACTERS = /[&|<>^"%\r\n]/;
+
 export function resolveSpawnInvocation(
   cmd: string,
   args: string[],
@@ -93,6 +108,14 @@ export function resolveSpawnInvocation(
 
   const lower = cmd.toLowerCase();
   if (WINDOWS_CMD_SHIMS.has(lower)) {
+    for (const arg of args) {
+      if (CMD_METACHARACTERS.test(arg)) {
+        throw new Error(
+          `Unsafe argument for "${cmd}" on Windows: ${arg}. ` +
+            'Arguments routed through cmd.exe may not contain & | < > ^ " % or newlines.',
+        );
+      }
+    }
     return {
       command: comSpec,
       args: ['/d', '/s', '/c', `${cmd}.cmd`, ...args],

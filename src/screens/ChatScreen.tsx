@@ -8,7 +8,8 @@
  * Phase 4: Chat Interface + Iteration
  */
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import TextInput from 'ink-text-input';
 import { existsSync, statSync } from 'node:fs';
 import { ChatLineRow } from '../components/ChatMessage.js';
@@ -48,6 +49,7 @@ import { BoardRegistryService } from '../services/project/BoardRegistryService.j
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
 import { UI_COLORS } from '../theme.js';
 import { HintBar } from '../components/HintBar.js';
+import { parentOf } from '../config/navigation.js';
 import { DEFAULT_EFFORT, LLM_EFFORTS, MODEL_CHOICES, defaultModelFor as getDefaultModel, isValidEffort, normalizeEffort } from '../config/llmCatalog.js';
 import type { LLMEffort, LLMProviderName } from '../types/llm.js';
 import { ProjectCommandHandlers } from '../services/commands/ProjectCommandHandlers.js';
@@ -915,8 +917,20 @@ For the current board "${board.title}":
                 components: [...new Set([...board.components, ...writtenFiles])],
                 generatedAt: new Date().toISOString(),
               });
-            } catch {
-              // Prompt history is best-effort; generated files remain written.
+            } catch (error) {
+              // Best-effort, but not silent. The generated files are written
+              // either way, so this is not fatal — yet /history and /update
+              // both read this history back, and swallowing the failure let
+              // the user believe a prompt was recorded when /update would
+              // later have nothing to replay.
+              addMsg(
+                newMsg(
+                  'system',
+                  `⚠ Files were written, but this prompt could not be saved to history: ${
+                    error instanceof Error ? error.message : String(error)
+                  }\n"/update" will not be able to replay it.`,
+                ),
+              );
             }
           }
           addMsg(
@@ -1785,24 +1799,42 @@ Requirements:
     [isLoading, board, onNavigate, addMsg, pendingConfirm, llmProvider, llmMeta, llmError, initLLMFromConfig, sendToLLM, startLogMsg, createProgressCallback, finishLog, getActiveProjectDir, runBuildPushDeploy, buildDoctorReport, buildHistoryReport, writeProtectedDataFromSource, makePipelineReporter, allBoards, runModifyAll, autoGenerateInitial, updateStreamingMsg, appendLog],
   );
 
+  // App mode is read once per mount. getAppMode() constructs a ConfigService,
+  // which reads ~/.openboard/config.json off disk — it was being called from
+  // the suggestions memo (keyed on `input`, so once per keystroke while typing
+  // a slash command) and again from the header on every render. The mode
+  // cannot change without leaving this screen for settings.
+  const appMode = useMemo(() => getAppMode(), []);
+  const allowsDeploy = useMemo(() => modeAllowsDeploy(appMode), [appMode]);
+
   const commandSuggestions = useMemo(() => {
     const trimmed = input.trim().toLowerCase();
     if (!trimmed.startsWith('/')) return [];
-    return chatCommandsForMode(modeAllowsDeploy(getAppMode()))
+    return chatCommandsForMode(allowsDeploy)
       .filter((item) => item.command.startsWith(trimmed))
       .slice(0, 5);
-  }, [input]);
+  }, [input, allowsDeploy]);
 
   // ─── Chat log viewport ──────────────────────────────────────────────────────
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 24;
-  const termWidth = stdout?.columns ?? 80;
+  // Subscribed rather than sampled, so resizing the window re-wraps the log
+  // instead of leaving it at whatever width this screen first rendered at.
+  const { columns: termWidth, rows: termHeight } = useTerminalSize();
   // Content width minus the outer frame (border 2 + paddingX 2) and the
   // scrollbar gutter (gap 1 + bar 1).
   const logWidth = Math.max(20, termWidth - 6);
   // Conditional chrome shrinks the log instead of overflowing the screen.
+  //
+  // Except it could not shrink past MIN_LOG_HEIGHT, and on a standard 24-row
+  // terminal the fixed chrome plus an error, a biller line and five command
+  // suggestions asked for more rows than exist — so the whole frame ran off
+  // the top. Suggestions are the one piece of chrome that can be given up:
+  // they are transient, they reappear the moment there is room, and losing the
+  // fifth one costs far less than losing the top of the conversation.
   const billerLine = describeBillerStatus(billerStatus);
-  const reserved = CHROME_ROWS + (llmError ? 2 : 0) + commandSuggestions.length + (billerLine ? 1 : 0);
+  const baseReserved = CHROME_ROWS + (llmError ? 2 : 0) + (billerLine ? 1 : 0);
+  const roomForSuggestions = Math.max(0, termHeight - baseReserved - MIN_LOG_HEIGHT);
+  const shownSuggestions = commandSuggestions.slice(0, roomForSuggestions);
+  const reserved = baseReserved + shownSuggestions.length;
   const logHeight = Math.max(MIN_LOG_HEIGHT, termHeight - reserved);
 
   // Re-wrapping every message on every streamed token is the one hot path here,
@@ -1829,7 +1861,7 @@ Requirements:
 
   // ESC: go back to welcome screen · PgUp/PgDn: scroll chat history by a page
   useInput((_input, key) => {
-    if (key.escape) onNavigate?.('welcome');
+    if (key.escape) onNavigate?.(parentOf('chat'));
     if (key.pageUp) {
       const view = viewRef.current;
       setScrollOffset((offset) =>
@@ -1866,7 +1898,7 @@ Requirements:
         alignItems="center"
       >
         <Text bold color={UI_COLORS.logo}>{headerTitle}</Text>
-        <Text color={UI_COLORS.subtitle}>{headerLLMInfo} · Mode: {appModeInfo(getAppMode()).label}</Text>
+        <Text color={UI_COLORS.subtitle}>{headerLLMInfo} · Mode: {appModeInfo(appMode).label}</Text>
         {billerLine && <Text color={UI_COLORS.subtitle}>{billerLine}</Text>}
         <Text color={UI_COLORS.subtitle}>Chat to create or modify this dashboard</Text>
       </Box>
@@ -1919,9 +1951,9 @@ Requirements:
         !messages.some((m) => m.isStreaming) && <LoadingRemark />
       ))}
 
-      {commandSuggestions.length > 0 && (
+      {shownSuggestions.length > 0 && (
         <Box flexDirection="column">
-          {commandSuggestions.map((item) => (
+          {shownSuggestions.map((item) => (
             <Text key={item.command} color={UI_COLORS.subtitle}>
               <Text color={item.color}>{item.command}</Text>
               {'  '}

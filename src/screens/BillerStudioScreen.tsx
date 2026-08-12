@@ -18,7 +18,8 @@
  */
 
 import React, { useMemo, useRef, useState } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import TextInput from 'ink-text-input';
 import type { Screen } from '../App.js';
 import { UI_COLORS } from '../theme.js';
@@ -152,7 +153,10 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
   const [script, setScript] = useState('');
 
   const config = useMemo(() => new ConfigService(), []);
-  const settings = new TypedConfigRepository().getBillerSettings();
+  // Memoized like the ConfigService above it. Unmemoized, this constructed a
+  // repository and read the config file off disk on every render — including
+  // every keystroke into the studio's text input.
+  const settings = useMemo(() => new TypedConfigRepository().getBillerSettings(), []);
 
   const probeService = useMemo(() => deps?.probeService ?? new BillerProbeService(), [deps]);
   const generator = useMemo(() => deps?.generator ?? new BillerScriptGenerator(), [deps]);
@@ -437,9 +441,8 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
 
   // ─── Viewport ──────────────────────────────────────────────────────────────
 
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 24;
-  const termWidth = stdout?.columns ?? 80;
+  // Subscribed rather than sampled — see useTerminalSize.
+  const { columns: termWidth, rows: termHeight } = useTerminalSize();
   const logWidth = Math.max(20, termWidth - 6);
   const logHeight = Math.max(MIN_LOG_HEIGHT, termHeight - CHROME_ROWS);
 

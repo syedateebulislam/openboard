@@ -10,7 +10,7 @@
  * paragraph — on a screen that also has to fit a log pane. The facts are now
  * one meta line, and the prose is shown for the row it actually describes.
  */
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
@@ -123,7 +123,9 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   const [intervalInput, setIntervalInput] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
-  const [, setRefresh] = useState(0);
+  // The nonce is now read, not just written: it is the signal that the config
+  // and scripts folder may have changed, so it is what the reads below key on.
+  const [refreshNonce, setRefresh] = useState(0);
   /** Value of the row the cursor is on, so space can act on it. */
   const [highlighted, setHighlighted] = useState('');
   /** Biller key awaiting a delete confirmation, if any. */
@@ -190,9 +192,14 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     log.onKey(key);
   });
 
-  const config = new ConfigService();
-  const settings = new TypedConfigRepository().getBillerSettings();
-  const billers = discoverBillers(settings.scriptsDir);
+  // Reading the config file and scanning the scripts folder are both blocking
+  // disk work, and this ran on every render — so every arrow key and every
+  // character typed into a prompt re-read the config and re-listed (and
+  // re-read) every fetcher script. They only change when something on this
+  // screen changes them, which is exactly what the refresh nonce marks.
+  const config = useMemo(() => new ConfigService(), [refreshNonce]);
+  const settings = useMemo(() => new TypedConfigRepository().getBillerSettings(), [refreshNonce]);
+  const billers = useMemo(() => discoverBillers(settings.scriptsDir), [settings.scriptsDir, refreshNonce]);
   const hasDir = Boolean(settings.scriptsDir);
   const hasEmail = Boolean(settings.email);
   const hasPassword = Boolean(settings.appPassword);
@@ -390,6 +397,13 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   // returns the stored object, so the snapshot identity is stable.
   const running = useSyncExternalStore(subscribeBillerRun, activeBillerRun, activeBillerRun);
 
+  // Which billers have data on disk. One stat per biller, recomputed when the
+  // list changes or a run finishes — not once per biller on every keystroke.
+  const billersWithData = useMemo(
+    () => new Set(billers.filter((biller) => existsSync(biller.csvPath)).map((biller) => biller.key)),
+    [billers, running, refreshNonce],
+  );
+
   const menuItems = [
     // Offered first on a fresh setup: one keypress from nothing to a working
     // folder, instead of hunting for scripts the user may not have yet.
@@ -403,7 +417,7 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     ...(hasDir && hasEmail && hasPassword
       ? [
           ...billers.map((biller) => ({
-            label: `${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.displayName}${existsSync(biller.csvPath) ? '' : ' (no data yet)'}`,
+            label: `${settings.enabledKeys.includes(biller.key) ? '[x]' : '[ ]'} ${biller.displayName}${billersWithData.has(biller.key) ? '' : ' (no data yet)'}`,
             value: `${TOGGLE_PREFIX}${biller.key}`,
           })),
           // Sits directly under the list it adds to, the way ManageBoardsScreen

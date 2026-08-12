@@ -13,6 +13,7 @@ import { parentOf } from '../config/navigation.js';
 import { UI_COLORS } from '../theme.js';
 import { HintBar } from '../components/HintBar.js';
 import { Spinner } from '../components/Spinner.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,7 +79,11 @@ const QUALITY_ITEMS: Array<{ label: string; value: BoardConfig['uiQuality'] }> =
 // Component
 // ---------------------------------------------------------------------------
 
+/** Columns the boxed header needs: 40 for the box, plus padding={2} each side. */
+const HEADER_MIN_COLUMNS = 44;
+
 export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
+  const { columns } = useTerminalSize();
   // Step state
   const [step, setStep] = useState<CreationStep>('select-preset');
 
@@ -201,11 +206,18 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
         return;
       }
 
-      // Create board config and pass to parent
+      // Use the name sanitizeBoardName produced, not a second, weaker
+      // transform of the raw input. handleNameSubmit called createBoardConfig
+      // for its validation and threw the result away, and the replacement here
+      // only collapsed whitespace — so '.', '/', '\' and brackets survived into
+      // board.name, which becomes a directory under projects/ and the GitHub
+      // repo name. "Sales (2024)" and "Q1/Q2 Revenue" both produced a broken
+      // directory.
+      const named = createBoardConfig(boardName);
       const boardConfig: import('../types/board.js').BoardConfig = {
         id: `board-${Date.now()}`,
-        name: boardName.toLowerCase().replace(/\s+/g, '-'),
-        title: boardName,
+        name: named.name,
+        title: named.title,
         type: selectedPreset.id as BoardConfig['type'],
         outputDir: '',
         dataFiles: [filePath],
@@ -227,17 +239,26 @@ export function BoardCreationScreen({ onNavigate, onBoardCreated }: Props) {
   // Render helpers
   // -------------------------------------------------------------------------
 
+  // 40 columns of box plus padding={2} on both sides. Narrower than that and
+  // every row of the frame wraps, so the box is dropped for a plain heading
+  // rather than drawn broken.
   const renderHeader = () => (
     <Box marginBottom={1} flexDirection="column">
-      <Text bold color={UI_COLORS.border}>
-        ╔══════════════════════════════════════╗
-      </Text>
-      <Text bold color={UI_COLORS.logo}>
-        ║        Create New Dashboard          ║
-      </Text>
-      <Text bold color={UI_COLORS.border}>
-        ╚══════════════════════════════════════╝
-      </Text>
+      {columns < HEADER_MIN_COLUMNS ? (
+        <Text bold color={UI_COLORS.logo}>Create New Dashboard</Text>
+      ) : (
+        <>
+          <Text bold color={UI_COLORS.border}>
+            ╔══════════════════════════════════════╗
+          </Text>
+          <Text bold color={UI_COLORS.logo}>
+            ║        Create New Dashboard          ║
+          </Text>
+          <Text bold color={UI_COLORS.border}>
+            ╚══════════════════════════════════════╝
+          </Text>
+        </>
+      )}
     </Box>
   );
 

@@ -154,7 +154,15 @@
   background: var(--accent-tint);
 }
 
-.app-title {
+/*
+  The brand wordmark, shared by two markups. On the login page it is a real
+  h1 (.app-title) — nothing wraps it there. In the app header it is a span
+  (.app-title-text) inside the brand button, because a heading nested inside a
+  button is not reachable as a heading; that page's h1 is a separate sr-only
+  element in App.tsx.
+*/
+.app-title,
+.app-title-text {
   margin: 0;
   text-align: center;
   font-family: var(--font-mono);
@@ -162,6 +170,33 @@
   font-weight: 600;
   letter-spacing: -0.4px;
   color: var(--text-primary);
+}
+
+/*
+  Off-screen until focused, then pinned to the top-left. Keyboard users get
+  past the header links in one keystroke; nobody else ever sees it.
+*/
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.625rem 1rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+}
+
+/* The auth check renders only a live region; keep it from collapsing layout. */
+.auth-loading {
+  min-height: 100vh;
 }
 
 .app-header-side { min-width: 0; }

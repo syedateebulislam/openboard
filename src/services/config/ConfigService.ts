@@ -218,29 +218,10 @@ function getNestedValue(obj: Record<string, unknown>, dotKey: string): unknown {
   return current;
 }
 
-function setNestedValue(obj: Record<string, unknown>, dotKey: string, value: unknown): void {
-  const parts = dotKey.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i];
-    if (current[part] === undefined || current[part] === null || typeof current[part] !== 'object') {
-      current[part] = {};
-    }
-    current = current[part] as Record<string, unknown>;
-  }
-  current[parts[parts.length - 1]] = value;
-}
-
-function deleteNestedValue(obj: Record<string, unknown>, dotKey: string): void {
-  const parts = dotKey.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i];
-    if (current[part] === undefined || typeof current[part] !== 'object') return;
-    current = current[part] as Record<string, unknown>;
-  }
-  delete current[parts[parts.length - 1]];
-}
+// The matching setNestedValue/deleteNestedValue helpers are gone: writes now
+// go through conf's own dot-notation, which is backed by dot-prop and refuses
+// __proto__/constructor/prototype path segments outright. Reads stay here
+// because they walk a plain object and never write.
 
 function hasNestedValue(obj: Record<string, unknown>, dotKey: string): boolean {
   return getNestedValue(obj, dotKey) !== undefined;
@@ -303,12 +284,17 @@ export class ConfigService {
 
   /**
    * Set a value by dot-notation key with optional Zod validation.
+   *
+   * Writes the single key rather than reading the whole store, mutating a copy
+   * and writing it all back. That older shape lost unrelated keys: the biller
+   * scheduler writes billers.lastRunAt on a timer, and if it read the store
+   * before the user saved a token in the TUI and wrote after, the token was
+   * silently gone. Handing conf one key keeps the read-modify-write inside its
+   * own synchronous block, followed by an atomic file replace.
    */
   set(key: string, value: unknown): void {
     validateSet(key, value);
-    const store = { ...(this.conf.store as Record<string, unknown>) };
-    setNestedValue(store, key, value);
-    this.conf.store = store;
+    this.conf.set(key, value);
   }
 
   /**
@@ -323,9 +309,7 @@ export class ConfigService {
    * Delete a dot-notation key.
    */
   delete(key: string): void {
-    const store = { ...(this.conf.store as Record<string, unknown>) };
-    deleteNestedValue(store, key);
-    this.conf.store = store;
+    this.conf.delete(key);
   }
 
   /**
@@ -340,10 +324,7 @@ export class ConfigService {
    * The stored value is NOT readable in plaintext from the config file.
    */
   setEncrypted(key: string, value: string): void {
-    const ciphertext = encrypt(value);
-    const store = { ...(this.conf.store as Record<string, unknown>) };
-    setNestedValue(store, key, ciphertext);
-    this.conf.store = store;
+    this.conf.set(key, encrypt(value));
   }
 
   /**
@@ -399,7 +380,10 @@ export class ConfigService {
       const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
       throw new Error(`Config validation failed: ${issues}`);
     }
-    this.conf.store = config as Record<string, unknown>;
+    // Store what the schema returned, not what came in. Writing the original
+    // object validated it and then discarded the result, so any key the schema
+    // does not describe was persisted unchecked.
+    this.conf.store = (result.data ?? {}) as Record<string, unknown>;
   }
 
   /**

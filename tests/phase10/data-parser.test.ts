@@ -152,6 +152,31 @@ describe('DataParserService CSV/JSON regression', () => {
       expect(parsed.rows).toEqual([{ id: 7, name: 'solo' }]);
     });
 
+    it('collects headers across rows, not just the first', async () => {
+      // Exported JSON is routinely heterogeneous. Taking the columns from
+      // rows[0] alone silently dropped every field that first record happened
+      // not to carry.
+      const path = writeFixture(
+        'mixed.json',
+        JSON.stringify([
+          { id: 1, amount: 10 },
+          { id: 2, amount: 20, refunded: true, note: 'late' },
+        ]),
+      );
+
+      const { headers } = await DataParserService.parse(path);
+
+      expect(headers).toEqual(['id', 'amount', 'refunded', 'note']);
+    });
+
+    it('rejects an oversized JSON file before reading it into memory', async () => {
+      const path = writeFixture('big.json', JSON.stringify([{ id: 1 }]));
+
+      // The bound has to act on the file size, because by the time a row count
+      // exists the document is already resident twice over.
+      await expect(DataParserService.parse(path, { maxJsonBytes: 4 })).rejects.toThrow(/too large/i);
+    });
+
     it('throws a JSON parse error for malformed input', async () => {
       const path = writeFixture('broken.json', '{ not json');
 

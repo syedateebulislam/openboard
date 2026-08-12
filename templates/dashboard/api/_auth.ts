@@ -6,12 +6,18 @@ export interface AuthenticatedUser {
 }
 
 export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  // Null-prototype accumulator: the keys come straight from a request header,
+  // so a cookie named __proto__ or constructor writes into a plain object's
+  // prototype chain rather than into the object. Nothing exploitable follows
+  // from it today — assigning a string to __proto__ is a no-op, and a missing
+  // auth_token still reads as undefined — but the guarantee costs one argument
+  // and does not depend on staying lucky.
   return cookieHeader?.split(';').reduce((acc: Record<string, string>, cookie: string) => {
     const [rawKey, ...rawValue] = cookie.trim().split('=');
     if (!rawKey) return acc;
     acc[rawKey] = decodeURIComponent(rawValue.join('='));
     return acc;
-  }, {}) || {};
+  }, Object.create(null) as Record<string, string>) || {};
 }
 
 export function buildAuthCookie(token: string, maxAgeSeconds: number): string {
