@@ -310,9 +310,20 @@ Composition is deterministic and product-owned:
   registry (scoring each board's best component export) before every build,
   preview, and deploy — in the TUI chat flows and in `DashboardBuildPipeline`
   for the agent flows.
-- The LLM returns only per-dashboard components; `App.tsx`, `generated/*`, and
-  `components/MasterDashboard.tsx` in responses are filtered out before writing
-  (the master Overview is regenerated separately by `syncMasterTab`).
+- The LLM returns only per-dashboard components; `App.tsx`, `generated/*`,
+  `components/MasterDashboard.tsx`, and any shell path in
+  `TemplateService.SHELL_SYNC_FILES` are filtered out before writing (the
+  master Overview is regenerated separately by `syncMasterTab`).
+- `src/utils/masterOverview.ts` is a shell file too: it normalizes every
+  dashboard's rows for the master Overview (column detection, date and amount
+  parsing, period bucketing). It used to be generated beside
+  `MasterDashboard.tsx`, which froze it at the schemas known the day the master
+  tab was last built — and since `syncMasterTab` only regenerates when the
+  dashboard *set* changes, a biller that later shipped an unseen date format
+  silently vanished from every dated view of the overview while its own tab
+  kept showing it. `DashboardUpdateService.MASTER_CONTRACT_VERSION` is folded
+  into the master state hash, so bumping it rebuilds each workspace's
+  `MasterDashboard.tsx` once against the current shell contract.
 
 ## Prompt History
 

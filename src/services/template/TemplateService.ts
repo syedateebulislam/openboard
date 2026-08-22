@@ -62,6 +62,12 @@ const SHELL_SYNC_FILES = [
   'src/hooks/useAllDashboardsData.ts',
   'src/hooks/useProtectedDashboardData.ts',
   'src/hooks/useTheme.ts',
+  // How the master tab reads every other tab's rows. Shell-owned because a
+  // generated parser is frozen at the schemas that existed when the master tab
+  // was last built, and the master tab is only rebuilt when the dashboard set
+  // changes — so a biller that later ships an unseen date format silently
+  // vanishes from the overview while its own tab keeps showing it.
+  'src/utils/masterOverview.ts',
   'api/_auth.ts',
   'api/_freshness.ts',
   'api/auth.ts',
@@ -79,6 +85,19 @@ const SHELL_SYNC_FILES = [
 export interface ScaffoldVars {
   boardName: string;
   boardTitle: string;
+}
+
+/**
+ * Whether an LLM-returned path (relative to src/) is shell-owned.
+ *
+ * Writing one is never useful: the build pipeline re-syncs shell files from the
+ * template moments later, so the generated version is overwritten before it is
+ * ever compiled. Rejecting it up front keeps the run log honest about what the
+ * model actually contributed.
+ */
+export function isShellOwnedGeneratedPath(relativePath: string): boolean {
+  const normalized = `src/${relativePath.trim().replace(/\\/g, '/').replace(/^\.\//, '')}`;
+  return SHELL_SYNC_FILES.includes(normalized);
 }
 
 export class TemplateService {

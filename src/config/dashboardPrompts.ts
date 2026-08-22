@@ -68,7 +68,7 @@ export const AGENT_DEFAULT_PROMPT = readPrompt('agent-default.md', FINAL_FALLBAC
 
 /** Ultimate safety net if master.md is missing. */
 const BUILTIN_MASTER_FALLBACK =
-  'Build the master "Overview" tab aggregating ALL dashboards via useAllDashboardsData(): cross-app spend KPI cards (total, past 7 days, this month), exactly 4 insights (2 spend + 2 save InsightCards), a cross-app spend trend with a Weekly/Monthly/Quarterly toggle, and a per-app breakdown. Detect date/amount columns per dashboard; count-only fallback for dashboards without amounts; never embed raw rows.';
+  'Build the master "Overview" tab aggregating ALL dashboards via useAllDashboardsData(): cross-app spend KPI cards (total, past 7 days, this month), exactly 4 insights (2 spend + 2 save InsightCards), a cross-app spend trend with a Weekly/Monthly/Quarterly toggle, and a per-app breakdown. Import normalizeDashboards, summarizeApps, periodKey and periodLabel from ../utils/masterOverview (shell-owned; never author or return it) instead of writing any date/amount parsing; count-only fallback for dashboards without amounts; never embed raw rows.';
 
 /** Prompt for generating/refreshing the master Overview tab. */
 export const MASTER_DASHBOARD_PROMPT = readPrompt('master.md', BUILTIN_MASTER_FALLBACK);
