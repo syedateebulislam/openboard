@@ -142,6 +142,22 @@ describe('DashboardUpdateService.syncMasterTab', () => {
     expect(written).toEqual([]);
   });
 
+  it('repairs a stale master normalizer before the cached master check', async () => {
+    const { service } = makeService(fakeRegistry([makeBoard()], workspace));
+    await service.syncMasterTab(workspace, new PipelineReporter());
+    expect(completeMock).toHaveBeenCalledTimes(1);
+
+    const normalizer = join(workspace, 'src', 'utils', 'masterOverview.ts');
+    writeFileSync(normalizer, 'export const stale = true\n', 'utf-8');
+
+    const written = await service.syncMasterTab(workspace, new PipelineReporter());
+
+    expect(completeMock).toHaveBeenCalledTimes(1); // master component stayed cached
+    expect(written).toEqual([]);
+    expect(readFileSync(normalizer, 'utf-8')).toContain('export function normalizeDashboards');
+    expect(readFileSync(normalizer, 'utf-8')).not.toContain('export const stale');
+  });
+
   it('regenerates when the dashboard set changes', async () => {
     const registry = fakeRegistry([makeBoard({ name: 'a', title: 'A' })], workspace);
     const { service } = makeService(registry);

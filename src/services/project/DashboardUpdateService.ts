@@ -1187,6 +1187,23 @@ Requirements:
     run?: RunRecord,
   ): Promise<string[]> {
     try {
+      // Migrate the product-owned normalizer before the cached master-state
+      // check. Master generation can fail before a caller reaches the later
+      // build pipeline, so leaving this migration to pre-build shell sync can
+      // pair fresh child data with a stale Overview parser indefinitely. This
+      // is intentionally independent of whether the master component itself
+      // needs an LLM refresh.
+      try {
+        const synced = await this.templateService.syncMasterOverviewUtility(projectDir);
+        if (synced) {
+          reporter.log('Synced master Overview normalization utility.');
+        }
+      } catch (error) {
+        reporter.log(
+          `Warning: master Overview utility sync skipped: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       const boards = this.registry.listBoards();
       const masterPath = join(projectDir, 'src', 'components', 'MasterDashboard.tsx');
 

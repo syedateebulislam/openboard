@@ -160,6 +160,29 @@ export class TemplateService {
   }
 
   /**
+   * Refresh only the product-owned normalizer used by the master Overview.
+   *
+   * Master synchronization can short-circuit before the build pipeline when
+   * its component hash is current. Keeping this small migration separate from
+   * syncShellFiles avoids rewriting the rest of the app shell merely to repair
+   * how the Overview reads child-dashboard rows.
+   */
+  async syncMasterOverviewUtility(outputDir: string): Promise<boolean> {
+    const relPath = 'src/utils/masterOverview.ts';
+    const srcPath = resolve(this.templatesDir, relPath);
+    try {
+      await stat(srcPath);
+    } catch {
+      return false;
+    }
+    await this.copyFile(srcPath, resolve(outputDir, relPath), {
+      boardName: 'openboard-workspace',
+      boardTitle: 'OpenBoardCLI',
+    });
+    return true;
+  }
+
+  /**
    * Reset src/App.tsx to the blank OpenBoardCLI shell from the template. Used by
    * "remove all dashboards" to deterministically clear every tab while keeping
    * the auth shell, brand logo, and theme toggle. The template App.tsx has no
