@@ -2,8 +2,11 @@ Build (or rebuild) the master "Overview" tab — the landing dashboard that aggr
 
 Data model (OpenBoardCLI):
 - Load ALL dashboards' data at runtime from `useAllDashboardsData()` from `./hooks/useAllDashboardsData` (never `useProtectedDashboardData`). It returns `{ data, loading, error }` where `data.dashboards` is a record keyed by dashboard slug, each value shaped `{ rows, headers?, summary?, generatedAt? }`.
-- For each dashboard, dynamically detect its date column and its paid/total amount column from row keys, case-insensitively (date/time/ordered_at/paid_at/created_at; amount/paid/total/net/fare/bill/price/charge/grand_total — prefer the final paid amount). Schemas DIFFER per dashboard — detect per slug, never assume one shared schema.
-- Normalize into one combined internal list of { app (dashboard slug/label), date, amount } in a `utils/` helper: parse amounts safely (strip currency symbols, commas), parse dates with date-fns across common formats, never throw on bad input. When a dashboard has no usable amount column, fall back to counting its rows (count-based activity) and exclude it from spend totals; surface which apps are included in spend vs count-only.
+- Normalization is OpenBoardCLI-owned, NOT yours to write. Import it from `../utils/masterOverview` (a shell file synced from the template on every deploy — never author, rewrite, or return it, and never hand-roll date parsing, amount parsing, or column detection anywhere in the master tab):
+  - `normalizeDashboards(data.dashboards)` → `NormalizedRecord[]`, one entry per row of EVERY dashboard: `{ app, slug, date: Date | null, amount: number | null, countOnly: boolean }`. It detects each dashboard's date and amount column per slug (schemas DIFFER per dashboard) by sampling values, so a column whose values do not parse is skipped in favour of one that does.
+  - `summarizeApps(data.dashboards, records)` → `AppSummary[]`: `{ app, slug, totalSpend, transactions, datedTransactions, lastActivity: Date | null, hasAmount }`.
+  - `periodKey(date, period)` / `periodLabel(key, period)` for the Weekly/Monthly/Quarterly buckets, and `parseAmount` / `parseDate` for any one-off cell you still need.
+- Treat `date: null` and `amount: null` as normal: records without a date stay out of dated views (trends, period KPIs, last activity) but still count as transactions, and a dashboard with no usable amount column is count-only — exclude it from spend totals and say so on screen (which apps are spend vs count-only).
 
 Layout (top to bottom):
 - A row of KPI cards across ALL apps: total spend (all apps), spend in the past 7 days, spend this month, total transactions, most expensive app, and number of connected apps — with deltas vs the previous period where dates allow.

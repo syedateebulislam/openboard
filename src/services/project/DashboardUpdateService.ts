@@ -10,7 +10,7 @@ import { DataAnalyzer } from '../data/DataAnalyzer.js';
 import { DataParserService } from '../data/DataParserService.js';
 import { LLMService } from '../llm/LLMService.js';
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LOW } from '../llm/prompts/systemPrompt.js';
-import { TemplateService } from '../template/TemplateService.js';
+import { TemplateService, isShellOwnedGeneratedPath } from '../template/TemplateService.js';
 import { BuildService } from '../build/BuildService.js';
 import { DeployVerificationService } from '../deploy/DeployVerificationService.js';
 import { extractFiles } from '../../utils/codeExtractor.js';
@@ -29,6 +29,19 @@ import { DashboardBuildPipeline } from './DashboardBuildPipeline.js';
 import { RefreshAllDashboardsUseCase } from './useCases/RefreshAllDashboardsUseCase.js';
 
 export type UpdateProgress = (line: string) => void;
+
+/**
+ * Contract the master Overview component is generated against.
+ *
+ * Bump it whenever what MasterDashboard.tsx must import or assume changes, so
+ * every existing workspace regenerates the component once on its next
+ * dashboard operation instead of keeping one written for an older contract.
+ *
+ * 2 — normalisation moved into the shell utility src/utils/masterOverview.ts
+ *     (a generated parser froze at the schemas known the day it was written,
+ *     which silently dropped whole dashboards from the overview).
+ */
+const MASTER_CONTRACT_VERSION = 2;
 
 export interface DashboardPlan {
   title: string;
@@ -1149,7 +1162,14 @@ Requirements:
       .map((board) => `${board.name}|${board.title}`)
       .sort()
       .join('\n');
-    return createHash('sha256').update(signature).digest('hex');
+    // The contract the component is generated against is part of the identity
+    // of what was generated. Bumping it rebuilds each project's master tab once
+    // against the current shell contract; without it a workspace whose
+    // dashboard set never changes would keep a MasterDashboard written for an
+    // older one forever.
+    return createHash('sha256')
+      .update(`${MASTER_CONTRACT_VERSION}\n${signature}`)
+      .digest('hex');
   }
 
   /**
@@ -1167,6 +1187,23 @@ Requirements:
     run?: RunRecord,
   ): Promise<string[]> {
     try {
+      // Migrate the product-owned normalizer before the cached master-state
+      // check. Master generation can fail before a caller reaches the later
+      // build pipeline, so leaving this migration to pre-build shell sync can
+      // pair fresh child data with a stale Overview parser indefinitely. This
+      // is intentionally independent of whether the master component itself
+      // needs an LLM refresh.
+      try {
+        const synced = await this.templateService.syncMasterOverviewUtility(projectDir);
+        if (synced) {
+          reporter.log('Synced master Overview normalization utility.');
+        }
+      } catch (error) {
+        reporter.log(
+          `Warning: master Overview utility sync skipped: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       const boards = this.registry.listBoards();
       const masterPath = join(projectDir, 'src', 'components', 'MasterDashboard.tsx');
 
@@ -1189,10 +1226,11 @@ Registered dashboards (ALL must be represented in the master overview; their slu
 ${boards.map((b) => `- ${b.title} (slug: ${b.name}, type: ${b.type})${b.dataSummary ? `\n  Data analysis: ${b.dataSummary.slice(0, 1500)}` : ''}`).join('\n')}
 
 Requirements:
-1. Return ONLY components/MasterDashboard.tsx plus optional utils/ helpers using the required //CODE_START format.
+1. Return ONLY components/MasterDashboard.tsx plus optional presentation-only utils/ helpers using the required //CODE_START format.
 2. Export MasterDashboard as a named or default React component.
 3. Do not return App.tsx, tabs, navigation, authentication, or generated/dashboardManifest.tsx.
-4. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).`;
+4. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).
+5. Row normalisation is OpenBoardCLI-owned: import normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount and parseDate from '../utils/masterOverview' and never write your own date/amount parsing or column detection. utils/masterOverview.ts is shell-owned — returning it is ignored.`;
 
       const placeholderBoard: BoardConfig = {
         id: 'master',
@@ -1370,10 +1408,13 @@ Requirements:
 
     const extracted = extractFiles(response);
     const files = extracted.filter(
-      (file) => file.path !== 'App.tsx' && !file.path.startsWith('generated/'),
+      (file) =>
+        file.path !== 'App.tsx' &&
+        !file.path.startsWith('generated/') &&
+        !isShellOwnedGeneratedPath(file.path),
     );
     if (files.length !== extracted.length) {
-      reporter.log('Ignored LLM App.tsx/generated output; OpenBoardCLI owns shell and tab composition.');
+      reporter.log('Ignored LLM App.tsx/generated/shell output; OpenBoardCLI owns shell and tab composition.');
     }
     const projectDir = board.outputDir || this.registry.getSharedProjectDir();
     if (!projectDir || files.length === 0) return [];
@@ -1495,6 +1536,10 @@ Requirements:
 
         let repaired = 0;
         for (const file of files) {
+          // A shell file is never the thing to repair: the template owns it and
+          // re-syncs it on the next deploy, so "fixing" it here only hides the
+          // real mismatch in the component that imports it.
+          if (isShellOwnedGeneratedPath(file.path)) continue;
           try {
             await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
             repaired++;

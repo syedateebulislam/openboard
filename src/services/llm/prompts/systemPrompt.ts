@@ -146,6 +146,7 @@ RULES:
 20. NEVER remove api/auth.ts, api/_auth.ts, api/dashboard-data.ts, api/_data/protected-data.ts, src/hooks/useProtectedDashboardData.ts, src/hooks/useAllDashboardsData.ts, src/hooks/useTheme.ts, src/components/ThemeToggle.tsx, src/components/DashboardTabs.tsx, src/components/DashboardHeader.tsx, src/components/InsightCard.tsx, src/components/HeaderLinks.tsx, or src/components/BrandLogo.tsx.
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 22. MASTER TAB: components/MasterDashboard.tsx is maintained only by the dedicated master-generation request. Normal dashboard work must not return it.
+23. src/utils/masterOverview.ts is a shell utility owned by OpenBoardCLI and re-synced from the template on every deploy: never return, rewrite, or remove it. The master tab imports its row normalization (normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount, parseDate) from there instead of hand-rolling date/amount parsing.
 
 EXAMPLE OUTPUT:
 Here are the dashboard components you requested:
