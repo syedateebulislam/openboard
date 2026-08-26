@@ -40,8 +40,10 @@ export type UpdateProgress = (line: string) => void;
  * 2 — normalisation moved into the shell utility src/utils/masterOverview.ts
  *     (a generated parser froze at the schemas known the day it was written,
  *     which silently dropped whole dashboards from the overview).
+ * 3 — insights became evidence-gated and the cross-app spend trend became a
+ *     zero-filled stacked bar chart with currency/comparability safeguards.
  */
-const MASTER_CONTRACT_VERSION = 2;
+const MASTER_CONTRACT_VERSION = 3;
 
 export interface DashboardPlan {
   title: string;
@@ -1229,8 +1231,9 @@ Requirements:
 1. Return ONLY components/MasterDashboard.tsx plus optional presentation-only utils/ helpers using the required //CODE_START format.
 2. Export MasterDashboard as a named or default React component.
 3. Do not return App.tsx, tabs, navigation, authentication, or generated/dashboardManifest.tsx.
-4. MasterDashboard loads data ONLY via useAllDashboardsData() and follows the exactly-4 Top Insights rule (2 spending + 2 saving).
-5. Row normalisation is OpenBoardCLI-owned: import normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount and parseDate from '../utils/masterOverview' and never write your own date/amount parsing or column detection. utils/masterOverview.ts is shell-owned — returning it is ignored.`;
+4. MasterDashboard loads data ONLY via useAllDashboardsData(). Its Top Insights are adaptive and evidence-gated: select 2-5 material findings, render fewer when necessary, and never pad a tone/category quota or invent savings, alternatives, causes, forecasts, or recommendations.
+5. The cross-app spend trend follows the master prompt's truthful discrete-period contract: zero-filled stacked bars, no smoothed/interpolated lines or areas, no mixed-currency total, and an activity fallback when spend is not comparable.
+6. Row normalisation is OpenBoardCLI-owned: import normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount and parseDate from '../utils/masterOverview' and never write your own date/amount parsing or column detection. utils/masterOverview.ts is shell-owned — returning it is ignored.`;
 
       const placeholderBoard: BoardConfig = {
         id: 'master',

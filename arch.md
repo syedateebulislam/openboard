@@ -395,7 +395,7 @@ budget every generation call for that board uses, including every later
 | | High (default) | Low |
 |---|---|---|
 | System prompt | `SYSTEM_PROMPT` (`llm/prompts/systemPrompt.ts`) | `SYSTEM_PROMPT_LOW`, loaded from `prompts/system/low-quality.md` |
-| Required output | KPI row, 4-tile Top Insights, trend chart + period toggle, sortable/searchable/paginated records table | `<DashboardHeader>`, 1-3 KPI tiles, exactly one chart — everything else optional |
+| Output contract | Adaptive KPI row, 2-5 evidence-backed insights (fewer when evidence is weak), data-appropriate charts, and useful record inspection; no fixed sentiment/chart quota | `<DashboardHeader>`, 1-3 KPI tiles, exactly one chart — everything else optional |
 | Completion budget | 8192 tokens | 4096 tokens |
 
 Low quality exists because small/local models can exhaust their entire

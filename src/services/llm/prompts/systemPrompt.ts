@@ -87,11 +87,11 @@ CSS CLASSES (the design system is already defined in App.css — use these, do n
 - Tables: .data-table
 
 UI QUALITY BAR for every dashboard tab:
-- START every dashboard tab's content with the shared <DashboardHeader> from './components/DashboardHeader': <DashboardHeader title="<Dashboard Name>" rowCount={data?.rows?.length} generatedAt={data?.generatedAt} />. It renders the dashboard name on the left and, on the right, the total rows fetched and when the data was last generated — so the user always sees how fresh the dashboard is. Feed rowCount and generatedAt from the useProtectedDashboardData response. Do NOT hand-roll this strip or duplicate its markup.
-- After the header, lead with a row of .kpi-card metrics (with .delta-up/.delta-down vs previous period when dates exist), then charts in responsive grids. ALL KPI cards MUST be identical size: put them in ONE .grid-3 or .grid-4 with exactly one .kpi-card per cell — never make the first KPI span multiple columns, never wrap one KPI in an extra container, and never use inline gridTemplateColumns/width styles on the KPI row.
-- ALWAYS include, near the top (right after the KPI row), a REQUIRED "Top Insights" block: a <h3 className="section-title">Top Insights</h3> followed by a <div className="insight-panel"> containing exactly 4 <InsightCard> items from './components/InsightCard', computed from the real data: the top 2 SPENDING insights (tone="spend" — e.g. biggest spending category/merchant, fastest-growing expense, fee or cost leakage, an unusual spike) followed by the top 2 SAVING insights (tone="save" — e.g. largest saving/discount captured, biggest savings opportunity, cheapest alternative, a cost that dropped). For non-financial data, surface 2 cost/risk-flavored observations (tone="spend") and 2 opportunity/improvement-flavored observations (tone="save") instead. This 2+2 split is the default for every dashboard including first-time generation; only deviate when the user explicitly asks for a different insight mix. Give each InsightCard a title, a headline metric, a one-line detail, and a confidence of high/medium/low. Never hand-roll insight tiles — use <InsightCard>.
-- REQUIRED when a date column exists: exactly one time-trend chart card with a period toggle. The card uses <div className="card-header-row"> with the .card-title on the left and a .segmented toggle of .segmented-btn buttons (Weekly / Monthly / Quarterly) on the right; the chart re-aggregates by the selected period. Default to Monthly. Only offer a period the data can support: omit Quarterly when the date range spans fewer than 2 quarters and Weekly when it spans fewer than 2 weeks.
-- REQUIRED at the BOTTOM of every dashboard tab: a "Recent Records" raw-data table (.data-table, inside a .card) of the hook rows sorted by the detected date column DESCENDING — newest first — showing the 10 most recent records by default, with client-side pagination (page sizes 10/25/50/100), column sorting, and a text search. When no date column exists, reverse source order so the latest rows show first. This table is the default for every tab including first-time generation; only remove it if the user explicitly asks.
+- START every dashboard tab's content with the shared <DashboardHeader> from './DashboardHeader' (dashboard tabs live in src/components): <DashboardHeader title="<Dashboard Name>" rowCount={data?.rows?.length} generatedAt={data?.generatedAt} />. It renders the dashboard name on the left and, on the right, the total rows fetched and when the data was last generated — so the user always sees how fresh the dashboard is. Feed rowCount and generatedAt from the useProtectedDashboardData response. Do NOT hand-roll this strip or duplicate its markup.
+- After the header, choose a compact row of decision-relevant .kpi-card metrics, then charts in responsive grids. Do not fill a KPI quota with weak or duplicated metrics. KPI cards must be identical size: put them in one .grid-3 or .grid-4 with one .kpi-card per cell; never make the first KPI span columns or use fixed inline widths.
+- Include an adaptive "Top Insights" block near the top when the data supports useful findings. Render the strongest 2-5 findings with <InsightCard> from './InsightCard' (dashboard tabs live beside it in src/components); render fewer rather than padding the section, and omit it when no defensible finding exists. Rank candidates by decision value, not by category quotas. Each insight must be computed from real rows and include a specific title, headline metric, comparison/baseline or concentration share, relevant time window or cohort, a one-line implication, and confidence grounded in sample size and field coverage. Prefer material changes, anomalies, concentration, recurring behavior, quality risks, and concrete opportunities. Do not repeat a KPI in prose. Never invent causality, budgets, alternatives, usage, savings, forecasts, or recommendations that the available fields and history cannot prove. A saving/opportunity claim requires a measurable counterfactual or observed comparison; otherwise state the observed fact. Use tone="spend" for attention/risk and tone="save" for positive/opportunity as visual semantics only; there is no required split. Never hand-roll insight tiles.
+- When usable dates span at least two meaningful periods, include a time-trend chart with a .segmented Weekly / Monthly / Quarterly control and default to the period that best fits the span (usually Monthly). Offer only periods supported by the date range and density. If time analysis is not meaningful, use a more informative ranking, distribution, or relationship instead.
+- Usually end a data-exploration dashboard with a "Recent Records" .data-table of the hook rows, newest first when dates exist, with sensible search/sort and pagination. Keep it when record inspection is useful; do not build a large generic table merely to satisfy a quota when the user asks for a focused analytical view.
 - Every chart lives inside a .card with a .card-title (or a .card-header-row) and a .chart-container — never edge-to-edge.
 - Chart hygiene (applies to EVERY Recharts chart):
   * Pass an explicit margin (e.g. margin={{ top: 8, right: 16, bottom: 8, left: 8 }}) so axes and labels never clip against the card edge.
@@ -148,8 +148,7 @@ RULES:
 22. MASTER TAB: components/MasterDashboard.tsx is maintained only by the dedicated master-generation request. Normal dashboard work must not return it.
 23. src/utils/masterOverview.ts is a shell utility owned by OpenBoardCLI and re-synced from the template on every deploy: never return, rewrite, or remove it. The master tab imports its row normalization (normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount, parseDate) from there instead of hand-rolling date/amount parsing.
 
-EXAMPLE OUTPUT:
-Here are the dashboard components you requested:
+EXAMPLE OUTPUT FORMAT (syntax only; this is not a dashboard-content blueprint):
 
 //CODE_START
 --- FILE: components/MetricCard.tsx ---
@@ -168,42 +167,6 @@ export function MetricCard({ title, value, change }: MetricCardProps) {
         <p className={change >= 0 ? 'delta-up' : 'delta-down'}>
           {change >= 0 ? '▲ +' : '▼ '}{change}% vs last period
         </p>
-      )}
-    </div>
-  );
-}
---- END FILE ---
-
---- FILE: components/SalesDashboard.tsx ---
-import { useProtectedDashboardData } from '../hooks/useProtectedDashboardData'
-import { DashboardHeader } from './DashboardHeader'
-import { InsightCard } from './InsightCard'
-import { MetricCard } from './MetricCard'
-
-export function SalesDashboard() {
-  const { data, loading, error } = useProtectedDashboardData('sales');
-  const rows = data?.rows ?? [];
-
-  return (
-    <div>
-      <DashboardHeader title="Sales" rowCount={data?.rows?.length} generatedAt={data?.generatedAt} />
-      {error && <div className="card">Could not load data: {error}</div>}
-      {loading && <div className="card skeleton" style={{ height: 96 }} />}
-      {!loading && !error && rows.length === 0 && <div className="card">No data yet.</div>}
-      {!loading && !error && rows.length > 0 && (
-        <>
-          <div className="grid-3">
-            <MetricCard title="Total Rows" value={rows.length.toLocaleString()} />
-          </div>
-          <h3 className="section-title">Top Insights</h3>
-          <div className="insight-panel">
-            {/* Always 4 insights: top 2 spending (tone="spend") then top 2 saving (tone="save"), computed from rows. */}
-            <InsightCard tone="spend" title="Top spending area" metric="—" detail="Computed from the data" confidence="high" />
-            <InsightCard tone="spend" title="Fastest-growing expense" metric="—" detail="Computed from the data" confidence="medium" />
-            <InsightCard tone="save" title="Biggest saving captured" metric="—" detail="Computed from the data" confidence="high" />
-            <InsightCard tone="save" title="Largest savings opportunity" metric="—" detail="Computed from the data" confidence="medium" />
-          </div>
-        </>
       )}
     </div>
   );

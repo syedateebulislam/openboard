@@ -1,7 +1,6 @@
 /**
  * Phase 9 — UI default contracts shipped with every generation:
- *  - REQUIRED "Recent Records" table (newest-first, 10 visible by default) in
- *    the system prompt and every category prompt
+ *  - "Recent Records" is a useful default, not a mandatory output quota
  *  - equal-size KPI row rule + the CSS guard that enforces it
  *  - mobile header layout that keeps HeaderLinks clear of the user greeting
  *  - Excel support surfaced in the CLI help and creation screen
@@ -19,21 +18,22 @@ const REPO = process.cwd();
 const TEMPLATE_CSS = readFileSync(join(REPO, 'templates', 'dashboard', 'src', 'App.css'), 'utf-8');
 
 describe('Recent Records table default', () => {
-  it('is REQUIRED newest-first with 10 visible by default in the system prompt', () => {
+  it('keeps a practical newest-first table as an adaptive system default', () => {
     expect(SYSTEM_PROMPT).toContain('Recent Records');
-    expect(SYSTEM_PROMPT).toMatch(/date column DESCENDING/i);
-    expect(SYSTEM_PROMPT).toMatch(/10 most recent records by default/i);
+    expect(SYSTEM_PROMPT).toMatch(/Usually end a data-exploration dashboard/i);
+    expect(SYSTEM_PROMPT).toMatch(/newest first/i);
+    expect(SYSTEM_PROMPT).toMatch(/sensible search\/sort and pagination/i);
     expect(SYSTEM_PROMPT).toContain('.data-table');
   });
 
-  it('is required in every category prompt including the master tab', () => {
+  it('lets every category keep or simplify record inspection based on value', () => {
     for (const file of [
       'finance.md', 'grocery.md', 'custom.md', 'health.md', 'agent-default.md', 'fallback.md', 'master.md',
       'travel.md', 'food.md', 'shopping.md', 'subscriptions.md', 'utilities.md', 'invoices.md',
     ]) {
       const md = readFileSync(join(REPO, 'prompts', 'dashboard', file), 'utf-8');
-      expect(md, file).toContain('Recent Records');
-      expect(md, file).toMatch(/10 most recent|newest-first/i);
+      expect(md, file).toMatch(/record|table/i);
+      expect(md, file).not.toMatch(/REQUIRED "Recent Records"/i);
     }
     expect(MASTER_DASHBOARD_PROMPT).toContain('Recent Records');
   });
@@ -41,8 +41,8 @@ describe('Recent Records table default', () => {
 
 describe('Equal-size KPI row', () => {
   it('is enforced in the system prompt', () => {
-    expect(SYSTEM_PROMPT).toMatch(/ALL KPI cards MUST be identical size/i);
-    expect(SYSTEM_PROMPT).toMatch(/never make the first KPI span multiple columns/i);
+    expect(SYSTEM_PROMPT).toMatch(/KPI cards must be identical size/i);
+    expect(SYSTEM_PROMPT).toMatch(/never make the first KPI span columns/i);
   });
 
   it('has a CSS guard so a KPI card can never span grid columns', () => {

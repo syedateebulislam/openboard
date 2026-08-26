@@ -20,9 +20,27 @@ const TEMPLATE = join(process.cwd(), 'templates', 'dashboard');
 describe('Master Overview tab contract', () => {
   it('loads the master prompt with the cross-app aggregation rules', () => {
     expect(MASTER_DASHBOARD_PROMPT).toContain('useAllDashboardsData');
+    expect(MASTER_DASHBOARD_PROMPT).toContain('../hooks/useAllDashboardsData');
+    expect(MASTER_DASHBOARD_PROMPT).not.toContain('from `./hooks/useAllDashboardsData`');
     expect(MASTER_DASHBOARD_PROMPT).toMatch(/Overview/);
-    expect(MASTER_DASHBOARD_PROMPT).toMatch(/exactly 4/i);
-    expect(MASTER_DASHBOARD_PROMPT).toMatch(/Weekly \/ Monthly \/ Quarterly/);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/evidence-first Top Insights/i);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/2-5 material cross-app findings/i);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/Weekly\/Monthly\/Quarterly/);
+  });
+
+  it('requires a truthful cross-app spend visualization on first generation', () => {
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/STACKED `BarChart`/);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/initialize every spend-bearing app to numeric zero/i);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/Never use smoothed Line\/Area curves/i);
+    expect(MASTER_DASHBOARD_PROMPT).toContain('type="monotone"');
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/more than one meaningful currency exists, never sum/i);
+    expect(MASTER_DASHBOARD_PROMPT).toMatch(/activity-by-app trend or ranking/i);
+  });
+
+  it('bumps the master contract so existing workspaces regenerate once', () => {
+    const service = readFileSync(join(process.cwd(), 'src', 'services', 'project', 'DashboardUpdateService.ts'), 'utf-8');
+    expect(service).toContain('const MASTER_CONTRACT_VERSION = 3');
+    expect(service).toMatch(/zero-filled stacked bars/i);
   });
 
   it('protects product-owned composition and the master component in the system prompt', () => {

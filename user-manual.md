@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║           [>_] OpenBoardCLI           ║
 ║     Analytics Dashboard Generator     ║
-║                v2.4.3                 ║
+║                v2.4.4                 ║
 ╚═══════════════════════════════════════╝
 ```
 
@@ -144,8 +144,9 @@ Low quality boards use a shorter system prompt and a smaller completion
 budget for every generation and update, not just the first one — this applies
 on every `/update` too, so a low-context local model doesn't hit the same
 wall again later. A Low quality dashboard only requires a header, 1-3 KPI
-cards, and one chart; a High quality one also requires Top Insights, a
-trend chart, and a searchable/sortable records table.
+cards, and one chart. A High quality dashboard gives the model the full design
+system and analytical framework, then lets it choose evidence-backed insights,
+KPIs, charts, and record inspection appropriate to the actual fields and history.
 
 For a newly configured dashboard, the chat header shows:
 

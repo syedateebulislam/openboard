@@ -103,16 +103,16 @@ Dashboard tabs are **product-owned and deterministic**: OpenBoardCLI regenerates
 
 ### Master Overview tab
 
-As soon as the app has at least one dashboard, a master **Overview** tab is generated as the first/landing tab. It aggregates every dashboard's data (via the protected `?dashboard=__all__` API): cross-app spend KPIs (total, past 7 days, this month), a Weekly/Monthly/Quarterly cross-app spend trend, a per-app breakdown, and 2 spending + 2 saving insights. It is refreshed automatically whenever dashboards are added, updated, or removed (skipped when nothing changed), and clicking the OpenBoardCLI logo in the header always returns to it.
+As soon as the app has at least one dashboard, a master **Overview** tab is generated as the first/landing tab. It aggregates every dashboard's data (via the protected `?dashboard=__all__` API): comparable cross-app KPIs, a truthful zero-filled stacked-bar spend trend (never smoothed across missing buckets or summed across currencies), a per-app breakdown, and only the strongest evidence-backed insights. When money is not comparable it falls back to activity instead of drawing a misleading spend chart. It is refreshed automatically whenever dashboards are added, updated, or removed, and clicking the OpenBoardCLI logo in the header always returns to it.
 
 ### Default UI contract
 
-Every **High** quality generated tab includes by default (until you ask the chat to change it):
+Every **High** quality generated tab follows these defaults while adapting to what the data can support:
 
 - A row of equal-sized KPI cards.
-- A "Top Insights" block of exactly 4 tiles: top 2 spending + top 2 saving insights.
-- A time-trend chart with a Weekly/Monthly/Quarterly toggle (when dates exist).
-- A "Recent Records" table at the bottom — newest first, 10 most recent visible by default, with pagination, sorting, and search.
+- A "Top Insights" block containing the best 2-5 measured findings, or fewer instead of padded speculation. Each finding carries a baseline/context, time window or cohort, and evidence-based confidence; no fixed spending/saving quota.
+- A time-trend chart with a Weekly/Monthly/Quarterly toggle when the date span and density make it meaningful; otherwise a more useful ranking, distribution, or relationship.
+- A practical "Recent Records" table when row inspection adds value, with proportionate pagination, sorting, and search.
 
 **Low** quality tabs only require a header, 1-3 KPI cards, and exactly one chart — everything else above is optional, traded for a shorter prompt and smaller completion budget so small/local models are more likely to finish valid code instead of exhausting their token budget on reasoning.
 

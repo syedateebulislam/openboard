@@ -34,15 +34,13 @@ describe('Dashboard init prompts', () => {
       expect(FINAL_FALLBACK_PROMPT.length).toBeGreaterThan(0);
     });
 
-    it('should require the period-toggle trend chart and chart hygiene in every prompt', () => {
+    it('should preserve chart hygiene without forcing the same chart into every dashboard', () => {
       const prompts = [...Object.values(DASHBOARD_PROMPTS), AGENT_DEFAULT_PROMPT, FINAL_FALLBACK_PROMPT];
       for (const prompt of prompts) {
-        // Weekly/Monthly/Quarterly trend view via the shared segmented control.
-        expect(prompt).toContain('Quarterly');
-        expect(prompt).toContain('.segmented');
-        // Chart hygiene: explicit margins and no degenerate single-slice pies.
+        expect(prompt).toMatch(/choose/i);
         expect(prompt.toLowerCase()).toContain('margin');
         expect(prompt).toContain('YAxis width');
+        expect(prompt).not.toMatch(/first chart is REQUIRED|REQUIRED .*trend card/i);
       }
     });
 
