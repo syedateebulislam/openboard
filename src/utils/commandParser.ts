@@ -14,6 +14,7 @@
  *   /commands                                    - Show command palette
  *   /doctor                                      - Run local readiness checks
  *   /history                                     - Show dashboard prompt history
+ *   /prompt [show|full|history|append|set|clear] - Inspect or customize the active dashboard prompt
  *   /logs                                        - Show latest operation log
  *   /data                                        - Show linked data source summary
  *   /billers [sync|enable <key>|disable <key>]   - Invoice fetcher status / run now / toggle one biller
@@ -35,6 +36,7 @@ export type Command =
   | { type: 'commands' }
   | { type: 'doctor' }
   | { type: 'history' }
+  | { type: 'prompt'; args: string[] }
   | { type: 'logs' }
   | { type: 'data' }
   | { type: 'billers'; args: string[] }
@@ -66,6 +68,7 @@ export const CHAT_COMMANDS: ChatCommandSuggestion[] = [
   { command: '/data', category: 'data', color: 'magenta', description: 'Show linked data file summary' },
   { command: '/billers', category: 'data', color: 'magenta', description: 'Invoice fetcher status; /billers sync runs them, enable/disable toggles one' },
   { command: '/history', category: 'data', color: 'magenta', description: 'Show prompt history for this dashboard' },
+  { command: '/prompt', category: 'data', color: 'magenta', description: 'Inspect or customize the active dashboard prompt' },
   { command: '/logs', category: 'info', color: 'green', description: 'Show latest operation log' },
   { command: '/doctor', category: 'info', color: 'green', description: 'Check OpenBoardCLI readiness' },
   { command: '/status', category: 'info', color: 'green', description: 'Show dashboard/project status' },
@@ -119,6 +122,9 @@ export function parseCommand(input: string): Command {
   if (/^\/resume$/i.test(trimmed)) return { type: 'resume' };
   if (/^\/data$/i.test(trimmed)) return { type: 'data' };
   if (/^\/history$/i.test(trimmed)) return { type: 'history' };
+  if (/^\/prompt(\s|$)/i.test(trimmed)) {
+    return { type: 'prompt', args: input.trim().split(/\s+/).slice(1) };
+  }
   if (/^\/logs$/i.test(trimmed)) return { type: 'logs' };
   if (/^\/doctor$/i.test(trimmed)) return { type: 'doctor' };
   if (/^\/commands$/i.test(trimmed)) return { type: 'commands' };
@@ -193,6 +199,7 @@ export const HELP_TEXT = `Available commands:
   /data         - Show linked data source summary
   /billers      - Show invoice fetcher status; /billers sync runs them; /billers enable|disable <key> toggles one
   /history      - Show this dashboard's prompt history
+  /prompt       - Show active prompt provenance; use full|history|append <text>|set <text>|clear
   /logs         - Show latest operation log
   /doctor       - Check LLM/GitHub/Vercel/project readiness
   /model        - Show current LLM model/effort; /model <model> [effort] to switch

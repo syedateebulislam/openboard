@@ -177,6 +177,7 @@ Internal chat commands start with `/`.
 | `/data` | Show linked data source summary |
 | `/billers` | Invoice fetcher status; `/billers sync` runs the enabled ones; `/billers enable\|disable <key>` toggles one |
 | `/history` | Show prompt history for the dashboard |
+| `/prompt` | Show the active prompt and provenance; use `full`, `history`, `append <text>`, `set <text>`, or `clear` |
 | `/logs` | Show latest operation log |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
 | `/model` | Show or switch the LLM model and effort (`/model <model> [effort]`, `/model effort <level>`) |
@@ -188,6 +189,8 @@ Internal chat commands start with `/`.
 | `/help` | Show command help |
 
 When typing `/`, the TUI shows matching command suggestions with color coding. The chat labels are fixed-width: `You`, `LLM`, `Sys` (cyan, informational), and `Err` (red — reserved for real failures). Provider failures are summarized in plain, actionable language (invalid key, unreachable local server, unsupported model settings, quota) instead of raw provider error text, and successful `/build`/`/push` runs end with the suggested next command. The chat header shows the configured LLM, model, effort, and app mode.
+
+`/prompt` reports whether the last successful generation used the currently shipped prompt (`CURRENT`), an older prompt (`STALE`), or predates prompt auditing (`LEGACY`). Dashboard-specific additions persist below the packaged category prompt and apply to both initial generation and future updates.
 
 ## Agent Automation
 

@@ -3,7 +3,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { normalizeUserPath } from '../../utils/pathNormalizer.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createBoardConfig, getPreset } from '../../config/boardPresets.js';
-import { MASTER_DASHBOARD_PROMPT, resolveInitialIntent } from '../../config/dashboardPrompts.js';
+import { MASTER_DASHBOARD_PROMPT } from '../../config/dashboardPrompts.js';
 import { getAppMode, modeAllowsDeploy } from '../../config/appModes.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
 import { DataAnalyzer } from '../data/DataAnalyzer.js';
@@ -16,6 +16,7 @@ import { DeployVerificationService } from '../deploy/DeployVerificationService.j
 import { extractFiles } from '../../utils/codeExtractor.js';
 import { classifyAgentError } from '../../utils/errorCodes.js';
 import type { BoardConfig } from '../../types/board.js';
+import type { LLMMessage } from '../../types/llm.js';
 import { BoardRegistryService } from './BoardRegistryService.js';
 import { PromptHistoryService } from './PromptHistoryService.js';
 import { ProjectLockService } from './ProjectLockService.js';
@@ -27,6 +28,7 @@ import type { RunRecord, RunTokenUsage } from './RunStateService.js';
 import { DashboardManifestService } from './DashboardManifestService.js';
 import { DashboardBuildPipeline } from './DashboardBuildPipeline.js';
 import { RefreshAllDashboardsUseCase } from './useCases/RefreshAllDashboardsUseCase.js';
+import { DashboardPromptService } from './DashboardPromptService.js';
 
 export type UpdateProgress = (line: string) => void;
 
@@ -252,6 +254,7 @@ export class DashboardUpdateService {
   private events?: PipelineEventSink;
   private runs: RunStateService;
   private manifest: DashboardManifestService;
+  private promptProfiles: DashboardPromptService;
 
   constructor(
     registry = new BoardRegistryService(),
@@ -260,6 +263,7 @@ export class DashboardUpdateService {
     templateService = new TemplateService(),
     events?: PipelineEventSink,
     runs = new RunStateService(),
+    promptProfiles = new DashboardPromptService(),
   ) {
     this.registry = registry;
     this.history = history;
@@ -268,6 +272,7 @@ export class DashboardUpdateService {
     this.events = events;
     this.runs = runs;
     this.manifest = new DashboardManifestService(templateService);
+    this.promptProfiles = promptProfiles;
   }
 
   listBoards(): BoardConfig[] {
@@ -350,6 +355,7 @@ export class DashboardUpdateService {
         createdAt: new Date().toISOString(),
         dataSummary,
         uiQuality: options.quality,
+        promptBase: typeProvided ? 'category' : 'agent-default',
       };
 
       reporter.log(`Preparing OpenBoardCLI workspace for "${board.title}"...`);
@@ -378,9 +384,10 @@ export class DashboardUpdateService {
 
       await this.writeProtectedData(initializedBoard, parsed, dataSummary, reporter.progress);
 
+      const initialPrompt = this.buildInitialPrompt(initializedBoard, dataSummary, options.prompt);
       const writtenFiles = await this.generateAndWriteFiles(
         initializedBoard,
-        this.buildInitialPrompt(initializedBoard, dataSummary, options.prompt, typeProvided),
+        initialPrompt,
         reporter,
         run,
       );
@@ -403,9 +410,13 @@ export class DashboardUpdateService {
         boardName: updatedBoard.name,
         boardTitle: updatedBoard.title,
         source: 'initial',
-        prompt: options.prompt || 'Agent initial dashboard generation from data source.',
+        prompt: this.promptProfiles.composeRequestIntent(updatedBoard, options.prompt),
         writtenFiles,
         dataSummary,
+        promptAudit: this.promptProfiles.createAudit(
+          updatedBoard,
+          this.buildGenerationMessages(updatedBoard, initialPrompt),
+        ),
       });
 
       const masterFiles = await this.syncMasterTab(scaffold.projectDir, reporter, run);
@@ -593,6 +604,7 @@ Requirements:
         prompt: 'Non-interactive update from latest data using saved prompt history.',
         writtenFiles,
         dataSummary: latestSummary,
+        promptAudit: this.promptProfiles.createAudit(board, this.buildGenerationMessages(board, prompt)),
       });
 
       if (execution.deferFinalize) {
@@ -849,6 +861,10 @@ Requirements:
       prompt: userPrompt,
       writtenFiles,
       dataSummary,
+      promptAudit: this.promptProfiles.createAudit(
+        updatedBoard,
+        this.buildGenerationMessages(updatedBoard, prompt),
+      ),
     });
 
     return { board: updatedBoard, writtenFiles };
@@ -1263,10 +1279,11 @@ Requirements:
     board: BoardConfig,
     dataSummary: string,
     userPrompt?: string,
-    typeProvided = true,
   ): string {
     const boards = this.registry.listBoards();
-    const intent = resolveInitialIntent({ userPrompt, type: board.type, typeProvided });
+    const intent = userPrompt?.trim()
+      ? `REQUEST-SPECIFIC INSTRUCTIONS:\n${userPrompt.trim()}`
+      : 'Apply the active dashboard prompt profile from the system instructions to this dataset.';
 
     return `Generate an initial dashboard tab for "${board.title}" inside the existing OpenBoardCLI master React app.
 
@@ -1377,7 +1394,8 @@ Requirements:
     signal?: AbortSignal,
   ): Promise<string[]> {
     const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
-    const systemPrompt = board.uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT;
+    const messages = this.buildGenerationMessages(board, prompt);
+    const systemPrompt = messages.find((message) => message.role === 'system')?.content ?? '';
     // A local model's *total* context (prompt + completion) is often small —
     // trimming the system prompt alone isn't enough if the completion budget
     // still assumes a large-context provider.
@@ -1386,10 +1404,7 @@ Requirements:
     reporter.log('Generating dashboard code with configured LLM...');
     let usageReported = false;
     const response = await llm.complete({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
+      messages,
       temperature: 0.2,
       maxTokens,
       // Stream liveness so non-interactive agent runners don't treat a long
@@ -1437,6 +1452,22 @@ Requirements:
     }
     reporter.log(`Wrote ${writtenFiles.length} file(s): ${writtenFiles.join(', ')}`);
     return writtenFiles;
+  }
+
+  private buildGenerationMessages(board: BoardConfig, prompt: string): LLMMessage[] {
+    const baseSystemPrompt = board.uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT;
+    if (board.id === 'master') {
+      return [
+        { role: 'system', content: baseSystemPrompt },
+        { role: 'user', content: prompt },
+      ];
+    }
+    const profile = this.promptProfiles.profile(board);
+    const systemPrompt = `${baseSystemPrompt}\n\nACTIVE DASHBOARD PROMPT PROFILE (${profile.defaultSource}):\n${profile.effectivePrompt}`;
+    return [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt },
+    ];
   }
 
   private async writeProtectedData(

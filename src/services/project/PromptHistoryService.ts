@@ -12,7 +12,21 @@ export interface PromptHistoryEntry {
   prompt: string;
   writtenFiles: string[];
   dataSummary?: string;
+  promptAudit?: PromptRequestAudit;
   createdAt: string;
+}
+
+export interface PromptRequestAudit {
+  cliVersion: string;
+  systemProfile: 'high' | 'low';
+  frameworkHash: string;
+  defaultSource: string;
+  defaultHash: string;
+  appendedHash?: string;
+  effectiveHash: string;
+  systemRequestHash: string;
+  userRequestHash: string;
+  requestHash: string;
 }
 
 export class PromptHistoryService {

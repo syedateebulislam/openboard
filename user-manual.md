@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║           [>_] OpenBoardCLI           ║
 ║     Analytics Dashboard Generator     ║
-║                v2.4.4                 ║
+║                v2.4.5                 ║
 ╚═══════════════════════════════════════╝
 ```
 
@@ -204,6 +204,7 @@ Commands must start with `/`.
 | `/update` | Regenerate from latest linked data using saved prompt history, then build/push/deploy |
 | `/data` | Show linked data source summary |
 | `/history` | Show prompt history |
+| `/prompt` | Inspect the active prompt and dated provenance, or customize it for this dashboard |
 | `/logs` | Show latest operation log |
 | `/billers` | Invoice fetcher status; `/billers sync` runs them; `/billers enable\|disable <key>` toggles one |
 | `/doctor` | Check LLM/GitHub/Vercel/project readiness |
@@ -216,6 +217,8 @@ Commands must start with `/`.
 | `/help` | Show command help |
 
 When you start typing `/`, OpenBoardCLI shows matching command suggestions with color coding.
+
+Use `/prompt full` to see the complete packaged category prompt plus any dashboard-specific instructions. Use `/prompt history` to verify the CLI version and prompt/request fingerprints used by successful generations. `/prompt append <text>` adds instructions below the default, `/prompt set <text>` replaces only those added instructions, and `/prompt clear` restores the packaged default. Run `/update` after a change to regenerate the dashboard with it.
 
 ## Deploy
 

@@ -36,6 +36,8 @@ export interface BoardConfig {
    * reliably finish the full-featured prompt. Undefined behaves as 'high'.
    */
   uiQuality?: 'high' | 'low';
+  /** Which shipped base prompt seeded this dashboard. Legacy/TUI boards use their category. */
+  promptBase?: 'category' | 'agent-default';
 }
 
 export interface ChatMessage {

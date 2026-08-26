@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { ConfigService } from '../config/ConfigService.js';
 import type { BoardConfig } from '../../types/board.js';
 import { PromptHistoryService } from './PromptHistoryService.js';
+import { DashboardPromptService } from './DashboardPromptService.js';
 
 function isBoardConfig(value: unknown): value is BoardConfig {
   if (!value || typeof value !== 'object') return false;
@@ -44,6 +45,7 @@ export class BoardRegistryService {
     const updated = this.listBoards().filter((board) => board.id !== id);
     this.config.set('boards', updated);
     new PromptHistoryService(this.config).delete(id);
+    new DashboardPromptService(this.config).delete(id);
     return updated;
   }
 

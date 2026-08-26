@@ -268,6 +268,7 @@ against the running operation's phase list, not the full create pipeline.
 | `/data` | Parse and summarize linked data source |
 | `/billers` | Invoice fetcher status; `/billers sync` runs the enabled ones; `/billers enable\|disable <key>` toggles one |
 | `/history` | Show prompt history |
+| `/prompt` | Inspect prompt profile/provenance or append, replace, and clear per-dashboard instructions |
 | `/logs` | Show latest operation log |
 | `/doctor` | Show readiness checks |
 | `/model` | Show or switch model and effort |
@@ -327,19 +328,27 @@ Composition is deterministic and product-owned:
 
 ## Prompt History
 
+`DashboardPromptService` is the shared prompt-profile boundary for TUI and agent generation. It resolves the packaged category or agent-default prompt, appends the dashboard's persisted overlay, and fingerprints the framework, default, effective prompt, and exact LLM request. Packaged defaults remain package-owned, so an OpenBoardCLI upgrade takes effect without rewriting user config.
+
+Per-dashboard overlays and their dated change log are stored under:
+
+```text
+~/.openboard/dashboard-prompts/<dashboard-id>-<hash>.json
+```
+
 `PromptHistoryService` stores prompt history per dashboard:
 
 ```text
 ~/.openboard/prompt-history/<dashboard-id>.json
 ```
 
-History is appended after successful LLM file writes. It powers:
+History is appended after successful LLM file writes and includes prompt provenance hashes. It powers:
 
 - internal `/update`
 - `openboard update --dashboard`
 - `openboard update --all`
 
-When a dashboard is removed, its prompt-history file is removed with it.
+When a dashboard is removed, its prompt-history and prompt-profile files are removed with it.
 
 ## LLM Providers
 

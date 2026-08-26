@@ -47,6 +47,7 @@ import { describeLLMError, isErrorShapedContent } from '../utils/errorCodes.js';
 import type { Screen } from '../App.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { PromptHistoryService } from '../services/project/PromptHistoryService.js';
+import { DashboardPromptService } from '../services/project/DashboardPromptService.js';
 import { UI_COLORS } from '../theme.js';
 import { HintBar } from '../components/HintBar.js';
 import { parentOf } from '../config/navigation.js';
@@ -60,6 +61,7 @@ import type { BillerSchedulerStatus } from '../types/billers.js';
 
 const projectManager = new ProjectManager();
 const projectCommands = new ProjectCommandHandlers(projectManager);
+const dashboardPrompts = new DashboardPromptService();
 
 // ─── Message ID generator using crypto for uniqueness ───────────────────────
 function generateMsgId(): string {
@@ -124,6 +126,7 @@ interface Props {
 interface SendToLLMOptions {
   recordPrompt?: boolean;
   promptSource?: 'initial' | 'manual' | 'update';
+  historyPrompt?: string;
   signal?: AbortSignal;
   dataSummary?: string;
 }
@@ -726,6 +729,9 @@ Generated components: ${board.components.length > 0 ? board.components.join(', '
         boardContext += `\n\nDATA ANALYSIS (use this to generate relevant charts and metrics):\n${board.dataSummary}`;
       }
 
+      const promptProfile = dashboardPrompts.profile(board);
+      boardContext += `\n\nACTIVE DASHBOARD PROMPT PROFILE (${promptProfile.defaultSource}):\n${promptProfile.effectivePrompt}`;
+
       try {
         const registry = new BoardRegistryService();
         const boards = registry.listBoards();
@@ -828,6 +834,7 @@ For the current board "${board.title}":
       }
 
       const contextMessages = buildLLMContext(text);
+      const promptAudit = dashboardPrompts.createAudit(board, contextMessages);
 
       // Create a placeholder streaming message
       const streamMsg = newMsg('assistant', '', true);
@@ -906,14 +913,16 @@ For the current board "${board.title}":
                 boardName: board.name,
                 boardTitle: board.title,
                 source: options.promptSource ?? 'manual',
-                prompt: text,
+                prompt: options.historyPrompt ?? text,
                 writtenFiles,
                 dataSummary: options.dataSummary ?? board.dataSummary,
+                promptAudit,
               });
 
               new BoardRegistryService().upsertBoard({
                 ...board,
                 outputDir: getActiveProjectDir(),
+                dataSummary: options.dataSummary ?? board.dataSummary,
                 components: [...new Set([...board.components, ...writtenFiles])],
                 generatedAt: new Date().toISOString(),
               });
@@ -1003,8 +1012,8 @@ For the current board "${board.title}":
     autoGenTriggered.current = true;
     const featureClause = board.uiQuality === 'low'
       ? 'Keep it simple: 1-3 KPI/metric cards and exactly one chart is enough — prioritize finishing complete, valid code over feature richness.'
-      : 'Include at least 2-3 charts and some metric/stat cards.';
-    const autoPrompt = `Generate an initial dashboard tab for "${board.title}" (${board.type} type) inside the existing OpenBoardCLI master React app. Based on my data analysis, create appropriate metric cards, charts, and visualizations. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. Use the column names and data types from the analysis to pick the best chart types. ${featureClause} Return only this dashboard's component files — OpenBoardCLI registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoardCLI"; do not replace it with "${board.title}".`;
+      : 'Choose the smallest set of charts and metrics that communicates the strongest evidence in the data; do not add filler visualizations.';
+    const autoPrompt = `Generate the initial dashboard tab for "${board.title}" inside the existing OpenBoardCLI master React app. Apply the active dashboard prompt profile supplied in the system context to the analyzed data. Load real rows with useProtectedDashboardData('${board.name}') from src/hooks/useProtectedDashboardData.ts. Do not embed raw source rows or sensitive data in frontend code. ${featureClause} Return only this dashboard's component files — OpenBoardCLI registers the tab automatically at build time; do not return App.tsx or navigation code. Keep the centered master header text exactly "OpenBoardCLI"; do not replace it with "${board.title}".`;
 
     addMsg(newMsg('system', 'Auto-generating initial dashboard from your data...'));
     setIsLoading(true);
@@ -1295,6 +1304,40 @@ For the current board "${board.title}":
 
       if (cmd.type === 'history') {
         addMsg(newMsg('system', buildHistoryReport()));
+        return;
+      }
+
+      if (cmd.type === 'prompt') {
+        if (allBoards) {
+          addMsg(newMsg('error', 'Select an individual dashboard before inspecting or changing its prompt.'));
+          return;
+        }
+
+        const history = new PromptHistoryService().read(board.id);
+        const action = cmd.args[0]?.toLowerCase() ?? 'show';
+        const promptText = cmd.args.slice(1).join(' ').trim();
+        try {
+          if (action === 'show') {
+            addMsg(newMsg('system', dashboardPrompts.summary(board, history)));
+          } else if (action === 'full') {
+            addMsg(newMsg('system', dashboardPrompts.full(board)));
+          } else if (action === 'history') {
+            addMsg(newMsg('system', dashboardPrompts.historyReport(board, history)));
+          } else if (action === 'append') {
+            dashboardPrompts.append(board.id, promptText);
+            addMsg(newMsg('system', `Dashboard prompt instructions appended.\n\n${dashboardPrompts.summary(board, history)}`));
+          } else if (action === 'set' || action === 'modify') {
+            dashboardPrompts.set(board.id, promptText);
+            addMsg(newMsg('system', `Dashboard prompt instructions replaced.\n\n${dashboardPrompts.summary(board, history)}`));
+          } else if (action === 'clear') {
+            dashboardPrompts.clear(board.id);
+            addMsg(newMsg('system', `Dashboard prompt instructions cleared; the shipped default is active again.\n\n${dashboardPrompts.summary(board, history)}`));
+          } else {
+            addMsg(newMsg('error', 'Usage: /prompt [show|full|history|append <text>|set <text>|clear]'));
+          }
+        } catch (error: any) {
+          addMsg(newMsg('error', `Prompt update failed: ${error.message}`));
+        }
         return;
       }
 
@@ -1646,8 +1689,9 @@ Requirements:
           reporter.phase('generate');
           runs.markPhase(run, 'generate');
           const writtenFiles = await sendToLLM(updatePrompt, {
-            recordPrompt: false,
+            recordPrompt: true,
             promptSource: 'update',
+            historyPrompt: 'Update from latest data while preserving the active dashboard prompt and prior user intent.',
             dataSummary: latestSummary,
             signal: updateController.signal,
           });

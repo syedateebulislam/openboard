@@ -426,7 +426,8 @@ describe('Bulk dashboard operations', () => {
       const boardCall = completeMock.mock.calls.find(
         ([opts]) => opts.messages.some((m: { content: string }) => m.content.includes('add a chart')),
       );
-      expect(boardCall![0].messages[0].content).toBe(SYSTEM_PROMPT);
+      expect(boardCall![0].messages[0].content).toContain(SYSTEM_PROMPT);
+      expect(boardCall![0].messages[0].content).toContain('ACTIVE DASHBOARD PROMPT PROFILE (finance.md)');
       expect(boardCall![0].maxTokens).toBe(8192);
     });
 
@@ -442,7 +443,7 @@ describe('Bulk dashboard operations', () => {
       const boardCall = completeMock.mock.calls.find(
         ([opts]) => opts.messages.some((m: { content: string }) => m.content.includes('add a chart')),
       );
-      expect(boardCall![0].messages[0].content).toBe(SYSTEM_PROMPT_LOW);
+      expect(boardCall![0].messages[0].content).toContain(SYSTEM_PROMPT_LOW);
       expect(boardCall![0].messages[0].content).not.toBe(SYSTEM_PROMPT);
       expect(boardCall![0].maxTokens).toBe(4096);
     });

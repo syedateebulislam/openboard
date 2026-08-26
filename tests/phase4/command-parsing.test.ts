@@ -60,6 +60,12 @@ describe('Command Parsing', () => {
       expect(parseCommand('/commands')).toEqual({ type: 'commands' });
       expect(parseCommand('/doctor')).toEqual({ type: 'doctor' });
       expect(parseCommand('/history')).toEqual({ type: 'history' });
+      expect(parseCommand('/prompt')).toEqual({ type: 'prompt', args: [] });
+      expect(parseCommand('/prompt full')).toEqual({ type: 'prompt', args: ['full'] });
+      expect(parseCommand('/prompt append Prefer weekly totals')).toEqual({
+        type: 'prompt',
+        args: ['append', 'Prefer', 'weekly', 'totals'],
+      });
       expect(parseCommand('/logs')).toEqual({ type: 'logs' });
       expect(parseCommand('/data')).toEqual({ type: 'data' });
     });
@@ -176,6 +182,7 @@ describe('Command Parsing', () => {
       expect(HELP_TEXT).toContain('/update');
       expect(HELP_TEXT).toContain('/data');
       expect(HELP_TEXT).toContain('/history');
+      expect(HELP_TEXT).toContain('/prompt');
       expect(HELP_TEXT).toContain('/logs');
       expect(HELP_TEXT).toContain('/doctor');
       expect(HELP_TEXT).toContain('/commands');
