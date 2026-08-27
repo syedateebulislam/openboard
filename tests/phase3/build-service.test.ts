@@ -136,6 +136,11 @@ Found 1 error.`;
       const result = await BuildService.typeCheck('/test/project');
       expect(result.success).toBe(true);
       expect(result.errors).toEqual([]);
+      expect(mockCrossSpawn).toHaveBeenCalledWith(
+        'npx',
+        ['tsc', '--project', 'tsconfig.app.json', '--noEmit'],
+        expect.objectContaining({ cwd: '/test/project' }),
+      );
     });
 
     it('should return errors when tsc fails', async () => {
@@ -148,6 +153,48 @@ Found 1 error.`;
       expect(result.success).toBe(false);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].code).toBe('TS2322');
+    });
+  });
+
+  describe('validateGeneratedCode', () => {
+    it('blocks an out-of-scope identifier from generated code', async () => {
+      mockCrossSpawn.mockResolvedValueOnce({
+        stdout: "src/components/Uber.tsx(12,4): error TS2304: Cannot find name 'repeatedRoute'.",
+        stderr: '',
+        code: 2,
+      });
+
+      const result = await BuildService.validateGeneratedCode('/test/project');
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(mockCrossSpawn).toHaveBeenCalledWith(
+        'npx',
+        ['tsc', '--project', 'tsconfig.validate.json', '--noEmit'],
+        expect.objectContaining({ cwd: '/test/project' }),
+      );
+    });
+
+    it('does not block deployment for non-runtime library type differences', async () => {
+      mockCrossSpawn.mockResolvedValueOnce({
+        stdout: "src/components/Master.tsx(20,3): error TS2345: Argument type mismatch.",
+        stderr: '',
+        code: 2,
+      });
+
+      await expect(BuildService.validateGeneratedCode('/test/project')).resolves.toEqual({
+        success: true,
+        errors: [],
+      });
+    });
+
+    it('fails closed when the validation config cannot be read', async () => {
+      mockCrossSpawn.mockResolvedValueOnce(mockFailure("error TS5058: The specified path does not exist: 'tsconfig.validate.json'.", 2));
+
+      const result = await BuildService.validateGeneratedCode('/test/project');
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toMatchObject({ code: 'TS_CONFIG' });
     });
   });
 

@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { ProjectManager } from '../../src/services/project/ProjectManager.js';
 import { PreviewService } from '../../src/services/deploy/PreviewService.js';
 import { ConfigService } from '../../src/services/config/ConfigService.js';
+import { BuildService } from '../../src/services/build/BuildService.js';
 import type { BoardConfig } from '../../src/types/board.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -180,6 +181,29 @@ describe('ProjectManager', () => {
     it('should fail if project has not been scaffolded', async () => {
       const result = await pm.build('/nonexistent/project');
       expect(result.success).toBe(false);
+    });
+
+    it('does not run Vite when generated TypeScript has an undefined identifier', async () => {
+      const projectDir = makeTempDir();
+      writeFileSync(join(projectDir, 'package.json'), '{"scripts":{"build":"vite build"}}\n', 'utf-8');
+      const typeCheck = vi.spyOn(BuildService, 'validateGeneratedCode').mockResolvedValue({
+        success: false,
+        errors: [{
+          file: 'src/components/UberRidesDashboard.tsx',
+          line: 172,
+          column: 43,
+          code: 'TS2304',
+          message: "Cannot find name 'repeatedRoute'.",
+        }],
+      });
+      const viteBuild = vi.spyOn(BuildService, 'build').mockResolvedValue({ success: true });
+
+      const result = await pm.build(projectDir);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("TS2304 Cannot find name 'repeatedRoute'");
+      expect(typeCheck).toHaveBeenCalledWith(projectDir, undefined, undefined);
+      expect(viteBuild).not.toHaveBeenCalled();
     });
   });
 

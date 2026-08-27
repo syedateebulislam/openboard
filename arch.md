@@ -417,6 +417,21 @@ always uses the standard prompt regardless of any individual board's
 `uiQuality` — it is one product-controlled aggregation across all boards, not
 a per-dashboard choice.
 
+## Generated Build Validation
+
+Every `ProjectManager.build()` first syncs the product shell, then runs
+`BuildService.validateGeneratedCode()` against `tsconfig.validate.json`. The
+validation config follows only `src/main.tsx`'s active import graph and blocks
+runtime-safety diagnostics such as out-of-scope identifiers before Vite can
+transpile them into a browser `ReferenceError`. Ordinary chart-library typing
+differences remain advisory. A blocking diagnostic enters the existing bounded
+LLM repair loop; Vite and deployment run only after it clears.
+
+`removeAllDashboards()` calls `TemplateService.clearGeneratedFiles()` to delete
+all non-shell components, helpers, styles, and generated manifests. This keeps
+abandoned dashboards out of subsequent validation and regeneration runs even
+when an old registry entry did not list every file the LLM created.
+
 ## Cancellation And Resume
 
 Every cancellable operation (LLM generation, install, build, git push, Vercel

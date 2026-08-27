@@ -37,7 +37,10 @@ vi.mock('../../src/services/llm/LLMService.js', () => ({
 // fake workspaces here have no package.json/node_modules, so leaving it real
 // spawns an actual npx process per repair attempt — slow and flaky in CI.
 vi.mock('../../src/services/build/BuildService.js', () => ({
-  BuildService: { typeCheck: vi.fn(async () => ({ success: true, errors: [] })) },
+  BuildService: {
+    typeCheck: vi.fn(async () => ({ success: true, errors: [] })),
+    validateGeneratedCode: vi.fn(async () => ({ success: true, errors: [] })),
+  },
 }));
 
 import { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
@@ -112,6 +115,7 @@ function fakeProjectManager() {
 function fakeTemplate() {
   return {
     restoreAppShell: vi.fn(async () => {}),
+    clearGeneratedFiles: vi.fn(async () => [] as string[]),
     writeProtectedDashboardData: vi.fn(async () => 'api/_data/dash.json'),
     writeGeneratedFile: vi.fn(async () => {}),
     deleteGeneratedFile: vi.fn(async () => {}),
@@ -479,14 +483,18 @@ describe('Bulk dashboard operations', () => {
       ];
       const registry = fakeRegistry(boards, workspace);
       const { service, projectManager, template } = makeService({ registry, runsDir });
+      template.clearGeneratedFiles.mockResolvedValue([
+        'components/A.tsx',
+        'components/B.tsx',
+        'components/MasterDashboard.tsx',
+        'utils/staleDashboard.ts',
+      ]);
 
       const result = await service.removeAllDashboards();
 
       expect(result.success).toBe(true);
       expect(template.restoreAppShell).toHaveBeenCalledTimes(1);
-      expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/MasterDashboard.tsx');
-      expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/A.tsx');
-      expect(template.deleteGeneratedFile).toHaveBeenCalledWith(workspace, 'components/B.tsx');
+      expect(template.clearGeneratedFiles).toHaveBeenCalledWith(workspace);
       expect(template.deleteProtectedDashboardData).toHaveBeenCalledTimes(2);
       expect(registry.setMasterState).toHaveBeenCalledWith(undefined);
       expect(registry.current()).toHaveLength(0);
@@ -494,18 +502,6 @@ describe('Bulk dashboard operations', () => {
       expect(projectManager.deploy).toHaveBeenCalledTimes(1);
     });
 
-    it('never deletes the shared shell components', async () => {
-      const boards = [makeBoard({ name: 'a', components: ['components/AuthProvider.tsx', 'components/ThemeToggle.tsx', 'components/Real.tsx'] })];
-      const registry = fakeRegistry(boards, workspace);
-      const { service, template } = makeService({ registry, runsDir });
-
-      await service.removeAllDashboards();
-
-      const deleted = template.deleteGeneratedFile.mock.calls.map((c) => c[1]);
-      expect(deleted).toContain('components/Real.tsx');
-      expect(deleted).not.toContain('components/AuthProvider.tsx');
-      expect(deleted).not.toContain('components/ThemeToggle.tsx');
-    });
   });
 
   // ── TemplateService.restoreAppShell ─────────────────────────────────────────
@@ -525,6 +521,29 @@ describe('Bulk dashboard operations', () => {
       expect(restored).toContain('AuthProvider');
       expect(restored).not.toContain('a fully custom multi-tab app');
       expect(existsSync(join(srcDir, 'App.tsx'))).toBe(true);
+    });
+
+    it('clears orphaned generated files but preserves product shell files', async () => {
+      const ts = new RealTemplateService();
+      const componentsDir = join(workspace, 'src', 'components');
+      const utilsDir = join(workspace, 'src', 'utils');
+      mkdirSync(componentsDir, { recursive: true });
+      mkdirSync(utilsDir, { recursive: true });
+      writeFileSync(join(componentsDir, 'AuthProvider.tsx'), '// shell', 'utf-8');
+      writeFileSync(join(componentsDir, 'OldDashboard.tsx'), '// stale', 'utf-8');
+      writeFileSync(join(componentsDir, 'old-dashboard.css'), '/* stale */', 'utf-8');
+      writeFileSync(join(utilsDir, 'masterOverview.ts'), '// shell', 'utf-8');
+      writeFileSync(join(utilsDir, 'oldDashboard.ts'), '// stale', 'utf-8');
+
+      const removed = await ts.clearGeneratedFiles(workspace);
+
+      expect(removed).toEqual([
+        'components/OldDashboard.tsx',
+        'components/old-dashboard.css',
+        'utils/oldDashboard.ts',
+      ]);
+      expect(existsSync(join(componentsDir, 'AuthProvider.tsx'))).toBe(true);
+      expect(existsSync(join(utilsDir, 'masterOverview.ts'))).toBe(true);
     });
   });
 });

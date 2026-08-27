@@ -79,6 +79,7 @@ const SHELL_SYNC_FILES = [
   'vite.local-api.ts',
   'tsconfig.json',
   'tsconfig.app.json',
+  'tsconfig.validate.json',
   'tsconfig.node.json',
 ];
 
@@ -192,6 +193,38 @@ export class TemplateService {
     const source = resolve(this.templatesDir, 'src', 'App.tsx');
     const content = await readFile(source, 'utf-8');
     await this.writeGeneratedFile(outputDir, 'App.tsx', content);
+  }
+
+  /** Remove every LLM-owned source artifact while preserving the app shell. */
+  async clearGeneratedFiles(outputDir: string): Promise<string[]> {
+    const srcRoot = resolve(outputDir, 'src');
+    const removed: string[] = [];
+    const roots = ['components', 'generated', 'hooks', 'lib', 'types', 'utils'];
+
+    const visit = async (directory: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(directory, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const absolute = resolve(directory, entry.name);
+        if (entry.isDirectory()) {
+          await visit(absolute);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const generatedPath = relative(srcRoot, absolute).replace(/\\/g, '/');
+        if (!GENERATED_FILE_ALLOWLIST.some((pattern) => pattern.test(generatedPath))) continue;
+        if (isShellOwnedGeneratedPath(generatedPath)) continue;
+        await rm(absolute, { force: true });
+        removed.push(generatedPath);
+      }
+    };
+
+    for (const root of roots) await visit(resolve(srcRoot, root));
+    return removed.sort();
   }
 
   /**

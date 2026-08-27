@@ -21,6 +21,14 @@ export interface TypeCheckResult {
   errors: TypeCheckError[];
 }
 
+const RUNTIME_SAFETY_CODES = new Set([
+  'TS2304', // Cannot find name
+  'TS2448', // Block-scoped variable used before its declaration
+  'TS2454', // Variable used before being assigned
+  'TS2552', // Cannot find name; did you mean...
+  'TS18004', // Shorthand property has no value in scope
+]);
+
 function runCommand(
   cmd: string,
   args: string[],
@@ -75,12 +83,59 @@ export class BuildService {
   }
 
   static async typeCheck(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<TypeCheckResult> {
-    const { stdout, stderr, code } = await runCommand('npx', ['tsc', '--noEmit'], projectDir, 120_000, onProgress, signal);
+    const { stdout, stderr, code } = await runCommand(
+      'npx',
+      ['tsc', '--project', 'tsconfig.app.json', '--noEmit'],
+      projectDir,
+      120_000,
+      onProgress,
+      signal,
+    );
     if (code === 0) return { success: true, errors: [] };
 
     const output = stdout + stderr;
     const errors = BuildService.parseTscErrors(output);
     return { success: false, errors };
+  }
+
+  /**
+   * Catch diagnostics that can become immediate browser ReferenceErrors.
+   * The validation config follows only src/main.tsx's active import graph and
+   * deliberately relaxes ordinary library typing differences.
+   */
+  static async validateGeneratedCode(
+    projectDir: string,
+    _onProgress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<TypeCheckResult> {
+    const { stdout, stderr, code } = await runCommand(
+      'npx',
+      ['tsc', '--project', 'tsconfig.validate.json', '--noEmit'],
+      projectDir,
+      120_000,
+      // The compiler can emit non-blocking library diagnostics. Report only
+      // the runtime-safety subset after classification, not raw stderr.
+      undefined,
+      signal,
+    );
+    if (code === 0) return { success: true, errors: [] };
+    const output = stdout + stderr;
+    const parsed = BuildService.parseTscErrors(output);
+    if (parsed.length === 0) {
+      return {
+        success: false,
+        errors: [{
+          file: 'tsconfig.validate.json',
+          line: 1,
+          column: 1,
+          code: 'TS_CONFIG',
+          message: output.trim() || 'TypeScript validation failed without diagnostic output.',
+        }],
+      };
+    }
+    const runtimeErrors = parsed
+      .filter((error) => RUNTIME_SAFETY_CODES.has(error.code));
+    return { success: runtimeErrors.length === 0, errors: runtimeErrors };
   }
 
   static parseTscErrors(output: string): TypeCheckError[] {
@@ -100,6 +155,12 @@ export class BuildService {
     return errors;
   }
 
+  static formatTypeCheckErrors(errors: TypeCheckError[]): string {
+    return errors
+      .map((error) => `${error.file}(${error.line},${error.column}): ${error.code} ${error.message}`)
+      .join('\n');
+  }
+
   static async build(projectDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<BuildResult> {
     const { code, stderr } = await runCommand('npx', ['vite', 'build'], projectDir, 300_000, onProgress, signal);
     if (code !== 0) return { success: false, error: stderr };
@@ -117,9 +178,7 @@ export class BuildService {
     if (!typeResult.success) {
       return {
         success: false,
-        error: typeResult.errors
-          .map(e => `${e.file}(${e.line},${e.column}): ${e.message}`)
-          .join('\n'),
+        error: BuildService.formatTypeCheckErrors(typeResult.errors),
       };
     }
 

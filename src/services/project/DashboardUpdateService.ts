@@ -1005,26 +1005,14 @@ Requirements:
       reporter.phase('generate');
       reporter.log('Resetting the generated app to the empty OpenBoardCLI shell...');
       await this.templateService.restoreAppShell(projectDir);
-      await this.templateService.deleteGeneratedFile(projectDir, 'components/MasterDashboard.tsx');
+      const removedFiles = await this.templateService.clearGeneratedFiles(projectDir);
       this.registry.setMasterState(undefined);
 
       reporter.phase('write');
-      const removedFiles: string[] = [];
       for (const board of boards) {
-        for (const rawPath of board.components) {
-          const normalized = rawPath.replace(/\\/g, '/');
-          if (!/^components\/.+\.tsx$/.test(normalized)) continue;     // dashboard components only
-          if (/AuthProvider|LoginPage|ThemeToggle|BrandLogo|ErrorBoundary/.test(normalized)) continue; // never the shell
-          try {
-            await this.templateService.deleteGeneratedFile(projectDir, normalized);
-            removedFiles.push(normalized);
-          } catch {
-            // Path not allowlisted / unsafe — skip rather than risk a wrong delete.
-          }
-        }
         await this.templateService.deleteProtectedDashboardData(projectDir, board.name);
       }
-      reporter.log(`Removed ${removedFiles.length} generated component file(s) and all protected data.`);
+      reporter.log(`Removed ${removedFiles.length} generated source file(s) and all protected data.`);
 
       for (const board of boards) this.registry.removeBoard(board.id);
       reporter.log('Cleared the dashboard registry.');
@@ -1510,7 +1498,7 @@ Requirements:
         // Advisory type signal — never blocks, only informs the repair.
         let tscSignal = '';
         try {
-          const typeResult = await BuildService.typeCheck(projectDir, reporter.progress);
+          const typeResult = await BuildService.validateGeneratedCode(projectDir, reporter.progress);
           if (!typeResult.success && typeResult.errors.length > 0) {
             tscSignal = typeResult.errors
               .slice(0, 30)

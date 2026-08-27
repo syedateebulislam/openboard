@@ -203,6 +203,25 @@ export class ProjectManager {
     if (!existsSync(join(projectDir, 'package.json'))) {
       return { success: false, error: 'No package.json found in project directory' };
     }
+    try {
+      // Existing workspaces need the validation config introduced after they
+      // were scaffolded. This also keeps every direct TUI build on the same
+      // product-owned shell contract as the agent pipeline.
+      await new TemplateService(this.templatesDir).syncShellFiles(projectDir);
+    } catch (error) {
+      return { success: false, error: `Shell sync failed before build: ${error instanceof Error ? error.message : String(error)}` };
+    }
+
+    onProgress?.('Checking generated TypeScript...');
+    const typeResult = await BuildService.validateGeneratedCode(projectDir, onProgress, signal);
+    if (!typeResult.success) {
+      const details = BuildService.formatTypeCheckErrors(typeResult.errors);
+      return {
+        success: false,
+        error: details || 'TypeScript validation failed without a parseable diagnostic.',
+      };
+    }
+
     const result = await BuildService.build(projectDir, onProgress, signal);
     return {
       success: result.success,
