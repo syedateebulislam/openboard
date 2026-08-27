@@ -460,11 +460,20 @@ flowchart TD
     B --> C["LLM prompt: SYSTEM_PROMPT or SYSTEM_PROMPT_LOW per board.uiQuality, board context, registered dashboards, data summary (components only — no App.tsx)"]
     C --> D[LLM response]
     D --> E["codeExtractor: extract //CODE_START blocks; drop App.tsx / generated/* / MasterDashboard"]
-    E --> F["TemplateService: write generated files into shared workspace (allowlisted paths)"]
-    F --> G["PromptHistoryService: record prompt, source, written files, data summary"]
+    E --> F["DashboardUpdateService: enforce per-dashboard file ownership; journal prior files and registry"]
+    F --> F2["TemplateService: write generated files into shared workspace (allowlisted paths)"]
+    F2 --> G["PromptHistoryService: record prompt, source, written files, data summary"]
     G --> H["syncMasterTab: refresh Overview; DashboardManifestService: regenerate tab manifest"]
     H --> I["DashboardBuildPipeline: shell sync, install, build (with repair loop)"]
 ```
+
+Generated helpers are owned by the dashboard that first records them in
+`BoardConfig.components`. A create, update, scheduled refresh, or repair may
+rewrite its own files or create dashboard-scoped helpers, but cannot replace a
+path owned by another tab. Before the first write, the update service journals
+the existing generated files, board registry, and master state. If the final
+workspace build still fails after repair, it restores that snapshot and
+regenerates the manifest, leaving the last buildable dashboards active.
 
 ## Deployment Flow
 

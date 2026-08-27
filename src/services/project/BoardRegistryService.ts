@@ -41,6 +41,12 @@ export class BoardRegistryService {
     return updated;
   }
 
+  /** Restore an exact registry snapshot after a failed workspace mutation. */
+  replaceBoards(boards: BoardConfig[]): BoardConfig[] {
+    this.config.set('boards', boards);
+    return boards;
+  }
+
   removeBoard(id: string): BoardConfig[] {
     const updated = this.listBoards().filter((board) => board.id !== id);
     this.config.set('boards', updated);

@@ -106,6 +106,12 @@ interface RefreshExecutionOptions {
   projectDir?: string;
 }
 
+interface WorkspaceMutation {
+  files: Map<string, string | undefined>;
+  boards: BoardConfig[];
+  masterState: ReturnType<BoardRegistryService['getMasterState']>;
+}
+
 // Default models come from the shared catalog (src/config/llmCatalog.ts).
 
 function isGeneratedPathRejection(error: unknown): boolean {
@@ -255,6 +261,7 @@ export class DashboardUpdateService {
   private runs: RunStateService;
   private manifest: DashboardManifestService;
   private promptProfiles: DashboardPromptService;
+  private pendingMutations = new Map<string, WorkspaceMutation>();
 
   constructor(
     registry = new BoardRegistryService(),
@@ -1428,11 +1435,20 @@ Requirements:
     reporter.phase('write');
     const writtenFiles: string[] = [];
     for (const file of files) {
+      const owner = this.generatedPathOwner(board, file.path);
+      if (owner) {
+        reporter.log(`Skipped ${file.path}: owned by dashboard "${owner.title}"; use a ${board.name}-scoped helper path instead.`);
+        continue;
+      }
       try {
+        this.captureGeneratedFile(projectDir, file.path);
         await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
         writtenFiles.push(file.path);
       } catch (error) {
-        if (!isGeneratedPathRejection(error)) throw error;
+        if (!isGeneratedPathRejection(error)) {
+          await this.rollbackWorkspaceMutation(projectDir, reporter);
+          throw error;
+        }
         // Disallowed path (e.g. a stray App.css block — shell-owned since the
         // allowlist change) — skip it rather than abort the whole pipeline.
         reporter.log(`Skipped disallowed generated file: ${file.path}`);
@@ -1451,7 +1467,12 @@ Requirements:
       ];
     }
     const profile = this.promptProfiles.profile(board);
-    const systemPrompt = `${baseSystemPrompt}\n\nACTIVE DASHBOARD PROMPT PROFILE (${profile.defaultSource}):\n${profile.effectivePrompt}`;
+    const otherOwnedPaths = this.registry.listBoards()
+      .filter((candidate) => candidate.id !== board.id)
+      .flatMap((candidate) => candidate.components)
+      .map((path) => path.replace(/\\/g, '/'));
+    const ownershipPrompt = `GENERATED FILE OWNERSHIP:\n- This run owns dashboard "${board.name}" only.\n- Name every new helper/style with the dashboard slug or place it under a "${board.name}/" subdirectory.\n- Never return or rewrite files owned by another dashboard${otherOwnedPaths.length > 0 ? `: ${[...new Set(otherOwnedPaths)].join(', ')}` : '.'}`;
+    const systemPrompt = `${baseSystemPrompt}\n\nACTIVE DASHBOARD PROMPT PROFILE (${profile.defaultSource}):\n${profile.effectivePrompt}\n\n${ownershipPrompt}`;
     return [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt },
@@ -1486,8 +1507,8 @@ Requirements:
     writtenFiles: string[],
     buildError: string | undefined,
     reporter: PipelineReporter,
+    board: BoardConfig,
     run?: RunRecord,
-    uiQuality?: BoardConfig['uiQuality'],
   ): Promise<{ success: boolean; error?: string }> {
     let lastError = buildError ?? 'Unknown build error';
     let anyAttemptProducedFiles = false;
@@ -1533,16 +1554,17 @@ Requirements:
 1. Return ONLY the files that need changes, using the required //CODE_START format.
 2. Fix all build errors without changing dashboard behavior or removing features.
 3. Preserve AuthProvider, LoginPage, useAuth wiring and all dashboard tabs.
-4. Do not introduce new dependencies.`;
+4. Do not introduce new dependencies.
+5. Do not rewrite files owned by another dashboard. Prefer fixing this dashboard's component or a ${board.name}-scoped helper.`;
 
         const llm = LLMService.createProvider(new TypedConfigRepository().requireLLMConfig());
         const response = await llm.complete({
           messages: [
-            { role: 'system', content: uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT },
+            { role: 'system', content: board.uiQuality === 'low' ? SYSTEM_PROMPT_LOW : SYSTEM_PROMPT },
             { role: 'user', content: repairPrompt },
           ],
           temperature: 0.1,
-          maxTokens: uiQuality === 'low' ? 4096 : 8192,
+          maxTokens: board.uiQuality === 'low' ? 4096 : 8192,
           onProgress: reporter.progress,
           onUsage: (usage) => {
             if (run) this.runs.addTokenUsage(run, { ...usage, estimated: false });
@@ -1562,7 +1584,9 @@ Requirements:
           // re-syncs it on the next deploy, so "fixing" it here only hides the
           // real mismatch in the component that imports it.
           if (isShellOwnedGeneratedPath(file.path)) continue;
+          if (this.generatedPathOwner(board, file.path)) continue;
           try {
+            this.captureGeneratedFile(projectDir, file.path);
             await this.templateService.writeGeneratedFile(projectDir, file.path, file.content);
             repaired++;
           } catch {
@@ -1613,12 +1637,14 @@ Requirements:
       hasDependencies: (dir) => this.projectManager.getProjectInfo(dir)?.hasNodeModules ?? true,
       install: (dir, progress) => this.projectManager.install(dir, progress, signal),
       build: (dir, progress) => this.projectManager.build(dir, progress, signal),
-      repair: (dir, files, error) => this.repairAndRebuild(dir, files, error, reporter, run, board.uiQuality),
+      repair: (dir, files, error) => this.repairAndRebuild(dir, files, error, reporter, board, run),
     });
     const buildResult = await buildPipeline.execute(projectDir, writtenFiles, reporter);
     if (!buildResult.success) {
+      await this.rollbackWorkspaceMutation(projectDir, reporter);
       return this.failure(run, { board, writtenFiles }, buildResult.error ?? 'Build failed.');
     }
+    this.pendingMutations.delete(resolve(projectDir));
 
     // Mode contract: only the deploying modes publish. The preview-only
     // pipelines (local, hybrid) end at the local build — the user previews the
@@ -1704,6 +1730,51 @@ Requirements:
       runId: run?.runId,
       tokenUsage: run?.tokenUsage,
     };
+  }
+
+  private generatedPathOwner(board: BoardConfig, filePath: string): BoardConfig | undefined {
+    const normalized = filePath.replace(/\\/g, '/');
+    return this.registry.listBoards().find((candidate) =>
+      candidate.id !== board.id &&
+      candidate.components.some((path) => path.replace(/\\/g, '/') === normalized),
+    );
+  }
+
+  private captureGeneratedFile(projectDir: string, filePath: string): void {
+    const key = resolve(projectDir);
+    let mutation = this.pendingMutations.get(key);
+    if (!mutation) {
+      mutation = {
+        files: new Map(),
+        boards: this.registry.listBoards(),
+        masterState: this.registry.getMasterState(),
+      };
+      this.pendingMutations.set(key, mutation);
+    }
+
+    const normalized = filePath.replace(/\\/g, '/');
+    if (mutation.files.has(normalized)) return;
+    const absolute = join(projectDir, 'src', normalized);
+    mutation.files.set(normalized, existsSync(absolute) ? readFileSync(absolute, 'utf-8') : undefined);
+  }
+
+  private async rollbackWorkspaceMutation(projectDir: string, reporter: PipelineReporter): Promise<void> {
+    const key = resolve(projectDir);
+    const mutation = this.pendingMutations.get(key);
+    if (!mutation) return;
+
+    for (const [filePath, content] of mutation.files) {
+      if (content === undefined) {
+        await this.templateService.deleteGeneratedFile(projectDir, filePath);
+      } else {
+        await this.templateService.writeGeneratedFile(projectDir, filePath, content);
+      }
+    }
+    this.registry.replaceBoards(mutation.boards);
+    this.registry.setMasterState(mutation.masterState);
+    await this.manifest.sync(projectDir, mutation.boards);
+    this.pendingMutations.delete(key);
+    reporter.log(`Restored ${mutation.files.size} generated file(s) after the failed build; the previous dashboards remain active.`);
   }
 
   /**

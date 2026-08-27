@@ -83,6 +83,10 @@ function fakeRegistry(initial: BoardConfig[], sharedDir?: string) {
       else list.push(b);
       return list;
     }),
+    replaceBoards: vi.fn((boards: BoardConfig[]) => {
+      list = [...boards];
+      return list;
+    }),
     getMasterState: () => masterState,
     setMasterState: vi.fn((state?: { hash: string; generatedAt: string }) => {
       masterState = state;
@@ -185,7 +189,13 @@ describe('Bulk dashboard operations', () => {
   beforeEach(() => {
     // Reset implementation too, so a per-test mockResolvedValue can't leak.
     completeMock.mockReset();
-    completeMock.mockResolvedValue(VALID_CODE);
+    completeMock.mockImplementation(async (options: { messages?: Array<{ content?: string }> }) => {
+      const system = options.messages?.[0]?.content ?? '';
+      const owner = system.match(/This run owns dashboard "([^"]+)"/)?.[1];
+      return owner
+        ? VALID_CODE.replaceAll('Generated', `${owner.replace(/[^a-z0-9]/gi, '')}Generated`)
+        : VALID_CODE;
+    });
     runsDir = makeTempDir('runs');
     workspace = makeTempDir('ws');
     // A configured LLM provider so the internal createLLMConfig() does not throw;
