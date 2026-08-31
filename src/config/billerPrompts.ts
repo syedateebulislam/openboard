@@ -32,7 +32,7 @@ const BUILTIN_FIELD_DETECTION =
   'Analyse this receipt email and return, between //JSON_START and //JSON_END, a JSON object with key, displayName, senderEmail, subjectPrefix, subjectKeywords, defaultSinceDays, searchLimit, and a fields array of { name, description, example, type }. Do not include source_sender, email_uid, email_subject, email_date or currency.';
 
 const BUILTIN_SCRIPT_GENERATION =
-  'Return the complete Python fetcher between //CODE_START and //CODE_END, reproducing the supplied skeleton verbatim and writing only the docstring, config constants, COLUMNS, is_receipt() and parse(). KEY and DISPLAY_NAME must be plain string literals at column 0. parse() docstrings must use synthetic values.';
+  'Return the complete Python fetcher between //CODE_START and //CODE_END, reproducing the supplied skeleton verbatim and writing only the docstring, config constants, COLUMNS, is_receipt() and parse(). KEY and DISPLAY_NAME must be plain string literals at column 0. PDF fetchers must keep receipt_file in COLUMNS because the shared runner writes it. parse() docstrings must use synthetic values.';
 
 function readPrompt(file: string, fallback: string): string {
   try {

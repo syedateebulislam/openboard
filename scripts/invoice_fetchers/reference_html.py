@@ -157,9 +157,26 @@ def format_since(days: int) -> str:
 
 
 def ensure_csv(path) -> None:
-    if os.path.exists(path):
-        return
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.exists(path):
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            header = reader.fieldnames or []
+            if header == COLUMNS:
+                return
+            rows = list(reader)
+        backup = f"{path}.bak"
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows({column: row.get(column, "") for column in COLUMNS} for row in rows)
+        if os.path.exists(backup):
+            os.remove(backup)
+        os.replace(path, backup)
+        os.replace(temporary, path)
+        logging.info("[%s] CSV schema changed; archived the old file to %s", KEY, backup)
+        return
     with open(path, "w", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=COLUMNS).writeheader()
 

@@ -171,6 +171,18 @@ describe('script validation', () => {
     expect(result.errors.join(' ')).toMatch(/parents\[2\]/);
   });
 
+  it('rejects a PDF runner that writes receipt_file without declaring the column', () => {
+    const broken = `${validScript()}\nrow = {"receipt_file": "raw/invoice.pdf"}\n`;
+    const result = validateScriptSource(broken, 'big_basket');
+    expect(result.valid).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/receipt_file.*COLUMNS/i);
+  });
+
+  it('accepts receipt_file when the PDF schema declares it', () => {
+    const pdf = `${validScript().replace('"currency"]', '"currency", "receipt_file"]')}\nrow = {"receipt_file": "raw/invoice.pdf"}\n`;
+    expect(validateScriptSource(pdf, 'big_basket').valid).toBe(true);
+  });
+
   it('rejects keys that are not lower_snake_case', () => {
     for (const key of ['BigBasket', 'big-basket', '9lives', 'big basket']) {
       expect(validateScriptSource(validScript(key), key).valid).toBe(false);

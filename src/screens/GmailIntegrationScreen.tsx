@@ -286,11 +286,13 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
    * goes through a confirm step rather than acting on the keypress: the toggle
    * is one key away and undoing a deletion is not.
    */
-  const removeBiller = (key: string) => {
+  const removeBiller = async (key: string) => {
+    setBusy(true);
     const result = removeBillerScript(settings.scriptsDir, key);
     if (!result.removed) {
       setStatus(result.error ?? `Could not remove ${key}.`);
       setStep('menu');
+      setBusy(false);
       return;
     }
 
@@ -299,11 +301,19 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
     const enabled = settings.enabledKeys.filter((enabledKey) => enabledKey !== key);
     config.set('billers.enabledKeys', enabled);
 
-    log.append(`Removed the ${key} fetcher. Its invoices are still on disk.`);
-    setStatus(`Removed ${key}. Its CSV and any dashboard it built are untouched.`);
-    setPendingRemoval(undefined);
-    setStep('menu');
-    changed();
+    try {
+      const dashboardRemoved = await new BillerFetcherService().removeDashboardForBiller(key, log.append);
+      log.append(`Removed the ${key} fetcher${dashboardRemoved ? ' and its dashboard' : ''}. Its invoices are still on disk.`);
+      setStatus(`Removed ${key}${dashboardRemoved ? ' and its dashboard' : ''}. Its CSV is preserved.`);
+    } catch (error: any) {
+      log.append(`Removed the ${key} fetcher, but its dashboard could not be removed: ${error.message}`);
+      setStatus(`Fetcher removed; dashboard cleanup failed. Regenerate All will retry reconciliation.`);
+    } finally {
+      setPendingRemoval(undefined);
+      setStep('menu');
+      changed();
+      setBusy(false);
+    }
   };
 
   const syncNow = async () => {

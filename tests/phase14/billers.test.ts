@@ -561,6 +561,62 @@ describe('Biller invoice fetchers', () => {
       expect(result.dashboardExists).toBe(true);
     });
 
+    it('reconciliation creates an enabled biller dashboard missing from the registry', async () => {
+      writeFetcher(scriptsDir, 'fetch_urban_company.py', 'urban_company', 'Urban Company');
+      mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+      writeFileSync(join(root, 'data', 'invoices', 'urban_company.csv'), 'invoice_id,total_paid\n1,499\n', 'utf-8');
+
+      const updateService = {
+        ...fakeUpdateService(),
+        listBoards: vi.fn(() => []),
+        removeDashboard: vi.fn(async () => ({ success: true })),
+      };
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: ['urban_company'] }),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: '[urban_company] 0 new rows' }),
+      });
+
+      const result = await service.reconcileDashboards();
+
+      expect(result.removed).toEqual([]);
+      expect(result.synced).toHaveLength(1);
+      expect(result.synced[0].dashboardExists).toBe(true);
+      expect(updateService.createFromDataSource).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Urban Company', type: 'utilities' }),
+        undefined,
+      );
+    });
+
+    it('reconciliation removes an orphaned biller dashboard but preserves its CSV', async () => {
+      const invoiceDir = join(root, 'data', 'invoices');
+      const airtelCsv = join(invoiceDir, 'airtel.csv');
+      mkdirSync(invoiceDir, { recursive: true });
+      writeFileSync(airtelCsv, 'invoice_id,total_paid\n1,799\n', 'utf-8');
+      const airtelBoard = {
+        id: 'airtel-id',
+        name: 'airtel',
+        title: 'Airtel',
+        dataFiles: [airtelCsv],
+      } as any;
+      const updateService = {
+        ...fakeUpdateService(),
+        listBoards: vi.fn(() => [airtelBoard]),
+        removeDashboard: vi.fn(async () => ({ success: true, board: airtelBoard })),
+      };
+      const service = new BillerFetcherService({
+        settings: () => settings({ enabledKeys: [] }),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: '' }),
+      });
+
+      const result = await service.reconcileDashboards();
+
+      expect(result.removed).toEqual(['airtel']);
+      expect(updateService.removeDashboard).toHaveBeenCalledWith(airtelBoard, undefined);
+      expect(existsSync(airtelCsv)).toBe(true);
+    });
+
     it('only runs enabled billers, and --biller overrides the selection', async () => {
       const ran: string[] = [];
       const service = new BillerFetcherService({

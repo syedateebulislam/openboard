@@ -45,6 +45,7 @@ import {
 } from '../services/billers/BillerScriptGenerator.js';
 import { BillerScriptWriter, DRY_RUN_LIMIT } from '../services/billers/BillerScriptWriter.js';
 import { discoverBillers } from '../services/billers/BillerDiscoveryService.js';
+import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
 import { BoardRegistryService } from '../services/project/BoardRegistryService.js';
 import { sanitizeErrorMessage } from '../utils/logger.js';
 import { nextStudioAction, type StudioStage as Stage } from './billerStudioFlow.js';
@@ -131,6 +132,7 @@ interface BillerStudioScreenProps {
     probeService?: BillerProbeService;
     generator?: BillerScriptGenerator;
     writer?: BillerScriptWriter;
+    fetcher?: BillerFetcherService;
   };
 }
 
@@ -161,6 +163,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
   const probeService = useMemo(() => deps?.probeService ?? new BillerProbeService(), [deps]);
   const generator = useMemo(() => deps?.generator ?? new BillerScriptGenerator(), [deps]);
   const writer = useMemo(() => deps?.writer ?? new BillerScriptWriter(), [deps]);
+  const fetcher = useMemo(() => deps?.fetcher ?? new BillerFetcherService(), [deps]);
 
   const providerName = (config.get('llm.provider') as string) || 'the LLM provider';
 
@@ -277,6 +280,7 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
     setStage('working');
 
     let writtenPath: string | undefined;
+    let scriptSaved = false;
     try {
       const source = await generator.generateScript(
         proposalValue,
@@ -342,8 +346,18 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
       const enabled = new Set(settings.enabledKeys);
       enabled.add(proposalValue.key);
       config.set('billers.enabledKeys', [...enabled]);
+      scriptSaved = true;
 
       const total = discoverBillers(settings.scriptsDir).length;
+      say('system', `Fetching ${proposalValue.displayName} invoices and creating its dashboard…`);
+      const [syncResult] = await fetcher.syncEnabled({
+        only: proposalValue.key,
+        maxBackfillDashboards: Infinity,
+        onProgress: (line) => say('system', line),
+      });
+      if (!syncResult?.ok || !syncResult.dashboardExists) {
+        throw new Error(syncResult?.error ?? 'The fetcher was saved, but its first dashboard was not created.');
+      }
       say(
         'assistant',
         `Saved ${writtenPath}\n\n${proposalValue.displayName} is now enabled and listed with your other billers (${total} total). Its CSV will appear at:\n  ${writer.csvPathFor(settings.scriptsDir!, proposalValue.key)}\n\nESC to go back, or /restart to add another.`,
@@ -351,8 +365,10 @@ export function BillerStudioScreen({ onNavigate, onBillerCreated, deps }: Biller
       onBillerCreated?.();
       setStage('done');
     } catch (error: any) {
-      if (writtenPath) writer.discard(writtenPath);
-      fail(`${error.message ?? String(error)}\n\nNothing was saved. /restart to try a different sender or subject.`);
+      if (writtenPath && !scriptSaved) writer.discard(writtenPath);
+      fail(scriptSaved
+        ? `${error.message ?? String(error)}\n\nThe fetcher was saved and enabled, but dashboard creation failed. Regenerate All will retry it.`
+        : `${error.message ?? String(error)}\n\nNothing was saved. /restart to try a different sender or subject.`);
       setStage('done');
     } finally {
       setBusy(false);

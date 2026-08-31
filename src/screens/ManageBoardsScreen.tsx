@@ -12,6 +12,7 @@ import type { PipelinePhase } from '../services/project/pipelinePhases.js';
 import { ScreenFrame } from '../components/ScreenFrame.js';
 import { summariseFailures } from '../utils/summariseFailures.js';
 import { parentOf } from '../config/navigation.js';
+import { BillerFetcherService } from '../services/billers/BillerFetcherService.js';
 
 // Re-exported so the generated-UI cleanup helper keeps a stable import path.
 export { removeDashboardFromGeneratedApp } from '../services/project/DashboardUpdateService.js';
@@ -164,6 +165,12 @@ export function ManageBoardsScreen({ onNavigate, onBoardSelected, onModifyAll }:
       setIsProcessing(true);
       log.append('Regenerating all dashboards from saved prompt history...');
       try {
+        log.append('Reconciling biller fetchers with dashboard tabs...');
+        const reconciliation = await new BillerFetcherService().reconcileDashboards({ onProgress: log.append });
+        const failedSyncs = reconciliation.synced.filter((result) => !result.ok);
+        if (failedSyncs.length > 0) {
+          throw new Error(summariseFailures(failedSyncs.map((result) => `${result.displayName}: ${result.error}`)));
+        }
         const service = makeBulkService();
         const results = await service.updateAll((line) => log.append(line));
         setBoards(registry.listBoards());

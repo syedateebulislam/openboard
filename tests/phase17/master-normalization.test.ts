@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import {
   findAmountColumn,
   findDateColumn,
+  displayApp,
   normalizeDashboards,
   parseAmount,
   parseDate,
@@ -153,6 +154,12 @@ const WORKSPACE: Record<string, DashboardPayload> = {
 };
 
 describe('normalizeDashboards', () => {
+  it('does not crash when protected payload keys are not strings', () => {
+    expect(displayApp(null)).toBe('Dashboard');
+    expect(displayApp(42)).toBe('42');
+    expect(displayApp('urban_company')).toBe('Urban Company');
+  });
+
   it('dates every Uber row instead of dropping the app', () => {
     const uber = normalizeDashboards(WORKSPACE).filter((record) => record.slug === 'uber-rides');
     expect(uber).toHaveLength(1);

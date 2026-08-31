@@ -18,6 +18,7 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, rmSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { crossSpawn } from '../../utils/crossSpawn.js';
 import { DashboardUpdateService } from '../project/DashboardUpdateService.js';
 import { TypedConfigRepository } from '../config/TypedConfigRepository.js';
@@ -197,6 +198,68 @@ export class BillerFetcherService {
   listEnabled(): BillerScript[] {
     const { enabledKeys } = this.settings();
     return this.list().filter((biller) => enabledKeys.includes(biller.key));
+  }
+
+  /** Remove the dashboard owned by a biller while leaving its invoice CSV intact. */
+  async removeDashboardForBiller(key: string, onProgress?: ProgressCallback): Promise<boolean> {
+    const board = this.updateService.findBoard(key);
+    if (!board) return false;
+    const result = await this.updateService.removeDashboard(board, onProgress);
+    if (!result.success) throw new Error(result.error ?? `Could not remove the ${key} dashboard.`);
+    return true;
+  }
+
+  /**
+   * Make biller scripts, enabled configuration and registered dashboards agree.
+   * Invoice CSVs are deliberately retained: removing a fetcher must not erase
+   * the user's historical data, and a re-added fetcher can build from it.
+   */
+  async reconcileDashboards(options: { onProgress?: ProgressCallback; signal?: AbortSignal } = {}): Promise<{
+    removed: string[];
+    synced: BillerSyncResults;
+  }> {
+    const settings = this.settings();
+    const discovered = this.list();
+    const discoveredKeys = new Set(discovered.map((biller) => biller.key));
+    const invoiceDir = settings.scriptsDir
+      ? resolve(repoRootFor(settings.scriptsDir), 'data', 'invoices')
+      : undefined;
+    const removed: string[] = [];
+
+    if (invoiceDir) {
+      for (const board of this.updateService.listBoards()) {
+        if (options.signal?.aborted) break;
+        const source = board.dataFiles[0];
+        if (!source) continue;
+        const sourceRelative = relative(invoiceDir, resolve(source));
+        const billerOwned = sourceRelative !== '' && !sourceRelative.startsWith('..') && !isAbsolute(sourceRelative);
+        if (!billerOwned) continue;
+        const stillDiscovered = discovered.some((biller) => resolve(biller.csvPath) === resolve(source));
+        if (stillDiscovered || discoveredKeys.has(board.name)) continue;
+
+        options.onProgress?.(`[${board.name}] fetcher no longer exists; removing its dashboard and keeping its CSV.`);
+        const result = await this.updateService.removeDashboard(board, options.onProgress);
+        if (!result.success) throw new Error(result.error ?? `Could not remove ${board.title}.`);
+        removed.push(board.name);
+      }
+    }
+
+    const missing = discovered.filter(
+      (biller) => settings.enabledKeys.includes(biller.key) && !this.updateService.findBoard(biller.key),
+    );
+    const synced: BillerSyncResults = [];
+    for (const biller of missing) {
+      if (options.signal?.aborted) break;
+      options.onProgress?.(`[${biller.key}] enabled fetcher has no dashboard; creating it now.`);
+      const results = await this.syncEnabled({
+        only: biller.key,
+        onProgress: options.onProgress,
+        signal: options.signal,
+        maxBackfillDashboards: Infinity,
+      });
+      synced.push(...results);
+    }
+    return { removed, synced };
   }
 
   /**

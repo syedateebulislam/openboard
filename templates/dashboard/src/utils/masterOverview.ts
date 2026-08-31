@@ -122,12 +122,13 @@ function normalizedKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
 
-export function displayApp(slug: string): string {
-  return slug
+export function displayApp(slug: unknown): string {
+  const value = typeof slug === 'string' ? slug : String(slug ?? '');
+  return value
     .split(/[-_\s]/)
     .filter(Boolean)
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
+    .join(' ') || 'Dashboard';
 }
 
 // ---------------------------------------------------------------------------

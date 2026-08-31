@@ -18,7 +18,7 @@ Return the COMPLETE Python file between `//CODE_START` and `//CODE_END`. No pros
 
 1. **Module docstring** — `Standalone <DisplayName> invoice fetcher.`, the self-contained paragraph, a `Usage:` line naming the real filename, `Requires: beautifulsoup4`, and the `Credentials:` line.
 2. **Config constants** — `KEY`, `DISPLAY_NAME`, `SENDER_EMAIL`, `SUBJECT_PREFIX`, `CSV_PATH`, `RAW_DIR`, `STATE_PATH`, `DEFAULT_SINCE_DAYS`, `SEARCH_LIMIT`.
-3. **`COLUMNS`** — exactly `source_sender, email_uid, email_subject, email_date`, then your fields in the order given, then `currency` last.
+3. **`COLUMNS`** — exactly `source_sender, email_uid, email_subject, email_date`, then your fields in the order given, then `currency`. For a PDF skeleton, keep the skeleton-owned `receipt_file` column after `currency`; the runner always writes it.
 4. **`is_receipt(subject)`** — returns `True` with the comment `# subject-prefix filter is enough` when `SUBJECT_PREFIX` is set; otherwise a real keyword test against the supplied keywords.
 5. **`parse(text, subject)`** — a docstring showing the email's line layout, then the extraction, then the return dict.
 
@@ -27,6 +27,7 @@ Return the COMPLETE Python file between `//CODE_START` and `//CODE_END`. No pros
 - `KEY` and `DISPLAY_NAME` must be plain string literals at column 0. OpenBoardCLI discovers fetchers by matching `^KEY\s*=\s*["'](.+?)["']` — an f-string or a computed value makes the fetcher **invisible in the UI**, with no error anywhere.
 - `CSV_PATH` and `RAW_DIR` must repeat the key literally: `REPO_ROOT / "data" / "invoices" / "<key>.csv"` and `REPO_ROOT / "data" / "invoices" / "raw" / "<key>"`.
 - The keys of the dict `parse()` returns must be a **subset of `COLUMNS`**. Any extra key raises `ValueError` from `csv.DictWriter` at runtime.
+- For PDF billers, `COLUMNS` must include `receipt_file`. It is added by the shared runner even though `parse()` does not return it.
 - End with `"currency": "INR"` unless the sample clearly shows another currency.
 - Use only the stdlib plus `bs4` (and `pdfplumber` for PDF billers). No `requests`, no `lxml`, no `dateutil`, no `pandas`.
 

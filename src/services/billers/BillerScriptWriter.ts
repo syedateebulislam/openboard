@@ -247,6 +247,11 @@ export function validateScriptSource(source: string, key: string): ScriptValidat
     errors.push('The script must declare a COLUMNS list.');
   }
 
+  const columnsBlock = /^COLUMNS\s*=\s*\[([\s\S]*?)\]/m.exec(source)?.[1] ?? '';
+  if (/"receipt_file"\s*:/.test(source) && !/["']receipt_file["']/.test(columnsBlock)) {
+    errors.push('PDF fetchers must include receipt_file in COLUMNS because the shared runner writes that field.');
+  }
+
   if (!/def\s+parse\s*\(/.test(source)) {
     errors.push('The script must define parse().');
   }
