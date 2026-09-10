@@ -12,7 +12,11 @@
 import { describe, it, expect } from 'vitest';
 import type { BillerSettings } from '../../src/types/billers.js';
 import { billerSchedulerArmKey, msUntilDue } from '../../src/services/billers/billerScheduler.js';
-import { billerKeyForToggle } from '../../src/screens/GmailIntegrationScreen.js';
+import {
+  billerKeyForToggle,
+  formatBillerRunAt,
+  nextBillerRunAt,
+} from '../../src/screens/GmailIntegrationScreen.js';
 
 const settings = (overrides: Partial<BillerSettings> = {}): BillerSettings => ({
   scriptsDir: '/scripts/invoice_fetchers',
@@ -89,5 +93,34 @@ describe('billerKeyForToggle', () => {
     // slice() on a hardcoded 7 would have been just as correct here, but only
     // by coincidence; this is the reason the offset is derived.
     expect(billerKeyForToggle('toggle:a:b')).toBe('a:b');
+  });
+});
+
+describe('biller run timestamps', () => {
+  it('formats a run with both its local date and time', () => {
+    const runAt = '2026-09-11T14:42:07.000Z';
+    expect(formatBillerRunAt(runAt)).toBe(new Date(runAt).toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    }));
+  });
+
+  it('derives the next run from the persisted scheduler anchor', () => {
+    const lastRunAt = Date.parse('2026-09-11T08:00:00.000Z');
+    const now = lastRunAt + 15 * 60_000;
+    expect(nextBillerRunAt(settings({
+      lastRunAt: new Date(lastRunAt).toISOString(),
+      syncIntervalMinutes: 60,
+    }), now)).toBe(lastRunAt + 60 * 60_000);
+  });
+
+  it('uses an active fetch as the next-run anchor', () => {
+    const startedAt = Date.parse('2026-09-11T12:00:00.000Z');
+    expect(nextBillerRunAt(settings({ syncIntervalMinutes: 360 }), startedAt, startedAt))
+      .toBe(startedAt + 360 * 60_000);
   });
 });

@@ -365,9 +365,10 @@ Integrations → Gmail, in this order:
    stays anchored so stopping does not cause a full re-fetch next time.
 
 Fetching runs in-process, only while OpenBoardCLI is open — no background daemon. The
-meta line reads `fetching now` during a run and `next in …` otherwise. The last run
-time is remembered between sessions, so reopening OpenBoardCLI does not re-fetch
-everything; an overdue run starts shortly after launch.
+meta line shows both `last` and `next run` as local date-and-time values, and adds
+`fetching now` while a run is active. The last run time is remembered between
+sessions, so reopening OpenBoardCLI does not re-fetch everything; an overdue run
+starts shortly after launch.
 
 The schedule is anchored when a run **starts**, not when it finishes. A fetch across
 many billers takes minutes, and quitting OpenBoardCLI part-way used to discard the

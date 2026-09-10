@@ -43,7 +43,7 @@ import {
   stopBillerRun,
 } from '../services/billers/billerRunController.js';
 import { summariseFailures } from '../utils/summariseFailures.js';
-import { defaultScriptsDir } from '../types/billers.js';
+import { defaultScriptsDir, type BillerSettings } from '../types/billers.js';
 import { LogPane } from '../components/LogPane.js';
 import { useProgressLog } from '../hooks/useProgressLog.js';
 import { billerActivityLog } from '../services/billers/billerActivityLog.js';
@@ -75,14 +75,34 @@ export function billerKeyForToggle(menuValue: string): string | undefined {
   return menuValue.startsWith(TOGGLE_PREFIX) ? menuValue.slice(TOGGLE_PREFIX.length) : undefined;
 }
 
-/** "in 4 min" / "in 2h 10m", or "due now" once the interval has elapsed. */
-function describeNextRun(msRemaining: number): string {
-  if (msRemaining <= 0) return 'due now';
-  const totalMinutes = Math.ceil(msRemaining / 60_000);
-  if (totalMinutes < 60) return `in ${totalMinutes} min`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes === 0 ? `in ${hours}h` : `in ${hours}h ${minutes}m`;
+const RUN_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: '2-digit',
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+};
+
+/** One local date-and-time format shared by the last and next run labels. */
+export function formatBillerRunAt(value: string | number): string {
+  return new Date(value).toLocaleString([], RUN_DATE_TIME_OPTIONS);
+}
+
+/**
+ * The next advertised run, using the same anchor and due calculation as the
+ * scheduler. An active run has already established a fresher in-memory anchor
+ * than the persisted setting, which is written just after the run begins.
+ */
+export function nextBillerRunAt(
+  settings: BillerSettings,
+  now = Date.now(),
+  activeStartedAt?: number,
+): number {
+  if (activeStartedAt !== undefined) {
+    return activeStartedAt + settings.syncIntervalMinutes * 60_000;
+  }
+  return now + msUntilDue(settings, now);
 }
 
 /**
@@ -474,15 +494,13 @@ export function GmailIntegrationScreen({ onNavigate, onBillersConfigured }: Prop
   const meta = [
     !hasDir ? 'no scripts folder' : !hasEmail ? 'address needed' : !hasPassword ? 'password needed' : 'ready',
     hasDir && hasEmail && hasPassword && `${settings.enabledKeys.length}/${billers.length} billers on`,
-    settings.lastRunAt && `last ${new Date(settings.lastRunAt).toLocaleTimeString()}`,
-    // Derived from the same lastRunAt anchor the scheduler uses. The loop only
-    // runs while OpenBoardCLI is open, which the wording has to stay honest about.
-    // While a fetch is in flight, say so instead of showing a countdown. The
-    // schedule anchors at the start of a run, so the two together previously
-    // read as "due now" for the whole run and looked like nothing was happening.
-    running
-      ? `fetching now (${running.origin})`
-      : isBillerSyncConfigured(settings) && `next ${describeNextRun(msUntilDue(settings))} while open`,
+    settings.lastRunAt && `last ${formatBillerRunAt(settings.lastRunAt)}`,
+    // An absolute timestamp is easier to trust than a countdown and does not
+    // become stale while this screen sits open. During a fetch, anchor it on the
+    // active run just as the scheduler does instead of showing the old cycle.
+    isBillerSyncConfigured(settings)
+      && `next run ${formatBillerRunAt(nextBillerRunAt(settings, Date.now(), running?.startedAt))}`,
+    running && `fetching now (${running.origin})`,
   ];
 
   // Data with no fetcher behind it renders a dashboard that quietly stops
