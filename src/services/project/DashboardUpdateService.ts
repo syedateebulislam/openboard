@@ -470,6 +470,124 @@ export class DashboardUpdateService {
     return this.updateBoard(board, onProgress);
   }
 
+  /**
+   * Refresh only the protected data consumed by an existing dashboard.
+   *
+   * Invoice fetchers change rows, not dashboard intent or component structure.
+   * Sending every scheduled CSV change through updateBoard() made deployment
+   * depend on a fresh LLM generation. A slow or interrupted model call left the
+   * new protected data on disk but never built or deployed it, and also stopped
+   * the remaining billers in that scheduled run from being processed.
+   *
+   * The master Overview remains correct because it reads the aggregate data at
+   * runtime. syncMasterTab() is still called so a missing/outdated master
+   * component is created when necessary.
+   */
+  async refreshDataBySelector(
+    selector: string,
+    onProgress?: UpdateProgress,
+    signal?: AbortSignal,
+  ): Promise<DashboardUpdateResult> {
+    const board = this.findBoard(selector);
+    if (!board) {
+      return {
+        success: false,
+        error: `Dashboard not found: ${selector}`,
+        errorCode: 'E_DASHBOARD_NOT_FOUND',
+      };
+    }
+
+    const run = this.runs.createRun('refresh', { dashboard: board.name, dataOnly: true });
+    const reporter = this.makeReporter(onProgress, run);
+    let lock: ReturnType<typeof ProjectLockService.acquire> | undefined;
+
+    try {
+      const projectDir = board.outputDir || this.registry.getSharedProjectDir();
+      if (!projectDir) {
+        return this.failure(run, { board }, 'No generated app workspace found.');
+      }
+
+      const dataFile = board.dataFiles[0];
+      if (!dataFile) {
+        return this.failure(run, { board }, 'No data source is linked to this dashboard.');
+      }
+
+      run.boardId = board.id;
+      run.boardName = board.name;
+      run.boardTitle = board.title;
+      run.projectDir = projectDir;
+      this.runs.save(run);
+
+      reporter.phase('parse');
+      reporter.log(`Reading latest data: ${dataFile}`);
+      const parsed = await DataParserService.parse(dataFile);
+
+      reporter.phase('analyze');
+      const analysis = DataAnalyzer.analyze(parsed);
+      const latestSummary = DataAnalyzer.generateSummary(analysis);
+      reporter.log(`Parsed latest data (${analysis.rowCount} rows, ${analysis.columnCount} columns)`);
+
+      lock = ProjectLockService.acquire(projectDir);
+      if (!lock.success) {
+        return this.failure(run, { board }, lock.error ?? 'Project lock failed');
+      }
+
+      reporter.phase('write', 'Writing refreshed dashboard data');
+      await this.writeProtectedData(board, parsed, latestSummary, reporter.progress);
+
+      const updatedBoard: BoardConfig = {
+        ...board,
+        outputDir: projectDir,
+        dataSummary: latestSummary,
+        generatedAt: new Date().toISOString(),
+      };
+      reporter.log('Dashboard data refreshed; existing component preserved.');
+
+      const masterFiles = await this.syncMasterTab(projectDir, reporter, run);
+      const result = await this.buildPushDeploy(
+        updatedBoard,
+        masterFiles,
+        `Refresh ${board.name} data: ${new Date().toISOString()}`,
+        reporter,
+        run,
+        signal,
+      );
+      if (!result.success) return result;
+
+      // Protected data is intentionally excluded from Git, so a successful
+      // push with an unavailable Vercel CLI cannot publish this refresh through
+      // Git integration. Require a direct deployment URL before declaring a
+      // publishing-mode data refresh complete; otherwise the scheduler must
+      // leave it pending and retry after authentication is repaired.
+      if (modeAllowsDeploy(getAppMode()) && !result.deployUrl) {
+        return this.failure(
+          run,
+          { board, writtenFiles: result.writtenFiles },
+          'Vercel is not authenticated for a direct dashboard-data deployment. Re-authenticate Vercel; the scheduler will retry this refresh.',
+        );
+      }
+
+      // Advance generatedAt only after the build/deploy succeeds. The scheduler
+      // compares this successful anchor (or lastDeployed in publishing modes)
+      // with the CSV mtime so a transient failure is retried even when the next
+      // fetch finds no additional rows. Preserve deployment fields that
+      // recordDeployment() may just have written to the registry.
+      const deployedBoard = this.findBoard(board.id) ?? updatedBoard;
+      const refreshedBoard: BoardConfig = {
+        ...deployedBoard,
+        outputDir: projectDir,
+        dataSummary: latestSummary,
+        generatedAt: updatedBoard.generatedAt,
+      };
+      this.registry.upsertBoard(refreshedBoard);
+      return { ...result, board: refreshedBoard };
+    } catch (error: any) {
+      return this.failure(run, { board }, error.message);
+    } finally {
+      lock?.release();
+    }
+  }
+
   async updateAll(onProgress?: UpdateProgress): Promise<DashboardUpdateResult[]> {
     return new RefreshAllDashboardsUseCase({
       listBoards: () => this.listBoards(),

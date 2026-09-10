@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { DashboardUpdateService } from '../../src/services/project/DashboardUpdateService.js';
+import type { BoardConfig } from '../../src/types/board.js';
 import {
   BUNDLED_SUPPORT_SCRIPTS,
   bundledScriptsDir,
@@ -27,6 +28,7 @@ import {
 import {
   BillerFetcherService,
   MAX_BACKFILL_DASHBOARDS_PER_RUN,
+  dashboardDataNeedsRefresh,
   describeFetchError,
   findFatalOutput,
   hashFile,
@@ -209,6 +211,7 @@ describe('Biller invoice fetchers', () => {
       findBoard: vi.fn(() => undefined),
       createFromDataSource: vi.fn(async () => ({ success: true })),
       updateBySelector: vi.fn(async () => ({ success: true })),
+      refreshDataBySelector: vi.fn(async () => ({ success: true })),
     });
 
     it('passes credentials to the fetchers through the environment', () => {
@@ -515,8 +518,48 @@ describe('Biller invoice fetchers', () => {
       });
 
       await service.syncEnabled();
-      expect(updateService.updateBySelector).toHaveBeenCalledWith('zomato', undefined);
+      expect(updateService.refreshDataBySelector).toHaveBeenCalledWith('zomato', undefined, undefined);
+      expect(updateService.updateBySelector).not.toHaveBeenCalled();
       expect(updateService.createFromDataSource).not.toHaveBeenCalled();
+    });
+
+    it('retries an unchanged CSV when its last deployment predates the data', async () => {
+      const csv = join(root, 'data', 'invoices', 'zomato.csv');
+      mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+      writeFileSync(csv, 'order_id\n1\n', 'utf-8');
+
+      const updateService = fakeUpdateService();
+      updateService.findBoard = vi.fn(() => ({
+        id: 'board-1',
+        name: 'zomato',
+        generatedAt: '2099-01-01T00:00:00.000Z',
+        lastDeployed: '2000-01-01T00:00:00.000Z',
+      }) as any);
+      const service = new BillerFetcherService({
+        settings: () => settings(),
+        updateService: updateService as unknown as DashboardUpdateService,
+        runScript: async () => ({ code: 0, output: '[zomato] 0 new rows' }),
+      });
+
+      const [result] = await service.syncEnabled();
+
+      expect(result.changed).toBe(false);
+      expect(result.dashboardUpdated).toBe(true);
+      expect(updateService.refreshDataBySelector).toHaveBeenCalledWith('zomato', undefined, undefined);
+    });
+
+    it('uses the successful build or deployment timestamp as the retry anchor', () => {
+      const csv = join(root, 'data', 'invoices', 'zomato.csv');
+      mkdirSync(join(root, 'data', 'invoices'), { recursive: true });
+      writeFileSync(csv, 'order_id\n1\n', 'utf-8');
+      const board = {
+        generatedAt: '2099-01-01T00:00:00.000Z',
+        lastDeployed: '2000-01-01T00:00:00.000Z',
+      } as BoardConfig;
+
+      expect(dashboardDataNeedsRefresh(csv, board, true)).toBe(true);
+      expect(dashboardDataNeedsRefresh(csv, board, false)).toBe(false);
+      expect(dashboardDataNeedsRefresh(csv, { ...board, lastDeployed: undefined }, true)).toBe(true);
     });
 
     it('skips the dashboard when the CSV did not change and one already exists', async () => {

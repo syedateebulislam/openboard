@@ -17,7 +17,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, rmSync } from 'node:fs';
+import { createReadStream, existsSync, rmSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { crossSpawn } from '../../utils/crossSpawn.js';
 import { DashboardUpdateService } from '../project/DashboardUpdateService.js';
@@ -39,6 +39,8 @@ import {
 } from './BillerDiscoveryService.js';
 import { ProjectLockService } from '../project/ProjectLockService.js';
 import { toneLine } from '../../utils/logTone.js';
+import { getAppMode, modeAllowsDeploy } from '../../config/appModes.js';
+import type { BoardConfig } from '../../types/board.js';
 
 export type ProgressCallback = (line: string) => void;
 
@@ -131,6 +133,38 @@ export function countCsvRows(path: string): Promise<number> {
       .on('end', () => resolvePromise(sawContent ? Math.max(0, newlines - 1) : 0))
       .on('error', () => resolvePromise(0));
   });
+}
+
+/**
+ * Whether data already on disk still needs a successful build/deploy.
+ *
+ * A fetch can update the CSV and then fail later during build or deployment.
+ * On the next run the before/after hashes are identical, so the hash gate alone
+ * would call the work complete forever. Compare the source mtime with the last
+ * successful publication anchor so an unchanged CSV retries unfinished work.
+ */
+export function dashboardDataNeedsRefresh(
+  dataFile: string,
+  board: BoardConfig,
+  deploying = modeAllowsDeploy(getAppMode()),
+): boolean {
+  if (!existsSync(dataFile)) return false;
+
+  // A remote board with generated data but no successful deployment must get
+  // another chance. Older installs may lack lastDeployed, so this also performs
+  // one harmless reconciliation deploy for them.
+  if (deploying && !board.lastDeployed) return Boolean(board.generatedAt);
+
+  const anchor = deploying ? board.lastDeployed : board.generatedAt;
+  if (!anchor) return false;
+  const anchorMs = Date.parse(anchor);
+  if (Number.isNaN(anchorMs)) return true;
+
+  try {
+    return statSync(dataFile).mtimeMs > anchorMs;
+  } catch {
+    return false;
+  }
 }
 
 /** Turn a raw script/spawn failure into something a user can act on. */
@@ -438,6 +472,10 @@ export class BillerFetcherService {
     ]);
     const changed = Boolean(after) && before !== after;
     const existing = this.updateService.findBoard(biller.key);
+    const deploying = modeAllowsDeploy(getAppMode());
+    const pendingDashboardRefresh = existing
+      ? dashboardDataNeedsRefresh(biller.csvPath, existing, deploying)
+      : false;
 
     // The two lines that answer "did anything happen?", coloured so they can be
     // found without reading the fetcher output above them.
@@ -459,8 +497,14 @@ export class BillerFetcherService {
     // and never produced a tab, because the first fetch found no new mail and
     // so nothing "changed". Build it from the data already on disk instead.
     const needsFirstDashboard = Boolean(after) && !existing;
-    if ((!changed && !needsFirstDashboard) || options.skipDashboard) {
+    if ((!changed && !needsFirstDashboard && !pendingDashboardRefresh) || options.skipDashboard) {
       return { ...base, ok: true, changed, dashboardExists: Boolean(existing) };
+    }
+
+    if (!changed && pendingDashboardRefresh) {
+      options.onProgress?.(
+        `[${biller.key}] data is newer than its last successful ${deploying ? 'deployment' : 'build'} — retrying the dashboard refresh.`,
+      );
     }
 
     // A backfill builds from rows already on disk, so it is never urgent — and
@@ -483,7 +527,16 @@ export class BillerFetcherService {
       }
 
       const result = existing
-        ? await this.updateService.updateBySelector(biller.key, options.onProgress)
+        // Existing dashboards already fetch their rows from protected data at
+        // runtime. A scheduled CSV change therefore needs a data refresh and
+        // deploy, not another LLM rewrite of the React component. Keeping that
+        // generation in this path made one slow model call block every later
+        // biller and prevented the freshly written data from being deployed.
+        ? await this.updateService.refreshDataBySelector(
+            biller.key,
+            options.onProgress,
+            options.signal,
+          )
         : await this.updateService.createFromDataSource(
             {
               dataFile: biller.csvPath,
