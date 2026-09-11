@@ -294,6 +294,81 @@ def search_uids(imap, sender_email, since_date: str) -> List[str]:
     return sorted(uids, key=lambda value: int(value))
 `;
 
+/** Historical-data repair added to the bundled Uber fetcher. */
+const UBER_CSV_REPAIR = `def repair_existing_csv(path) -> int:
+    """Repair known historical Uber rows without discarding user data."""
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != COLUMNS:
+                return 0
+            rows = list(reader)
+    except Exception as exc:
+        logging.warning("[%s] Could not inspect existing CSV: %s", KEY, exc)
+        return 0
+
+    changed = 0
+    kept = []
+    positions = {}
+
+    def quality(row) -> tuple:
+        return (
+            bool(str(row.get("trip_datetime") or "").strip()),
+            bool(str(row.get("total_paid") or "").strip()),
+            sum(bool(str(row.get(column) or "").strip()) for column in COLUMNS),
+        )
+
+    for raw in rows:
+        row = {column: raw.get(column) or "" for column in COLUMNS}
+        trip_datetime = str(row.get("trip_datetime") or "").strip()
+        repaired = re.sub(r"^ept\\b", "Sep", trip_datetime, flags=re.IGNORECASE)
+        if repaired != trip_datetime:
+            row["trip_datetime"] = repaired
+            changed += 1
+
+        uid = str(row.get("email_uid") or "").strip()
+        if uid and uid in positions:
+            index = positions[uid]
+            if quality(row) > quality(kept[index]):
+                kept[index] = row
+            changed += 1
+            continue
+        if uid:
+            positions[uid] = len(kept)
+        kept.append(row)
+
+    if changed == 0:
+        return 0
+
+    backup = f"{path}.bak"
+    temporary = f"{path}.tmp"
+    try:
+        if not os.path.exists(backup):
+            with open(path, "rb") as source, open(backup, "xb") as target:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+        with open(temporary, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows(kept)
+        os.replace(temporary, path)
+        logging.info("[%s] Repaired %d historical CSV row issue(s); backup: %s", KEY, changed, backup)
+        return changed
+    except Exception as exc:
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        except Exception:
+            pass
+        logging.warning("[%s] Could not repair existing CSV: %s", KEY, exc)
+        return 0
+`;
+
 /**
  * Bring one fetcher's source up to environment-based credentials.
  *
@@ -351,11 +426,65 @@ const findForwardedMail: FetcherMigration = (source, eol) => {
   return undefined;
 };
 
+/**
+ * Repair the bundled Uber parser without replacing user customizations.
+ *
+ * The old three-letter month regex matched "Sept" starting at its second
+ * character, producing "ept". Patch only the exact shipped statements, then
+ * add a data repair that canonicalizes affected rows and keeps the best row
+ * when an older short-schema duplicate shares its UID.
+ */
+const repairUberDates: FetcherMigration = (source, eol) => {
+  if (!/^KEY\s*=\s*["']uber_rides["']/m.test(source)) return undefined;
+  let current = source;
+
+  current = current.replace(/^import shutil\r?\n/m, '');
+  current = current.replace(
+    /^            shutil\.copy2\(path, backup\)$/m,
+    eol('            with open(path, "rb") as source, open(backup, "xb") as target:\n                while True:\n                    chunk = source.read(1024 * 1024)\n                    if not chunk:\n                        break\n                    target.write(chunk)'),
+  );
+  current = current.replace(
+    /^    repair_existing_csv\(CSV_PATH\)$/m,
+    eol('    if not args.dry_run:\n        repair_existing_csv(CSV_PATH)'),
+  );
+
+  if (!current.includes('def repair_existing_csv(')) {
+    current = current.replace(
+      /\r?\ndef ensure_csv\(path\) -> None:/,
+      `${eol(`\n${UBER_CSV_REPAIR}\n`)}\ndef ensure_csv(path) -> None:`,
+    );
+  }
+
+  current = current
+    .replace(
+      'r"([A-Z][a-z]{2}\\s+\\d{1,2},\\s*\\d{4})\\s*,\\s*(\\d{1,2}:\\d{2}\\s*(?:am|pm))"',
+      'r"\\b([A-Z][a-z]{2,8}\\s+\\d{1,2},\\s*\\d{4})\\s*,\\s*(\\d{1,2}:\\d{2}\\s*(?:am|pm))"',
+    )
+    .replace(
+      '        trip_datetime = f"{dt_match.group(1)} {dt_match.group(2)}"',
+      eol('        date_part = dt_match.group(1)\n        month, rest = date_part.split(None, 1)\n        trip_datetime = f"{month[:3].title()} {rest} {dt_match.group(2)}"'),
+    )
+    .replace(
+      '        d = find_first([r"([A-Z][a-z]{2}\\s+\\d{1,2},\\s*\\d{4})"], text)',
+      eol('        d = find_first([r"\\b([A-Z][a-z]{2,8}\\s+\\d{1,2},\\s*\\d{4})\\b"], text)\n        if d:\n            month, rest = d.split(None, 1)\n            d = f"{month[:3].title()} {rest}"'),
+    );
+
+  if (!current.includes('        repair_existing_csv(CSV_PATH)')) {
+    current = current.replace(
+      '    Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)',
+      eol('    Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)\n    if not args.dry_run:\n        repair_existing_csv(CSV_PATH)'),
+    );
+  }
+
+  return current === source ? undefined : current;
+};
+
 /** Applied in order; each is independent and skips itself when already done. */
 const FETCHER_MIGRATIONS: FetcherMigration[] = [
   repairRecursiveCredentials,
   useEnvironmentCredentials,
   findForwardedMail,
+  repairUberDates,
 ];
 
 export function migrateFetcherSource(source: string): string | undefined {

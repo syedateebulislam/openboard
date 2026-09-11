@@ -147,6 +147,7 @@ RULES:
 21. NEVER set isAuthenticated/user/client auth state from window.location, hostname checks, localStorage, hardcoded users, mock users, demo users, or client-side credentials.
 22. MASTER TAB: components/MasterDashboard.tsx is maintained only by the dedicated master-generation request. Normal dashboard work must not return it.
 23. src/utils/masterOverview.ts is a shell utility owned by OpenBoardCLI and re-synced from the template on every deploy: never return, rewrite, or remove it. The master tab imports its row normalization (normalizeDashboards, summarizeApps, periodKey, periodLabel, parseAmount, parseDate) from there instead of hand-rolling date/amount parsing.
+24. When a dashboard has multiple possible date fields, parse them one by one and use the first value that parses successfully. Never select the first non-empty value and stop after it fails; malformed primary dates must fall back to payment/email timestamps.
 
 EXAMPLE OUTPUT FORMAT (syntax only; this is not a dashboard-content blueprint):
 

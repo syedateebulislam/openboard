@@ -369,6 +369,23 @@ describe.skipIf(!hasPython)('parse_sample.py CLI', () => {
   });
 });
 
+describe.skipIf(!hasBs4)('bundled Uber fetcher', () => {
+  it('canonicalizes the four-letter September abbreviation', async () => {
+    const helper = join(bundledScriptsDir(), 'parse_sample.py');
+    const fetcher = join(bundledScriptsDir(), 'fetch_uber.py');
+    const samplePath = join(root, 'uber-september.txt');
+    writeFileSync(samplePath, 'Sept 11, 2026 , 12:07 am\nTotal ₹62.67', 'utf-8');
+
+    const result = await runPython([helper, fetcher, samplePath, 'Your Friday morning trip with Uber'], {
+      cwd: bundledScriptsDir(),
+      timeoutMs: 30_000,
+      freeTextArgs: ['Your Friday morning trip with Uber'],
+    });
+    const parsed = JSON.parse(result.stdout.trim());
+    expect(parsed.fields.trip_datetime).toBe('Sep 11, 2026 12:07 am');
+  });
+});
+
 // ── the probe's text extraction ──────────────────────────────────────────────
 
 describe.skipIf(!hasBs4)('probe_biller.py text extraction', () => {

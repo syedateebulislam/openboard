@@ -162,6 +162,86 @@ def format_since(days: int) -> str:
     return since.strftime("%d-%b-%Y")
 
 
+def repair_existing_csv(path) -> int:
+    """Repair known historical Uber rows without discarding user data.
+
+    Older runs could append a short legacy row beside its complete replacement,
+    and the previous September regex captured ``Sept`` as ``ept``. Keep the
+    most complete row for each UID and canonicalize the month abbreviation.
+    The first repair preserves the original beside the CSV as ``.bak``.
+    """
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != COLUMNS:
+                return 0
+            rows = list(reader)
+    except Exception as exc:
+        logging.warning("[%s] Could not inspect existing CSV: %s", KEY, exc)
+        return 0
+
+    changed = 0
+    kept = []
+    positions = {}
+
+    def quality(row) -> tuple:
+        return (
+            bool(str(row.get("trip_datetime") or "").strip()),
+            bool(str(row.get("total_paid") or "").strip()),
+            sum(bool(str(row.get(column) or "").strip()) for column in COLUMNS),
+        )
+
+    for raw in rows:
+        row = {column: raw.get(column) or "" for column in COLUMNS}
+        trip_datetime = str(row.get("trip_datetime") or "").strip()
+        repaired = re.sub(r"^ept\b", "Sep", trip_datetime, flags=re.IGNORECASE)
+        if repaired != trip_datetime:
+            row["trip_datetime"] = repaired
+            changed += 1
+
+        uid = str(row.get("email_uid") or "").strip()
+        if uid and uid in positions:
+            index = positions[uid]
+            if quality(row) > quality(kept[index]):
+                kept[index] = row
+            changed += 1
+            continue
+        if uid:
+            positions[uid] = len(kept)
+        kept.append(row)
+
+    if changed == 0:
+        return 0
+
+    backup = f"{path}.bak"
+    temporary = f"{path}.tmp"
+    try:
+        if not os.path.exists(backup):
+            with open(path, "rb") as source, open(backup, "xb") as target:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+        with open(temporary, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows(kept)
+        os.replace(temporary, path)
+        logging.info("[%s] Repaired %d historical CSV row issue(s); backup: %s", KEY, changed, backup)
+        return changed
+    except Exception as exc:
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+        except Exception:
+            pass
+        logging.warning("[%s] Could not repair existing CSV: %s", KEY, exc)
+        return 0
+
+
 def ensure_csv(path) -> None:
     if os.path.exists(path):
         return
@@ -270,13 +350,18 @@ def parse(text: str, subject: str) -> Dict[str, str]:
     """
     # ── Trip date/time ─────────────────────────────────────────────
     dt_match = re.search(
-        r"([A-Z][a-z]{2}\s+\d{1,2},\s*\d{4})\s*,\s*(\d{1,2}:\d{2}\s*(?:am|pm))",
+        r"\b([A-Z][a-z]{2,8}\s+\d{1,2},\s*\d{4})\s*,\s*(\d{1,2}:\d{2}\s*(?:am|pm))",
         text, flags=re.IGNORECASE,
     )
     if dt_match:
-        trip_datetime = f"{dt_match.group(1)} {dt_match.group(2)}"
+        date_part = dt_match.group(1)
+        month, rest = date_part.split(None, 1)
+        trip_datetime = f"{month[:3].title()} {rest} {dt_match.group(2)}"
     else:
-        d = find_first([r"([A-Z][a-z]{2}\s+\d{1,2},\s*\d{4})"], text)
+        d = find_first([r"\b([A-Z][a-z]{2,8}\s+\d{1,2},\s*\d{4})\b"], text)
+        if d:
+            month, rest = d.split(None, 1)
+            d = f"{month[:3].title()} {rest}"
         t = find_first([r"(\d{1,2}:\d{2}\s*(?:am|pm))"], text)
         trip_datetime = f"{d} {t}".strip()
 
@@ -375,6 +460,8 @@ def run(args) -> Tuple[int, int]:
 
     Path(RAW_DIR).mkdir(parents=True, exist_ok=True)
     Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)
+    if not args.dry_run:
+        repair_existing_csv(CSV_PATH)
 
     credentials = load_credentials()
     processed_uids = set(load_state(STATE_PATH))

@@ -56,6 +56,41 @@ function legacyFetcher(key = 'zomato', extra = ''): string {
   ].join('\n');
 }
 
+function legacyUberFetcher(): string {
+  return [
+    'import csv',
+    'import logging',
+    'import os',
+    'import re',
+    'from pathlib import Path',
+    'KEY = "uber_rides"',
+    'COLUMNS = ["email_uid", "trip_datetime", "total_paid"]',
+    'CSV_PATH = "uber_rides.csv"',
+    '',
+    'def ensure_csv(path) -> None:',
+    '    pass',
+    '',
+    'def parse(text, subject):',
+    '    my_custom_marker = 42',
+    '    dt_match = re.search(',
+    '        r"([A-Z][a-z]{2}\\s+\\d{1,2},\\s*\\d{4})\\s*,\\s*(\\d{1,2}:\\d{2}\\s*(?:am|pm))",',
+    '        text, flags=re.IGNORECASE,',
+    '    )',
+    '    if dt_match:',
+    '        trip_datetime = f"{dt_match.group(1)} {dt_match.group(2)}"',
+    '    else:',
+    '        d = find_first([r"([A-Z][a-z]{2}\\s+\\d{1,2},\\s*\\d{4})"], text)',
+    '        t = ""',
+    '        trip_datetime = f"{d} {t}".strip()',
+    '    return {"trip_datetime": trip_datetime}',
+    '',
+    'def run(args):',
+    '    Path(CSV_PATH).parent.mkdir(parents=True, exist_ok=True)',
+    '    return 0, 0',
+    '',
+  ].join('\n');
+}
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'openboard-migrate-'));
   scriptsDir = join(root, 'scripts', 'invoice_fetchers');
@@ -125,6 +160,16 @@ describe('migrateFetcherSource', () => {
     expect(migrated).toContain('\r\n');
     expect(migrated.split('\r\n').length).toBeGreaterThan(10);
     expect(/[^\r]\n/.test(migrated)).toBe(false);
+  });
+
+  it('repairs the installed Uber September parser and historical CSV in place', () => {
+    const migrated = migrateFetcherSource(legacyUberFetcher())!;
+    expect(migrated).toContain('[A-Z][a-z]{2,8}');
+    expect(migrated).toContain('month[:3].title()');
+    expect(migrated).toContain('def repair_existing_csv(');
+    expect(migrated).toContain('if not args.dry_run:\n        repair_existing_csv(CSV_PATH)');
+    expect(migrated).toContain('my_custom_marker = 42');
+    expect(migrateFetcherSource(migrated)).toBeUndefined();
   });
 });
 

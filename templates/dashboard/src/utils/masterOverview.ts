@@ -207,7 +207,7 @@ function expandYear(raw: string): number {
  * what the previous parser assumed. "3/16/26" is unambiguous — 16 cannot be a
  * month — and reads month-first.
  */
-export function parseDate(value: unknown): Date | null {
+export function parseDate(value: unknown, numericOrder: 'day-first' | 'month-first' = 'day-first'): Date | null {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
 
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -277,7 +277,9 @@ export function parseDate(value: unknown): Date | null {
     const second = Number(numeric[2]);
     const year = expandYear(numeric[3]);
     const time = extractTime(numeric[4] ?? '');
-    return second > 12 && first <= 12
+    if (second > 12 && first <= 12) return buildDate(year, first - 1, second, time);
+    if (first > 12 && second <= 12) return buildDate(year, second - 1, first, time);
+    return numericOrder === 'month-first'
       ? buildDate(year, first - 1, second, time)
       : buildDate(year, second - 1, first, time);
   }
@@ -388,9 +390,15 @@ export function findAmountColumn(rows: Record<string, unknown>[]): string | unde
 }
 
 /** First of the candidate columns that yields a date for this row. */
-function rowDate(row: Record<string, unknown>, columns: string[]): Date | null {
+function rowDate(row: Record<string, unknown>, columns: string[], slug: string): Date | null {
   for (const key of columns) {
-    const date = parseDate(row?.[key]);
+    // Uber emits payment_time as M/D/YY. Its primary trip timestamp is normally
+    // unambiguous, but when that cell is malformed the fallback must not turn
+    // Sep 11 into 9 November and advertise activity from the future.
+    const numericOrder = slug === 'uber-rides' && normalizedKey(key) === 'payment_time'
+      ? 'month-first'
+      : 'day-first';
+    const date = parseDate(row?.[key], numericOrder);
     if (date) return date;
   }
   return null;
@@ -417,7 +425,7 @@ export function normalizeDashboards(
       return {
         app,
         slug,
-        date: rowDate(row, dateColumns),
+        date: rowDate(row, dateColumns, slug),
         amount,
         countOnly: amount === null,
       };

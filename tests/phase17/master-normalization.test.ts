@@ -96,6 +96,12 @@ describe('parseDate', () => {
     });
   });
 
+  it('can read an ambiguous Uber payment timestamp month-first', () => {
+    expect(parts(parseDate('9/11/26 12:18 am', 'month-first'))).toEqual({
+      year: 2026, month: 8, day: 11, hours: 0, minutes: 18,
+    });
+  });
+
   it('accepts Date instances and epoch numbers', () => {
     const date = new Date(2026, 2, 16, 13, 23);
     expect(parseDate(date)).toBe(date);
@@ -192,6 +198,22 @@ describe('normalizeDashboards', () => {
       'uber-rides': { rows: [{ ...UBER_ROW, trip_datetime: 'sometime last Tuesday', payment_time: '' }] },
     });
     expect(envelopeOnly[0].date?.getTime()).toBe(Date.parse(UBER_ROW.email_date));
+  });
+
+  it('does not turn an Uber September payment into a future November ride', () => {
+    const records = normalizeDashboards({
+      'uber-rides': {
+        rows: [{
+          ...UBER_ROW,
+          trip_datetime: 'ept 11, 2026 12:07 am',
+          payment_time: '9/11/26 12:18 am',
+          email_date: '2026-09-10T18:48:26+00:00',
+        }],
+      },
+    });
+    expect(parts(records[0].date)).toEqual({
+      year: 2026, month: 8, day: 11, hours: 0, minutes: 18,
+    });
   });
 
   it('dates a row whose primary column is blank from the next one', () => {
