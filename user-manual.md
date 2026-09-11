@@ -40,7 +40,7 @@ The TUI opens with:
 ╔═══════════════════════════════════════╗
 ║           [>_] OpenBoardCLI           ║
 ║     Analytics Dashboard Generator     ║
-║                v2.4.9                 ║
+║                v2.4.10                ║
 ╚═══════════════════════════════════════╝
 ```
 
