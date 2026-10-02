@@ -1,4 +1,4 @@
-import { Globe, Github, Package } from 'lucide-react';
+import { Globe, Github, Package, Bot } from 'lucide-react';
 
 /**
  * HeaderLinks — OpenBoardCLI project links shown on the left side of the app
@@ -20,6 +20,11 @@ const LINKS = [
     href: 'https://www.npmjs.com/package/openboard-cli',
     label: 'npm package',
     Icon: Package,
+  },
+  {
+    href: 'https://clawhub.ai/syedateebulislam/skills/openboard-cli',
+    label: 'OpenBoard CLI skill on ClawHub',
+    Icon: Bot,
   },
 ] as const;
 
